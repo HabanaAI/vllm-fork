@@ -188,8 +188,10 @@ def objective(trial, args):
     else:
         prompt_bs_bucket_step = None
     if args.prompt_bs_bucket_max_range:
+        suggested_prompt_bs_max = max(prompt_bs_bucket_min, args.prompt_bs_bucket_max_range[0]) \
+                if prompt_bs_bucket_min else args.prompt_bs_bucket_max_range[0]
         prompt_bs_bucket_max = trial.suggest_int('prompt_bs_bucket_max',
-                                                 args.prompt_bs_bucket_max_range[0],
+                                                 suggested_prompt_bs_max,
                                                  args.prompt_bs_bucket_max_range[1],
                                                  step=args.prompt_bs_bucket_max_range[2])
     else:
@@ -210,8 +212,10 @@ def objective(trial, args):
     else:
         prompt_seq_bucket_step = None
     if args.prompt_seq_bucket_max_range:
+        suggested_prompt_seq_max = max(prompt_seq_bucket_min, args.prompt_seq_bucket_max_range[0]) \
+            if prompt_seq_bucket_min else args.prompt_seq_bucket_max_range[0]
         prompt_seq_bucket_max = trial.suggest_int('prompt_seq_bucket_max',
-                                                 args.prompt_seq_bucket_max_range[0],
+                                                 suggested_prompt_seq_max,
                                                  args.prompt_seq_bucket_max_range[1],
                                                  step=args.prompt_seq_bucket_max_range[2])
     else:
@@ -233,8 +237,10 @@ def objective(trial, args):
     else:
         decode_bs_bucket_step = None
     if args.decode_bs_bucket_max_range:
+        suggested_decode_bs_max = max(decode_bs_bucket_min, args.decode_bs_bucket_max_range[0]) \
+            if decode_bs_bucket_min else args.decode_bs_bucket_max_range[0]
         decode_bs_bucket_max = trial.suggest_int('decode_bs_bucket_max',
-                                                 args.decode_bs_bucket_max_range[0],
+                                                 suggested_decode_bs_max,
                                                  args.decode_bs_bucket_max_range[1],
                                                  step=args.decode_bs_bucket_max_range[2])
     else:
@@ -255,8 +261,10 @@ def objective(trial, args):
     else:
         decode_block_bucket_step = None
     if args.decode_block_bucket_max_range:
+        suggested_decode_block_bucket_max = max(decode_block_bucket_min, args.decode_block_bucket_max_range[0]) \
+            if decode_block_bucket_min else args.decode_block_bucket_max_range[0]
         decode_block_bucket_max = trial.suggest_int('decode_block_bucket_max',
-                                                  args.decode_block_bucket_max_range[0],
+                                                  suggested_decode_block_bucket_max,
                                                   args.decode_block_bucket_max_range[1],
                                                   step=args.decode_block_bucket_max_range[2])
     else:
