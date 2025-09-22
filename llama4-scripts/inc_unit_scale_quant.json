@@ -1,0 +1,11 @@
+{
+    "method": "HOOKS",
+    "mode": "QUANTIZE",
+    "observer": "maxabs",
+    "scale_method": "unit_scale",
+    "blocklist": {
+        "types": ["VLLMKVCache"],
+        "names": []
+        },
+    "dump_stats_path": "./hqt_output/measure"
+}
