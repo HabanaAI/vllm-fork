@@ -72,7 +72,6 @@ class OvisVideoPatchInputs(TypedDict):
 
 
 def _ovis2_5_field_config():
-    print('\n\n\n\n\n_ovis2_5_field_config',MultiModalFieldConfig.batched("image"))
     return dict(pixel_values=MultiModalFieldConfig.batched("image"),
                 grids=MultiModalFieldConfig.batched("image"),
                 indicator_tokens=MultiModalFieldConfig.batched("image"),
@@ -139,7 +138,6 @@ class VisualTokenizer(torch.nn.Module):
     def tokenize(self, logits: torch.Tensor) -> torch.Tensor:
         tokens = torch.softmax(logits, dim=-1,
                                dtype=torch.float32).to(logits.dtype)
-        print('\n\n\nlogits.dtype:', logits.dtype, '\n\n\n')
         return tokens
 
     def encode(self, pixel_values: torch.Tensor,
@@ -148,9 +146,9 @@ class VisualTokenizer(torch.nn.Module):
         print("[vis] grid_thws.shape =", getattr(grid_thws, "shape", None))
         if isinstance(grid_thws, torch.Tensor):
             print("[vis] first grid_thw =", grid_thws[0].tolist())
-            print("[vis] first grid_thw =", grid_thws[1].tolist())
+            print("[vis] second grid_thw =", grid_thws[1].tolist())
         
-        print('\n\n\npv in ovis:',pixel_values,'\n\n\n')
+        print('\n\n\npv in vt encode:',pixel_values,'\n\n\n')
         features = self.vit(pixel_values, grid_thws)
         print('\n\n\nfeatures:',features,'\n\n\n')
         # refer to qwen2.5-vl patchmerger
@@ -183,9 +181,6 @@ class Ovis2_5ProcessingInfo(BaseProcessingInfo):
         return self.ctx.get_hf_config()
 
     def get_hf_processor(self, **kwargs):
-        
-        print('\n\n\nkwargs in hf processor:', kwargs, '\n\n\n')
-        
         vit_config = self.get_hf_config().vit_config
         return self.ctx.get_hf_processor(
             Ovis2_5Processor,
@@ -354,9 +349,6 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
         mm_kwargs: Mapping[str, object],
 #       tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        
-        print('\n\n\nmm_kwargs:', mm_kwargs, '\n\n\n')
-        
         if not mm_data:
             # Avoid warning from HF logger for text-only input
             tokenizer = self.info.get_tokenizer()
@@ -480,8 +472,6 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
     def _parse_and_validate_image_input(
             self, **kwargs: object) -> Optional[OvisImagePatchInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
-        print('\n\n\npixel_values in parse and val:', pixel_values)
-        
         indicator_tokens = kwargs.pop("indicator_tokens", None)
         grids = kwargs.pop("grids", None)
         if pixel_values is None and indicator_tokens is None:
@@ -553,7 +543,6 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
             map(lambda x: 2 if x > 1 else x + 2, patches_per_image))
 
         target_dtype = self.visual_tokenizer.dtype
-        print('\n\n\ntarget dtype:', target_dtype, '\n\n\n')
         visual_tokens = self.visual_tokenizer(
             image_patches_flat.to(target_dtype), grid_thws)
 
@@ -584,7 +573,6 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         # from the order of kwargs.
         print('kwargs:', kwargs)
         for input_key in kwargs:
-            print('input_key:', input_key)
             if input_key in ("pixel_values", "indicator_tokens",
                              "grids") and "images" not in modalities:
                 modalities["images"] = self._parse_and_validate_image_input(
@@ -598,7 +586,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
 
     def get_multimodal_embeddings(self,
                                   **kwargs: object) -> MultiModalEmbeddings:
-        print('kwargs in get_multimodal_embeddings:', kwargs)
+
         modalities = self._parse_and_validate_multimodal_inputs(**kwargs)
         if not modalities:
             return []
@@ -638,13 +626,9 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        
-        print('\n\n\nkwargs in ovis forward:', kwargs, '\n\n\n')
-        
         if intermediate_tensors is not None:
             inputs_embeds = None
-        
-        
+
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
@@ -679,4 +663,3 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
 
     def get_language_model(self) -> torch.nn.Module:
         return self.llm
-    
