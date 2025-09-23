@@ -824,9 +824,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         trust_remote_code=True,
         dtype="bfloat16",
         limit_mm_per_prompt={modality: 1},
-#       tensor_parallel_size=4,
-        # hf_overrides={"architectures": ["Ovis2_5ForCausalLM"]},
-#       mm_processor_kwargs={"use_fast": True},
+        tensor_parallel_size=1,
     )
     
     # Ovis 占位符：<image>/<video>
