@@ -19,7 +19,7 @@ pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --
 
 ```
 Gaudi Docker: 1.22.1-6
-vLLM Fork: habana_main (commit ID: 36eb2cf9cec7ed62d40f29f28f2af48fef31794f)
+vLLM Fork: v0.9.0.1+Gaudi-1.22.0
 ```
 
 ## run example
