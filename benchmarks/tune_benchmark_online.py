@@ -175,21 +175,21 @@ def set_trial_value(prompt_bs_bucket_min, prompt_bs_bucket_step, prompt_bs_bucke
 def objective(trial, args):
     if args.prompt_bs_bucket_min_range:
         prompt_bs_bucket_min = trial.suggest_int('prompt_bs_bucket_min',
-                                             args.prompt_bs_bucket_min_range[0],
-                                             args.prompt_bs_bucket_min_range[1],
-                                             step=args.prompt_bs_bucket_min_range[2])
+                                                 args.prompt_bs_bucket_min_range[0],
+                                                 args.prompt_bs_bucket_min_range[1],
+                                                 step=args.prompt_bs_bucket_min_range[2])
     else:
         prompt_bs_bucket_min = None
     if args.prompt_bs_bucket_step_range:
         prompt_bs_bucket_step = trial.suggest_int('prompt_bs_bucket_step',
-                                             args.prompt_bs_bucket_step_range[0],
-                                             args.prompt_bs_bucket_step_range[1],
-                                             step=args.prompt_bs_bucket_step_range[2])
+                                                  args.prompt_bs_bucket_step_range[0],
+                                                  args.prompt_bs_bucket_step_range[1],
+                                                  step=args.prompt_bs_bucket_step_range[2])
     else:
         prompt_bs_bucket_step = None
     if args.prompt_bs_bucket_max_range:
         suggested_prompt_bs_max = max(prompt_bs_bucket_min, args.prompt_bs_bucket_max_range[0]) \
-                if prompt_bs_bucket_min else args.prompt_bs_bucket_max_range[0]
+            if prompt_bs_bucket_min else args.prompt_bs_bucket_max_range[0]
         prompt_bs_bucket_max = trial.suggest_int('prompt_bs_bucket_max',
                                                  suggested_prompt_bs_max,
                                                  args.prompt_bs_bucket_max_range[1],
@@ -199,25 +199,25 @@ def objective(trial, args):
 
     if args.prompt_seq_bucket_min_range:
         prompt_seq_bucket_min = trial.suggest_int('prompt_seq_bucket_min',
-                                             args.prompt_seq_bucket_min_range[0],
-                                             args.prompt_seq_bucket_min_range[1],
-                                             step=args.prompt_seq_bucket_min_range[2])
+                                                  args.prompt_seq_bucket_min_range[0],
+                                                  args.prompt_seq_bucket_min_range[1],
+                                                  step=args.prompt_seq_bucket_min_range[2])
     else:
         prompt_seq_bucket_min = None
     if args.prompt_seq_bucket_step_range:
         prompt_seq_bucket_step = trial.suggest_int('prompt_seq_bucket_step',
-                                             args.prompt_seq_bucket_step_range[0],
-                                             args.prompt_seq_bucket_step_range[1],
-                                             step=args.prompt_seq_bucket_step_range[2])
+                                                   args.prompt_seq_bucket_step_range[0],
+                                                   args.prompt_seq_bucket_step_range[1],
+                                                   step=args.prompt_seq_bucket_step_range[2])
     else:
         prompt_seq_bucket_step = None
     if args.prompt_seq_bucket_max_range:
         suggested_prompt_seq_max = max(prompt_seq_bucket_min, args.prompt_seq_bucket_max_range[0]) \
             if prompt_seq_bucket_min else args.prompt_seq_bucket_max_range[0]
         prompt_seq_bucket_max = trial.suggest_int('prompt_seq_bucket_max',
-                                                 suggested_prompt_seq_max,
-                                                 args.prompt_seq_bucket_max_range[1],
-                                                 step=args.prompt_seq_bucket_max_range[2])
+                                                  suggested_prompt_seq_max,
+                                                  args.prompt_seq_bucket_max_range[1],
+                                                  step=args.prompt_seq_bucket_max_range[2])
     else:
         prompt_seq_bucket_max = None
 
@@ -248,25 +248,25 @@ def objective(trial, args):
 
     if args.decode_block_bucket_min_range:
         decode_block_bucket_min = trial.suggest_int('decode_block_bucket_min',
-                                                  args.decode_block_bucket_min_range[0],
-                                                  args.decode_block_bucket_min_range[1],
-                                                  step=args.decode_block_bucket_min_range[2])
+                                                    args.decode_block_bucket_min_range[0],
+                                                    args.decode_block_bucket_min_range[1],
+                                                    step=args.decode_block_bucket_min_range[2])
     else:
         decode_block_bucket_min = None
     if args.decode_block_bucket_step_range:
         decode_block_bucket_step = trial.suggest_int('decode_block_bucket_step',
-                                                   args.decode_block_bucket_step_range[0],
-                                                   args.decode_block_bucket_step_range[1],
-                                                   step=args.decode_block_bucket_step_range[2])
+                                                     args.decode_block_bucket_step_range[0],
+                                                     args.decode_block_bucket_step_range[1],
+                                                     step=args.decode_block_bucket_step_range[2])
     else:
         decode_block_bucket_step = None
     if args.decode_block_bucket_max_range:
         suggested_decode_block_bucket_max = max(decode_block_bucket_min, args.decode_block_bucket_max_range[0]) \
             if decode_block_bucket_min else args.decode_block_bucket_max_range[0]
         decode_block_bucket_max = trial.suggest_int('decode_block_bucket_max',
-                                                  suggested_decode_block_bucket_max,
-                                                  args.decode_block_bucket_max_range[1],
-                                                  step=args.decode_block_bucket_max_range[2])
+                                                    suggested_decode_block_bucket_max,
+                                                    args.decode_block_bucket_max_range[1],
+                                                    step=args.decode_block_bucket_max_range[2])
     else:
         decode_block_bucket_max = None
 
@@ -297,8 +297,8 @@ def objective(trial, args):
     try:
         server_log_pipe = LogPipe()
         server_process = subprocess.Popen(vllm_server_cmd, shell=True,
-                                   stdout=server_log_pipe, stderr=server_log_pipe,
-                                   preexec_fn=os.setsid)  # assign a new group id
+                                          stdout=server_log_pipe, stderr=server_log_pipe,
+                                          preexec_fn=os.setsid)  # assign a new group id
         server_process.wait(timeout=args.time_out)
         # client_process =
         # parse the server log
@@ -333,6 +333,44 @@ def validate_args(args):
     if not 'benchmark_serving.py' in args.benchmark_serving_cmd:
         raise ValueError("--benchmark-serving-cmd should call benchmark_serving.py")
 
+    # check tuning parameters range
+    if args.prompt_bs_bucket_min_range and args.prompt_bs_bucket_max_range:
+        if args.prompt_bs_bucket_min_range[1] > args.prompt_bs_bucket_max_range[1]:
+            raise ValueError(
+                f"--prompt-bs-bucket-min-range max value {args.prompt_bs_bucket_min_range[1]} is greater than "
+                f"--prompt-bs-bucket-max-range max value {args.prompt_bs_bucket_max_range[1]}")
+        if args.prompt_bs_bucket_min_range[0] > args.prompt_bs_bucket_max_range[0]:
+            raise ValueError(
+                f"--prompt-bs-bucket-min-range min value {args.prompt_bs_bucket_min_range[0]} is greater than "
+                f"--prompt-bs-bucket-max-range min value {args.prompt_bs_bucket_max_range[0]}")
+    if args.prompt_seq_bucket_min_range and args.prompt_seq_bucket_max_range:
+        if args.prompt_seq_bucket_min_range[1] > args.prompt_seq_bucket_max_range[1]:
+            raise ValueError(
+                f"--prompt-seq-bucket-min-range max value {args.prompt_seq_bucket_min_range[1]} is greater than "
+                f"--prompt-seq-bucket-max-range max value {args.prompt_seq_bucket_max_range[1]}")
+        if args.prompt_seq_bucket_min_range[0] > args.prompt_seq_bucket_max_range[0]:
+            raise ValueError(
+                f"--prompt-seq-bucket-min-range min value {args.prompt_seq_bucket_min_range[0]} is greater than "
+                f"--prompt-seq-bucket-max-range min value {args.prompt_seq_bucket_max_range[0]}")
+    if args.decode_bs_bucket_min_range and args.decode_bs_bucket_max_range:
+        if args.decode_bs_bucket_min_range[1] > args.decode_bs_bucket_max_range[1]:
+            raise ValueError(
+                f"--decode-bs-bucket-min-range max value {args.decode_bs_bucket_min_range[1]} is greater than "
+                f"--decode-bs-bucket-max-range max value {args.decode_bs_bucket_max_range[1]}")
+        if args.decode_bs_bucket_min_range[0] > args.decode_bs_bucket_max_range[0]:
+            raise ValueError(
+                f"--decode-bs-bucket-min-range min value {args.decode_bs_bucket_min_range[0]} is greater than "
+                f"--decode-bs-bucket-max-range min value {args.decode_bs_bucket_max_range[0]}")
+    if args.decode_block_bucket_min_range and args.decode_block_bucket_max_range:
+        if args.decode_block_bucket_min_range[1] > args.decode_block_bucket_max_range[1]:
+            raise ValueError(
+                f"--decode-block-bucket-min-range max value {args.decode_block_bucket_min_range[1]} is greater than "
+                f"--decode-block-bucket-max-range max value {args.decode_block_bucket_max_range[1]}")
+        if args.decode_block_bucket_min_range[0] > args.decode_block_bucket_max_range[0]:
+            raise ValueError(
+                f"--decode-block-bucket-min-range min value {args.decode_block_bucket_min_range[0]} is greater than "
+                f"--decode-block-bucket-max-range min value {args.decode_block_bucket_max_range[0]}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Bucket Tune")
@@ -356,7 +394,7 @@ if __name__ == "__main__":
         "--prompt-bs-bucket-step-range",
         nargs=3,
         type=int,
-        required=False,   # if not specified, use value from env var of VLLM_PROMPT_BS_BUCKET_MIN or default
+        required=False,  # if not specified, use value from env var of VLLM_PROMPT_BS_BUCKET_MIN or default
         help="Tuning range for VLLM_PROMPT_BS_BUCKET_STEP in format of min max step",
     )
     parser.add_argument(
@@ -423,7 +461,7 @@ if __name__ == "__main__":
         nargs=3,
         type=int,
         required=False,
-        help= "Tuning range for VLLM_DECODE_BLOCK_STEP in format of min max step. Suggest a factor of 128.",
+        help="Tuning range for VLLM_DECODE_BLOCK_STEP in format of min max step. Suggest a factor of 128.",
     )
     parser.add_argument(
         "--decode-block-bucket-max-range",
@@ -500,10 +538,10 @@ if __name__ == "__main__":
                         best_trial.params.get("prompt_seq_bucket_step"), best_trial.params.get("prompt_seq_bucket_max"),
                         best_trial.params.get("decode_bs_bucket_min"), best_trial.params.get("decode_bs_bucket_step"),
                         best_trial.params.get("decode_bs_bucket_max"), best_trial.params.get("decode_block_bucket_min"),
-                        best_trial.params.get("decode_block_bucket_step"), best_trial.params.get("decode_block_bucket_max"),
+                        best_trial.params.get("decode_block_bucket_step"),
+                        best_trial.params.get("decode_block_bucket_max"),
                         best_trial.params.get("block_size"), print_only=True)
         best_values = best_trial.values
         print("  [Throughput(tokens/s), Warmup-Time(sec)]: {}".format(best_values))
 
     exit(0)
-
