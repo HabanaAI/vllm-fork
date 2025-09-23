@@ -122,15 +122,15 @@ class Siglip2VisionEmbeddings(nn.Module):
                 -1).unsqueeze(0).permute(0, 3, 1, 2)
             cnt = 0
             for t, h, w in grid_thws:
-                volume = t * h * w
+                volume = t.item() * h.item() * w.item()
                 pe = F.interpolate(positional_embeddings,
-                                   size=(h, w),
+                                   size=(h.item(), w.item()),
                                    mode='bicubic',
                                    align_corners=False)
                 pe = pe.permute(0, 2, 3, 1).reshape(1, h.item() * w.item(), -1)
-                pe = pe[0].repeat(t, 1)
-                pe = pe.reshape(t, h // self.hidden_stride, self.hidden_stride,
-                                w // self.hidden_stride, self.hidden_stride,
+                pe = pe[0].repeat(t.item(), 1)
+                pe = pe.reshape(t.item(), h.item() // self.hidden_stride, self.hidden_stride,
+                                w.item() // self.hidden_stride, self.hidden_stride,
                                 -1)
                 pe = pe.permute(0, 1, 3, 2, 4, 5).reshape(volume, -1)
                 pos_embed_new[cnt:cnt + volume] = pe
