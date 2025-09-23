@@ -1,7 +1,7 @@
 #!/bin/bash
 tp_parrallel=8
-in_len=1024
-out_len=1024
+in_len=122880
+out_len=8192
 multi_step=1
 total_len=$((in_len + out_len))
 # if total_len is not multiple of 128, round up to the next multiple of 128
@@ -12,15 +12,15 @@ fi
 ep_size=16
 moe_n_slice=1
 gpu_utils=0.95
-bs=64
-num_prompts=640
+bs=16
+num_prompts=16
 request_rate=inf
-block_size=256
-block_step=256
+block_size=128
+block_step=128
 
 log_name="[inc-staticquant-scalar-fp8matmul-split]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
 
-prompt_bs_max=8
+prompt_bs_max=1
 # Increase prompt max seq len bucket just in case there are more tokens than provided due to tokenizer
 prompt_seq_max=$((in_len + $block_size))
 total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
@@ -36,6 +36,7 @@ mkdir -p benchmark_logs
     #--model ${model} \
 
 QUANT_CONFIG="/workdir/vllm-fork-llama4/llama4-scripts/suresh-quant/maxabs_quant_g3.json" \
+PT_HPU_LAZY_MODE=1 \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
@@ -56,8 +57,29 @@ vllm serve ${model} \
   --kv-cache-dtype fp8_inc \
   --weights-load-device cpu \
   --tensor-parallel-size 8 \
-  --max-model-len 2048 2>&1 | tee benchmark_logs/${log_name}_serving.log &
+  --enable-expert-parallel \
+  --max-model-len 131072 2>&1 | tee benchmark_logs/${log_name}_serving.log &
 pid=$(($!-1))
+
+# vllm serve ${model} \
+#     --port 18080 \
+#     --tensor-parallel-size ${tp_parrallel} \
+#     --max-num-seqs ${bs} \
+#     --disable-log-requests \
+#     --max-model-len 131072 \
+#     --max-num-batched-tokens 131072 \
+#     --use-padding-aware-scheduling \
+#     --block-size ${block_size} \
+#     --distributed_executor_backend mp \
+#     --gpu_memory_utilization ${gpu_utils} \
+#     --enable-expert-parallel \
+#     --quantization inc \
+#     --kv-cache-dtype fp8_inc \
+#     --weights-load-device cpu \
+#     --tensor-parallel-size 8 \
+#     --override-generation-config='{"attn_temperature_tuning": true}' \
+#     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
+# pid=$(($!-1))
 # vllm serve ${model} \
 #     --port 18080 \
 #     --tensor-parallel-size ${tp_parrallel} \
@@ -78,7 +100,7 @@ pid=$(($!-1))
 #     --quantization="inc" \
 #     --override-generation-config='{"attn_temperature_tuning": true}' \
 #     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
-# pid=$(($!-1))
+# # pid=$(($!-1))
 
 until [[ "$n" -ge 1000 ]] || [[ $ready == true ]]; do
     n=$((n+1))
@@ -91,9 +113,9 @@ sleep 10s
 echo ${pid}
 
 ########################################################## Concurrency 64 Sonnet #################################################################
-max_concurrency_client=64
-in_len=1024
-out_len=1024
+max_concurrency_client=16
+in_len=122880
+out_len=8192
 start_time=$(date +%s)
 echo "Start to benchmark"
 python3 ../benchmarks/benchmark_serving.py \

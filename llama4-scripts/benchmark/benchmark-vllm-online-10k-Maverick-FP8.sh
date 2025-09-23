@@ -34,6 +34,7 @@ model_name="Maverick"
 mkdir -p benchmark_logs
 
 QUANT_CONFIG="quant.json" \
+PT_HPU_LAZY_MODE=1 \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \

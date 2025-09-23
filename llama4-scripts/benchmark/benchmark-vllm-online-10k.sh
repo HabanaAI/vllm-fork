@@ -34,7 +34,7 @@ tokenizer="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct/"
 model_name="Scout"
 
 mkdir -p benchmark_logs
-
+PT_HPU_LAZY_MODE=1 \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${prompt_seq_min} \
