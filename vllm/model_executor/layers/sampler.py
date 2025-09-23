@@ -271,7 +271,7 @@ class Sampler(nn.Module):
         """
         assert logits is not None
         _, vocab_size = logits.shape
-        #import remote_pdb;remote_pdb.set_trace()
+
         # Prepare sampling tensors with pinned memory to avoid blocking.
         if not sampling_metadata.reuse_sampling_tensors:
             self._init_sampling_tensors(logits, sampling_metadata)
@@ -290,15 +290,13 @@ class Sampler(nn.Module):
         do_min_p = self._do_min_p
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
-        #import remote_pdb;remote_pdb.set_trace()
         # Apply presence and frequency penalties.
         if do_penalties:
             logits = apply_penalties(logits, sampling_tensors.prompt_tokens,
                                      sampling_tensors.output_tokens,
                                      sampling_tensors.presence_penalties,
                                      sampling_tensors.frequency_penalties,
-                                     sampling_tensors.repetition_penalties,
-                                     self._prompt_mask_hpu_cache, self._last_prompt_mask)
+                                     sampling_tensors.repetition_penalties)
 
         # Use float32 to apply temperature scaling.
         # Use in-place division to avoid creating a new tensor.

@@ -5,7 +5,7 @@ from array import array
 from dataclasses import dataclass
 from typing import Optional
 
-import torch, time
+import torch
 
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams, SamplingType
@@ -20,7 +20,8 @@ _SAMPLING_EPS = 1e-5
 logger = init_logger(__name__)
 
 pin_memory = is_pin_memory_available()
-is_hpu = current_platform.is_hpu()   
+is_hpu = current_platform.is_hpu()
+
 @dataclass
 class SequenceGroupToSample:
     # |---------- N-1 iteration --------|
@@ -516,8 +517,6 @@ class SamplingTensors:
                         current_seq_ids.update(seq_ids)
             if current_seq_ids != past_seq_ids:
                 prompt_tokens_cache = None
-                logger.info(f"libin debug from_sampling_metadata reset  prompt_tokens_cache as {current_seq_ids=} {past_seq_ids=}")
-
         top_k_scalar = top_ks[0] if do_top_p_top_k and all(
             k == top_ks[0] for k in top_ks) else None
         top_p_scalar = top_ps[0] if do_top_p_top_k and all(
@@ -538,7 +537,7 @@ class SamplingTensors:
             dtype,
             prompt_tokens_cache,
         )
-        logger.info(f"libin debug from_sampling_metadata {do_penalties=}")
+
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
                 top_k_scalar, top_p_scalar, current_seq_ids)
 
@@ -561,18 +560,14 @@ class SamplingTensors:
     ) -> "SamplingTensors":
         # Note that the performance will be very bad without
         # pinned memory.
-
-        t0 = time.perf_counter()
         do_penalties = prompt_tokens or output_tokens
-        t1= time.perf_counter()
+
         if do_penalties:
             if is_hpu:
-                logger.info(f"libin debug try to find prompt {time.perf_counter()-t0=} ")
-                if (prompt_tokens_cache is not None and 
-                    prompt_tokens_cache.device == device):  
-                    # Reuse cached prompt_tokens already on HPU  
+                if (prompt_tokens_cache is not None and
+                    prompt_tokens_cache.device == device):
+                    # Reuse cached prompt_tokens already on HPU
                     prompt_t = prompt_tokens_cache
-                    #logger.info(f"libin debug found cache for prompt {prompt_t=}")
                 else:
                     prompt_t = make_tensor_with_pad_align(
                         prompt_tokens,
@@ -582,8 +577,6 @@ class SamplingTensors:
                         pin_memory=pin_memory,
                         max_len_align=1024,
                     )
-                    logger.info(f"libin debug not found cache for prompt {prompt_t=}")
-                t1 =  time.perf_counter()
                 output_t = make_tensor_with_pad_align(
                     output_tokens,
                     vocab_size,
@@ -611,7 +604,6 @@ class SamplingTensors:
             empty_tensor = torch.empty(0, device=device, dtype=torch.long)
             prompt_t = empty_tensor
             output_t = empty_tensor
-        t2 =  time.perf_counter()
         temperatures_t = torch.tensor(
             temperatures,
             device="cpu",
@@ -656,9 +648,7 @@ class SamplingTensors:
         )
         # Because the memory is pinned, we can do non-blocking
         # transfer to device.
-        t3 = time.perf_counter()
-        logger.info(f"libin debug found cache for prompt {prompt_t.device=} {device=}")
-        ret = cls(
+        return cls(
             temperatures=temperatures_t.to(device=device, non_blocking=True),
             top_ps=top_ps_t.to(device=device, non_blocking=True),
             top_ks=top_ks_t.to(device=device, non_blocking=True),
@@ -672,6 +662,3 @@ class SamplingTensors:
             prompt_tokens=prompt_t.to(device=device, non_blocking=True) if prompt_t.device != device else prompt_t,
             output_tokens=output_t.to(device=device, non_blocking=True),
         )
-        t4 = time.perf_counter()
-        logger.info(f"libin debug from_lists total:{t4-t0} prompt:{t1-t0=} decode: {t2-t1}: others:{t3-t2}, cls {t4-t3}")
-        return ret

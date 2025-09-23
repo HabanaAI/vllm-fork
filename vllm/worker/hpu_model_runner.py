@@ -3980,14 +3980,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     htorch.core.mark_step()
 
                 if hasattr(self.model.sampler, '_sampling_tensors') and self.model.sampler._sampling_tensors is not None:
-                    #import remote_pdb;remote_pdb.set_trace()
-                    sampling_tensors = self.model.sampler._sampling_tensors  
-                    if sampling_tensors.prompt_tokens.numel() > 0:  
-                        # Cache the prompt_tokens tensor that's already on HPU  
+                    sampling_tensors = self.model.sampler._sampling_tensors
+                    if sampling_tensors.prompt_tokens.numel() > 0:
+                        # Cache the prompt_tokens tensor that's already on HPU
                         self.model.sampler._prompt_tokens_hpu_cache = sampling_tensors.prompt_tokens
-                        self.model.sampler._prompt_mask_hpu_cache = self.model.sampler._last_prompt_mask
-                        
-                        #logger.info(f"libin execute_mode assign hpu_cache {self.model.sampler._last_prompt_mask =}")
 
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:
