@@ -446,27 +446,27 @@ class Siglip2Encoder(nn.Module):
     def rot_pos_emb(self, grid_thw):
         pos_ids = []
         for t, h, w in grid_thw:
-            hpos_ids = torch.arange(h).unsqueeze(1).expand(-1, w)
+            hpos_ids = torch.arange(h.item()).unsqueeze(1).expand(-1, w.item())
             hpos_ids = hpos_ids.reshape(
-                h // self.hidden_stride,
+                h.item() // self.hidden_stride,
                 self.hidden_stride,
-                w // self.hidden_stride,
+                w.item() // self.hidden_stride,
                 self.hidden_stride,
             )
             hpos_ids = hpos_ids.permute(0, 2, 1, 3)
             hpos_ids = hpos_ids.flatten()
 
-            wpos_ids = torch.arange(w).unsqueeze(0).expand(h, -1)
+            wpos_ids = torch.arange(w.item()).unsqueeze(0).expand(h.item(), -1)
             wpos_ids = wpos_ids.reshape(
-                h // self.hidden_stride,
+                h.item() // self.hidden_stride,
                 self.hidden_stride,
-                w // self.hidden_stride,
+                w.item() // self.hidden_stride,
                 self.hidden_stride,
             )
             wpos_ids = wpos_ids.permute(0, 2, 1, 3)
             wpos_ids = wpos_ids.flatten()
             pos_ids.append(
-                torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t, 1))
+                torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t.item(), 1))
         pos_ids = torch.cat(pos_ids, dim=0)
         max_grid_size = grid_thw[:, 1:].max()
         rotary_pos_emb_full = self.rotary_pos_emb(max_grid_size)
