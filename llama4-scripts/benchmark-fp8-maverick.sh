@@ -27,13 +27,15 @@ total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
 VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / block_size))
 VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len_aligned * bs / block_size + block_step))
 
-model="/workdir/Llama-4-Maverick-17B-128E-Instruct/"
-tokenizer="/workdir/Llama-4-Maverick-17B-128E-Instruct/"
+model="/workdir/hf_models/meta-llama_Llama-4-Maverick-17B-128E-Instruct/"
+tokenizer="/workdir/hf_models/meta-llama_Llama-4-Maverick-17B-128E-Instruct/"
 model_name="Maverick"
 
 mkdir -p benchmark_logs
+#python3 -m vllm.entrypoints.openai.api_server \
+    #--model ${model} \
 
-QUANT_CONFIG="/workdir/vllm-fork/llama4-scripts/quant.json" \
+QUANT_CONFIG="/workdir/vllm-fork-llama4/llama4-scripts/suresh-quant/maxabs_quant_g3.json" \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
@@ -48,26 +50,35 @@ HABANA_VISIBLE_DEVICES="ALL" \
 VLLM_EP_SIZE=${ep_size} \
 PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
 PT_HPU_WEIGHT_SHARING=0 \
-python3 -m vllm.entrypoints.openai.api_server \
-    --port 18080 \
-    --model ${model} \
-    --tensor-parallel-size ${tp_parrallel} \
-    --max-num-seqs ${bs} \
-    --disable-log-requests \
-    --dtype bfloat16 \
-    --use-v2-block-manager \
-    --num_scheduler_steps ${multi_step} \
-    --max-model-len 9216 \
-    --max-num-batched-tokens 9216 \
-    --use-padding-aware-scheduling \
-    --block-size ${block_size} \
-    --distributed_executor_backend mp \
-    --gpu_memory_utilization ${gpu_utils} \
-    --enable-expert-parallel \
-    --quantization="inc" \
-    --override-generation-config='{"attn_temperature_tuning": true}' \
-    --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
+VLLM_SKIP_WARMUP=true \
+vllm serve ${model} \
+  --quantization inc \
+  --kv-cache-dtype fp8_inc \
+  --weights-load-device cpu \
+  --tensor-parallel-size 8 \
+  --max-model-len 2048 2>&1 | tee benchmark_logs/${log_name}_serving.log &
 pid=$(($!-1))
+# vllm serve ${model} \
+#     --port 18080 \
+#     --tensor-parallel-size ${tp_parrallel} \
+#     --max-num-seqs ${bs} \
+#     --disable-log-requests \
+#     --dtype bfloat16 \
+#     --use-v2-block-manager \
+#   --kv-cache-dtype fp8_inc \
+#   --weights-load-device cpu \
+#     --num_scheduler_steps ${multi_step} \
+#     --max-model-len 9216 \
+#     --max-num-batched-tokens 9216 \
+#     --use-padding-aware-scheduling \
+#     --block-size ${block_size} \
+#     --distributed_executor_backend mp \
+#     --gpu_memory_utilization ${gpu_utils} \
+#     --enable-expert-parallel \
+#     --quantization="inc" \
+#     --override-generation-config='{"attn_temperature_tuning": true}' \
+#     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
+# pid=$(($!-1))
 
 until [[ "$n" -ge 1000 ]] || [[ $ready == true ]]; do
     n=$((n+1))
@@ -85,7 +96,7 @@ in_len=1024
 out_len=1024
 start_time=$(date +%s)
 echo "Start to benchmark"
-vllm serve \
+python3 ../benchmarks/benchmark_serving.py \
     --backend vllm \
     --model ${model} \
     --tokenizer ${tokenizer} \
