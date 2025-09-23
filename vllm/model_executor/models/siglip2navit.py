@@ -481,7 +481,8 @@ class Siglip2Encoder(nn.Module):
         vit_merger_window_size = (self.window_size // self.hidden_stride //
                                   self.patch_size)
 
-        for grid_t, grid_h, grid_w in grid_thw:
+        for grid_t_, grid_h_, grid_w_ in grid_thw:
+            grid_t, grid_h, grid_w = grid_t_.item(), grid_h_.item(), grid_w_.item()
             llm_grid_h, llm_grid_w = (
                 grid_h // self.hidden_stride,  # number of patch after merge
                 grid_w // self.hidden_stride,
@@ -513,7 +514,7 @@ class Siglip2Encoder(nn.Module):
             cu_seqlens_tmp = seqlens.cumsum(
                 0) * self.spatial_merge_unit + cu_window_seqlens[-1]
             cu_window_seqlens.extend(cu_seqlens_tmp.tolist())
-            window_index_id += (grid_t * llm_grid_h * llm_grid_w).item()
+            window_index_id += (grid_t * llm_grid_h * llm_grid_w)
         window_index = torch.cat(window_index, dim=0)
 
         return window_index, cu_window_seqlens
