@@ -116,18 +116,18 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
         if prompt_bs_bucket_step:
             print(f"\t VLLM_PROMPT_BS_BUCKET_STEP={prompt_bs_bucket_step}")
         else:
-            print("\t VLLM_PROMPT_BS_BUCKET_STEP = " + str(os.getenv("VLLM_PROMPT_BS_BUCKET_STEP", 32)))  # default:32
+            print("\t VLLM_PROMPT_BS_BUCKET_STEP=" + str(os.getenv("VLLM_PROMPT_BS_BUCKET_STEP", 32)))  # default:32
         if prompt_bs_bucket_max:
             print(f"\t VLLM_PROMPT_BS_BUCKET_MAX={prompt_bs_bucket_max}")
         else:
-            print("\t VLLM_PROMPT_BS_BUCKET_MAX = " + str(
+            print("\t VLLM_PROMPT_BS_BUCKET_MAX=" + str(
                 os.getenv("VLLM_PROMPT_BS_BUCKET_MAX", max_num_seqs)))  # default:max_num_seqs
         print(f"\t VLLM_PROMPT_SEQ_BUCKET_MIN={args.input_len}")
         if prompt_seq_step:
             print(f"\t VLLM_PROMPT_SEQ_BUCKET_STEP={prompt_seq_step}")
         else:
             print(
-                "\t VLLM_PROMPT_SEQ_BUCKET_STEP = " + str(
+                "\t VLLM_PROMPT_SEQ_BUCKET_STEP=" + str(
                     os.getenv("VLLM_PROMPT_SEQ_BUCKET_STEP", block_size)))  # default: block_size
         print(f"\t VLLM_PROMPT_SEQ_BUCKET_MAX={max_model_len}")
 
@@ -160,32 +160,35 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
 
 def objective(trial, args):
     benchmark_cmd_list = args.benchmark_throughput_cmd.split()
-    if "--block-size" in benchmark_cmd_list:
-        index = benchmark_cmd_list.index("--block-size")
-        block_size = int(benchmark_cmd_list[index + 1])
-        trial.set_user_attr("block_size", block_size)
-    else:
+    if args.tune_block_size:
         block_size = trial.suggest_int('block_size', 128, 256, step=128)
+    else:
+        if "--block-size" in benchmark_cmd_list:
+            index = benchmark_cmd_list.index("--block-size")
+            block_size = int(benchmark_cmd_list[index + 1])
+        else:
+            block_size = 128  # default block size
+        trial.set_user_attr("block_size", block_size)
 
     if args.prompt_bs_bucket_step_range:
         prompt_bs_bucket_step = trial.suggest_int('prompt_bs_bucket_step',
-                                                 args.prompt_bs_bucket_step_range[0],
-                                                 args.prompt_bs_bucket_step_range[1],
-                                                 step=args.prompt_bs_bucket_step_range[2])
+                                                  args.prompt_bs_bucket_step_range[0],
+                                                  args.prompt_bs_bucket_step_range[1],
+                                                  step=args.prompt_bs_bucket_step_range[2])
     else:
         prompt_bs_bucket_step = None
     if args.prompt_bs_bucket_max_range:
         prompt_bs_bucket_max = trial.suggest_int('prompt_bs_bucket_max',
-                                            args.prompt_bs_bucket_max_range[0],
-                                            args.prompt_bs_bucket_max_range[1],
-                                            step=args.prompt_bs_bucket_max_range[2])
+                                                 args.prompt_bs_bucket_max_range[0],
+                                                 args.prompt_bs_bucket_max_range[1],
+                                                 step=args.prompt_bs_bucket_max_range[2])
     else:
         prompt_bs_bucket_max = None
     if args.prompt_seq_step_range:
         prompt_seq_step = trial.suggest_int('prompt_seq_step',
-                                  args.prompt_seq_step_range[0],
-                                  args.prompt_seq_step_range[1],
-                                  step=args.prompt_seq_step_range[2])
+                                            args.prompt_seq_step_range[0],
+                                            args.prompt_seq_step_range[1],
+                                            step=args.prompt_seq_step_range[2])
     else:
         prompt_seq_step = None
     if args.decode_block_bucket_step_range:
@@ -197,9 +200,9 @@ def objective(trial, args):
         decode_block_step = int(os.getenv("VLLM_DECODE_BLOCK_BUCKET_STEP", block_size))
         trial.set_user_attr("decode_block_step", decode_block_step)
     decode_bs = trial.suggest_int('decode_bs',
-                              args.decode_bs_range[0],
-                              args.decode_bs_range[1],
-                              step=args.decode_bs_range[2])
+                                  args.decode_bs_range[0],
+                                  args.decode_bs_range[1],
+                                  step=args.decode_bs_range[2])
     # currently only fixed block size: 128, 256 are supported
     max_num_seqs = max(prompt_bs_bucket_max, decode_bs) if prompt_bs_bucket_max else decode_bs
     trial.set_user_attr("max_num_seqs", max_num_seqs)
@@ -318,6 +321,11 @@ if __name__ == "__main__":
         required=True,
         help="Tuning range for decode-bs-range in format of min max step.",
     )
+    parser.add_argument(
+        "--tune-block-size",
+        action="store_true",
+        help="Whether to tune block size.",
+    )
 
     parser.add_argument(
         "--num-trials",
@@ -355,7 +363,7 @@ if __name__ == "__main__":
         "--n", type=int, default=1, help="Number of generated sequences per prompt."
     )
 
-    # other benchmark_throughput cmd-line args
+    # benchmark_throughput cmd
     parser.add_argument(
         "--benchmark-throughput-cmd",
         type=str,
@@ -403,4 +411,3 @@ if __name__ == "__main__":
         print(f"\t [Throughput(tokens/s), Warmup-Time(sec)]: {best_values}")
 
     exit(0)
-
