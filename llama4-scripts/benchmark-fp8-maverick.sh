@@ -57,7 +57,6 @@ vllm serve ${model} \
   --kv-cache-dtype fp8_inc \
   --weights-load-device cpu \
   --tensor-parallel-size 8 \
-  --enable-expert-parallel \
   --max-model-len 131072 2>&1 | tee benchmark_logs/${log_name}_serving.log &
 pid=$(($!-1))
 
