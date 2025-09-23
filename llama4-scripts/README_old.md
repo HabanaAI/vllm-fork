@@ -2,26 +2,30 @@
 
 ## deploy
 ```
-docker run -d -it --runtime=habana --name llama4-vllm-1.22 -v /software:/software -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --ipc=host --net=host -e HF_HOME=/data/huggingface vault.habana.ai/gaudi-docker/1.22.1/ubuntu24.04/habanalabs/pytorch-installer-2.7.1:latest /bin
+docker run -d -it --runtime=habana --name llama4-vllm-1.21 -v /software:/software -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --ipc=host --net=host -e HF_HOME=/data/huggingface vault.habana.ai/gaudi-docker/1.20.1/ubuntu24.04/habanalabs/pytorch-installer-2.6.0:latest /bin
 /bash
 
-docker exec -it llama4-vllm-1.22 /bin/bash
+docker exec -it llama4-vllm-1.21 /bin/bash
 
-cd /data/models; huggingface-cli download --local-dir Llama-4-Maverick-17B-128E-Instruct meta-llama/Llama-4-Maverick-17B-128E-Instruct --token ${YOUR_TOKEN}
+cd /data/models; huggingface-cli download --local-dir Llama-4-Scout-17B-16E-Instruct meta-llama/Llama-4-Scout-17B-16E-Instruct --token ${YOUR_TOKEN}
 
 cd /software/users/${YOUR NAME}/;
-git clone https://github.com/HabanaAI/vllm-fork -b llama4-1.22
+git clone https://github.com/HabanaAI/vllm-fork -b llama4
 pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation;
 
-```
+> Note: if you're using 1.20.0, you might need to `pip install numpy==1.26.4" if it's not this version yet
 
-## Software version
-Gaudi Docker: 1.22.1-6
-vLLM Fork: 1.22.0 Release version
+> Note: this is from requirements-hpu.txt, for some reason something is uninstalling our version
+pip install git+https://github.com/HabanaAI/vllm-hpu-extension.git@145c63d
+
+# install dependencies for llama4
+pip install pydantic msgspec cachetools cloudpickle psutil zmq blake3 py-cpuinfo aiohttp openai uvloop fastapi uvicorn watchfiles partial_json_parser python-multipart gguf llguidance prometheus_client numba compressed_tensors
+
+```
 
 ## run example
 ```
-PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /data/models/Llama-4-Maverick-17B-128E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
+PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /data/models/Llama-4-Scout-17B-16E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
 ```
 
 ## FP8 quantization
@@ -29,6 +33,11 @@ PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /data/models/Ll
 To get a FP8 Maverick llama4 model, please follow below steps:
 
 ```bash
+# install specific INC
+pip uninstall -y neural-compressor neural-compressor-pt
+git clone -b dev/llama4_launch https://github.com/intel/neural-compressor.git
+cd neural-compressor
+pip install -e .
 
 # calibration
 QUANT_CONFIG=measure.json PT_HPU_LAZY_MODE=1 python test_measure.py --model_id meta-llama/Llama-4-Maverick-17B-128E-Instruct
@@ -40,7 +49,7 @@ QUANT_CONFIG=quant.json PT_HPU_LAZY_MODE=1 python test_vllm_quant.py --model_id 
 
 ``` bash
 cd llama4-scripts/accuracy;
-pip install numpy==1.26.4 # Not sure if this is still needed or not
+pip install numpy==1.26.4
 pip install lm_eval
 sh run_mmlupro_acc.sh
 ```
@@ -52,7 +61,7 @@ pip uninstall lm_eval
 git clone --depth 1 https://github.com/EleutherAI/lm-evaluation-harness
 cd lm-evaluation-harness
 pip install -e .
-pip install numpy==1.26.4 # Not sure if this is still needed or not
+pip install numpy==1.26.4
 cd vllm-fork/llama4-scripts/accuracy
 bash run_chartqa_acc.sh
 ```
