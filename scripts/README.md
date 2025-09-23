@@ -201,6 +201,9 @@ usage: calibrate_model.sh <options>
   -e    - set this flag to enable enforce_eager execution
 ```
 
+> [!IMPORTANT]
+> **For Mixture of Experts (MoE) models**: The `-u` must be passed to enable Expert Parallelism (EP) except for [Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct).
+
 The example below is to calibrate Qwen2.5-72B-Instruct model for 2 Gaudi cards. The measured data will be saved  into the `quantization` folder.
 
 ```bash
@@ -224,6 +227,8 @@ bash calibrate_model.sh \
      -t 8 -r 4 -u
 ```
 
+Then the resault measurement data from the calibration could be used to run fp8 inference with 8 or 4 HPUs.
+
 The `-x <TP_SIZE_WITH_PP>` must set to run the model with pipeline parallelism (PP), with the `TP_SIZE_WITH_PP` means the TP size when PP is enabled. Take GLM-4.5-FP8 with TP=4 and PP=2 as an example:
 
 ``` bash
@@ -233,9 +238,6 @@ bash calibrate_model.sh \
      -o quantization \
      -t 8 -x 4 -u
 ```
-
-Then the resault measurement data from the calibration could be used to run fp8 inference with 8 or 4 HPUs.
-> Note that `-u` must passed to the calibration script for MoE models except for [Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct).
 
 #### 3. Make the Quantization folder
 Create a quantization folder at the same level as start_gaudi_vllm_server.sh.
