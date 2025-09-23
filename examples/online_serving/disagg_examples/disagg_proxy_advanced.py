@@ -19,6 +19,7 @@ from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
                      Request, status)
 from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 from transformers import AutoTokenizer
+from asyncio import CancelledError
 
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s",
                               "%Y-%m-%d %H:%M:%S")
@@ -579,12 +580,44 @@ class Proxy:
                 if request.get("stream", False)
                 else "application/json"
             )
-            response = StreamingResponse(final_generator,
-                                         media_type=media_type)
-            return response
-        except Exception:
-            import sys
+            async def wrapped_generator():
+                try:
+                    async for chunk in final_generator:
+                        yield chunk
+                except CancelledError:
+                    logger.warning("Client disconnected during create_completion")
+                    raise
+                finally:
+                    logger.warning(" finally======================+++++++++++++++++++++++++++++++++++++++++++++++")
+                    if decode_instance:
+                        try:
+                            #self.decode_cycler.schedule_completion(
+                            #    decode_instance, request
+                            #)
+                            logger.info(f"Released decode load from {decode_instance}")
+                        except Exception as e:
+                            logger.error(f"Error releasing decode load: {e}")
 
+                    # 这里如果 prefill 也需要释放，可以加上类似逻辑
+                    if prefill_instance:
+                        try:
+                            #self.prefill_cycler.schedule_completion(
+                            #    prefill_instance, request
+                            #)
+                            logger.info(f"Released prefill load from {prefill_instance}")
+                        except Exception as e:
+                            logger.error(f"Error releasing prefill load: {e}")
+
+            return StreamingResponse(wrapped_generator(), media_type=media_type)
+
+            #response = StreamingResponse(final_generator,
+            #                             media_type=media_type)
+            #return response
+        except CancelledError:
+            # 最外层兜底
+            logger.warning("Client disconnected (outer CancelledError in create_completion)")
+            raise
+        except Exception:
             exc_info = sys.exc_info()
             print("Error occurred in disagg proxy server")
             print(exc_info)
