@@ -146,7 +146,6 @@ class VisualTokenizer(torch.nn.Module):
         print("[vis] grid_thws.shape =", getattr(grid_thws, "shape", None))
         if isinstance(grid_thws, torch.Tensor):
             print("[vis] first grid_thw =", grid_thws[0].tolist())
-            print("[vis] second grid_thw =", grid_thws[1].tolist())
         
         print('\n\n\npv in vt encode:',pixel_values,'\n\n\n')
         features = self.vit(pixel_values, grid_thws)
