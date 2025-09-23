@@ -127,7 +127,7 @@ class Siglip2VisionEmbeddings(nn.Module):
                                    size=(h, w),
                                    mode='bicubic',
                                    align_corners=False)
-                pe = pe.permute(0, 2, 3, 1).reshape(1, h * w, -1)
+                pe = pe.permute(0, 2, 3, 1).reshape(1, h.item() * w.item(), -1)
                 pe = pe[0].repeat(t, 1)
                 pe = pe.reshape(t, h // self.hidden_stride, self.hidden_stride,
                                 w // self.hidden_stride, self.hidden_stride,
