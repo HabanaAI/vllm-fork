@@ -24,14 +24,20 @@ sudo echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_
         -e HABANA_VISIBLE_DEVICES=all \
         -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
         --cap-add=sys_nice --net=host --ipc=host \
-        vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/pytorch-installer-2.7.1:latest
+        vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
     ```
 
 2. Install vLLM：
 
     ``` bash
+    # install vllm
     git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
-    VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork
+    pip install -r vllm-fork/requirements-hpu.txt
+    VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+    # [optional] install vllm-hpu-extension to do calibration and run in fp8
+    git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+    pip install -e vllm-hpu-extension --no-build-isolation
     ```
 
 3. If you need use multimodal models like Qwen-VL, GLM-4V, we recommend using Pillow-SIMD instead of Pillow to improve the image processing performance.
@@ -80,7 +86,7 @@ The command output is like below.
 ```
 Start a vLLM server for a huggingface model on Gaudi.
 
-Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:i:p:o:b:g:u:e:lc:sf] [-h]
+Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:q:i:p:o:b:g:u:e:lc:sf] [-h]
 Options:
 -w  Weights of the model, str, could be model id in huggingface or local path.
     DO NOT change the model name as some of the parameters depend on it.
@@ -91,6 +97,10 @@ Options:
     for cases with 4 or less HPUs.
 -a  API server URL, str, 'IP:PORT', default=127.0.0.1:30001
 -d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'
+    Set to 'fp8' if -q or environment variable 'QUANT_CONFIG' is provided.
+-q  Path to the quantization config file, str, default=None
+    default=./quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'
+    The environment variable 'QUANT_CONFIG' will override this option.
 -i  Input range, str, format='input_min,input_max', default='4,1024'
     Make sure the range cover all the possible lengths from the benchmark/client.
 -p  Max number of prefill sequences, int, default=8192/input_min
@@ -174,7 +184,7 @@ huggingface-cli download NeelNanda/pile-10k --repo-type dataset
 
 or pass the dataset ID.
 
-#### 2. Enter vllm-hpu-externsion/calibration folder and do calibration
+#### 2. Enter vllm-hpu-extension/calibration folder and do calibration
 The calibration steps are integrated to the `calibrate_model.sh`.
 
 ``` bash
@@ -201,6 +211,9 @@ usage: calibrate_model.sh <options>
   -e    - set this flag to enable enforce_eager execution
 ```
 
+> [!IMPORTANT]
+> **For Mixture of Experts (MoE) models**: The `-u` must be passed to enable Expert Parallelism (EP) except for [Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct).
+
 The example below is to calibrate Qwen2.5-72B-Instruct model for 2 Gaudi cards. The measured data will be saved  into the `quantization` folder.
 
 ```bash
@@ -214,7 +227,7 @@ HPU_SIZE=2
      -t $HPU_SIZE
 ```
 
-For Qwen3-235B-A22B, the original bfloat16 weights could not fit into 4 HPUs. It is recommended to use [Qwen3-235B-A22B-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-FP8) to do the calibration with 8 HPUs and then unify the calibration data for 4 HPUs as follow:
+For Qwen3-235B-A22B, the original bfloat16 weights can not fit into 4 Gaudi2 HPUs. It is recommended to use [Qwen3-235B-A22B-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-FP8) to do the calibration with 8 HPUs and then unify the calibration data for 4 HPUs as follow:
 
 ``` bash
 bash calibrate_model.sh \
@@ -223,6 +236,8 @@ bash calibrate_model.sh \
      -o quantization \
      -t 8 -r 4 -u
 ```
+
+Then the resault measurement data from the calibration could be used to run fp8 inference with 8 or 4 HPUs.
 
 The `-x <TP_SIZE_WITH_PP>` must set to run the model with pipeline parallelism (PP), with the `TP_SIZE_WITH_PP` means the TP size when PP is enabled. Take GLM-4.5-FP8 with TP=4 and PP=2 as an example:
 
@@ -233,9 +248,6 @@ bash calibrate_model.sh \
      -o quantization \
      -t 8 -x 4 -u
 ```
-
-Then the resault measurement data from the calibration could be used to run fp8 inference with 8 or 4 HPUs.
-> Note that `-u` must passed to the calibration script for MoE models except for [Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct).
 
 #### 3. Make the Quantization folder
 Create a quantization folder at the same level as start_gaudi_vllm_server.sh.
@@ -280,7 +292,7 @@ The command output is like below.
 ```
 Benchmark vLLM throughput for a huggingface model on Gaudi.
 
-Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:i:o:r:j:t:l:b:c:sfza] [-h]
+Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:q:i:o:r:j:t:l:b:c:sfza] [-h]
 options:
 -w  Weights of the model, str, could be model id in huggingface or local path.
     DO NOT change the model name as some of the parameters depend on it.
@@ -289,6 +301,10 @@ options:
     Used to select HPUs and to set NUMA accordingly. It's recommended to set
     for cases with 4 or less HPUs.
 -d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'
+    Set to 'fp8' if -q or environment variable 'QUANT_CONFIG' is provided.
+-q  Path to the quantization config file, str, default=None
+    default=./quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'
+    The environment variable 'QUANT_CONFIG' will override this option.
 -i  Input length, int, default=1024
 -p  Max number of prefill sequences, int, default=8192/input_min
 -o  Output length, int, default=512
