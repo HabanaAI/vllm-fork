@@ -9,7 +9,7 @@ Help() {
     # Display Help
     echo "Benchmark vLLM throughput for a huggingface model on Gaudi."
     echo
-    echo "Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:i:o:r:j:t:l:b:c:sfza] [-h]"
+    echo "Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:q:i:o:r:j:t:l:b:c:sfza] [-h]"
     echo "options:"
     echo "-w  Weights of the model, str, could be model id in huggingface or local path."
     echo "    DO NOT change the model name as some of the parameters depend on it."
@@ -18,6 +18,10 @@ Help() {
     echo "    Used to select HPUs and to set NUMA accordingly. It's recommended to set"
     echo "    for cases with 4 or less HPUs."
     echo "-d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'"
+    echo "    Set to 'fp8' if -q or environment variable 'QUANT_CONFIG' is provided."
+    echo "-q  Path to the quantization config file, str, default=None"
+    echo "    default=$BASH_DIR/quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'"
+    echo "    The environment variable 'QUANT_CONFIG' will override this option."
     echo "-i  Input length, int, default=1024"
     echo "-p  Max number of prefill sequences, int, default=${PREFERED_BATCHED_TOKENS}/input_min"
     echo "-o  Output length, int, default=512"
@@ -52,7 +56,7 @@ Help() {
 }
 
 # Get the options
-while getopts hw:t:m:d:i:p:o:b:r:j:n:g:u:e:lc:sf flag; do
+while getopts hw:t:m:d:q:i:p:o:b:r:j:n:g:u:e:lc:sf flag; do
     case $flag in
     h) # display Help
         Help
@@ -66,6 +70,8 @@ while getopts hw:t:m:d:i:p:o:b:r:j:n:g:u:e:lc:sf flag; do
         module_ids=$OPTARG ;;
     d) # get data type
         dtype=$OPTARG ;;
+    q) # get quantization config
+        quant_config=$OPTARG ;;
     i) # input range
         input_len=$OPTARG ;;
     p) # max number of prefill sequences
@@ -111,6 +117,7 @@ fi
 num_hpu=${num_hpu:-"1"}
 module_ids=${module_ids:-"None"}
 dtype=${dtype:-"bfloat16"}
+quant_config=${quant_config:-""}
 input_len=${input_len:-"1024"}
 max_num_prefill_seqs=${max_num_prefill_seqs:-""}
 output_len=${output_len:-"512"}
@@ -128,6 +135,11 @@ profile=${profile:-"false"}
 
 model_name=$(basename "$weights_path")
 model_name_lower=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+
+# if quant_config or QUANT_CONFIG is provided, set dtype to 'fp8'
+if [ "$quant_config" != "" ] || [ "$QUANT_CONFIG" != "" ]; then
+    dtype="fp8"
+fi
 
 if [ "$json_path" != "" ]; then
     input_min=4

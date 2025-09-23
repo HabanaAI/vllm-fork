@@ -9,7 +9,7 @@ Help() {
     # Display Help
     echo "Start a vLLM server for a huggingface model on Gaudi."
     echo
-    echo "Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:i:p:o:b:g:u:e:lc:sf] [-h]"
+    echo "Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:q:i:p:o:b:g:u:e:lc:sf] [-h]"
     echo "Options:"
     echo "-w  Weights of the model, str, could be model id in huggingface or local path."
     echo "    DO NOT change the model name as some of the parameters depend on it."
@@ -20,6 +20,10 @@ Help() {
     echo "    for cases with 4 or less HPUs."
     echo "-a  API server URL, str, 'IP:PORT', default=127.0.0.1:30001"
     echo "-d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'"
+    echo "    Set to 'fp8' if -q or environment variable 'QUANT_CONFIG' is provided."
+    echo "-q  Path to the quantization config file, str, default=None"
+    echo "    default=$BASH_DIR/quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'"
+    echo "    The environment variable 'QUANT_CONFIG' will override this option."
     echo "-i  Input range, str, format='input_min,input_max', default='4,1024'"
     echo "    Make sure the range cover all the possible lengths from the benchmark/client."
     echo "-p  Max number of prefill sequences, int, default=${PREFERED_BATCHED_TOKENS}/input_min"
@@ -52,7 +56,7 @@ Help() {
 }
 
 # Get the options
-while getopts hw:t:m:a:d:i:p:o:b:g:u:e:lc:sf flag; do
+while getopts hw:t:m:a:d:q:i:p:o:b:g:u:e:lc:sf flag; do
     case $flag in
     h) # display Help
         Help
@@ -70,6 +74,8 @@ while getopts hw:t:m:a:d:i:p:o:b:g:u:e:lc:sf flag; do
         ;;
     d) # get data type
         dtype=$OPTARG ;;
+    q) # get quantization config
+        quant_config=$OPTARG ;;
     i) # input range
         input_min=${OPTARG%%,*}
         input_max=${OPTARG##*,}
@@ -115,6 +121,7 @@ module_ids=${module_ids:-"None"}
 host=${host:-"127.0.0.1"}
 port=${port:-"30001"}
 dtype=${dtype:-"bfloat16"}
+quant_config=${quant_config:-""}
 input_min=${input_min:-"4"}
 input_max=${input_max:-"1024"}
 max_num_prefill_seqs=${max_num_prefill_seqs:-""}
@@ -131,6 +138,11 @@ profile=${profile:-"false"}
 
 model_name=$(basename "$weights_path")
 model_name_lower=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+
+# if quant_config or QUANT_CONFIG is provided, set dtype to 'fp8'
+if [ "$quant_config" != "" ] || [ "$QUANT_CONFIG" != "" ]; then
+    dtype="fp8"
+fi
 
 echo "Starting vllm server for ${model_name} from ${weights_path} with:"
 echo "    device: ${num_hpu} HPUs with module_ids=${module_ids}"
