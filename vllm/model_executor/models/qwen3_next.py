@@ -418,10 +418,10 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         )
 
         self.conv_state = torch.empty(conv_state_shape,
-                                 dtype=self.conv1d.weight.dtype,
+                                 dtype=torch.float32,
                                  device=self.conv1d.weight.device)
         self.ssm_state = torch.empty(temporal_state_shape,
-                                     dtype=self.conv1d.weight.dtype,
+                                     dtype=torch.float32,
                                      device=self.conv1d.weight.device)
 
         # selective projection used to make dt, B and C input dependant
@@ -543,6 +543,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         ssm_state = self.ssm_state
 
         projected_states, _ = self.in_proj(hidden_states)
+        projected_states = projected_states.float()
         projected_states_qkvz, projected_states_ba = torch.split(
             projected_states,
             [
@@ -638,7 +639,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         # reshape input data into 2D tensor
         core_attn_out = core_attn_out.reshape(-1, core_attn_out.shape[-1])
         z = z.reshape(-1, z.shape[-1])
-        core_attn_out = self.norm(core_attn_out, z)
+        core_attn_out = self.norm(core_attn_out, z).to(hidden_states.dtype)
         core_attn_out = core_attn_out.reshape(z_shape_og)
         core_attn_out = core_attn_out.reshape(core_attn_out.shape[0], core_attn_out.shape[1], -1)
 
