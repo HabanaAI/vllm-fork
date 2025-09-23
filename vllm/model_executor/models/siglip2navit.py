@@ -570,7 +570,7 @@ class Siglip2Encoder(nn.Module):
 
         print('grid_thws', grid_thws)
         cu_seqlens = torch.repeat_interleave(
-            grid_thws[:, 1] * grid_thws[:, 2], grid_thws[:, 0]
+            grid_thws[:, 1].item() * grid_thws[:, 2].item(), grid_thws[:, 0].item()
         ).cumsum(
             dim=0,
             # Select dtype based on the following factors:
