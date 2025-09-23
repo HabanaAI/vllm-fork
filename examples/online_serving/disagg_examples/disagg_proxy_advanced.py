@@ -96,7 +96,7 @@ async def D_first_token_generator(generator_p,
                                   req_len: int = None):
     try:
         async for _ in generator_p:
-            pass
+            continue
     finally:
         if callback_owner:
             callback_owner.exception_handler(
