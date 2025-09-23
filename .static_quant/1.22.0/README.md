@@ -9,6 +9,7 @@ The below steps are given for an model Llama-4-Maverick-17B-128E-Instruct as exa
 Example:
 ```json
 "dump_stats_path": "/root/vllm-fork/.static_quant/1.22.0/Llama-4-Maverick-17B-128E-Instruct/g3/inc_output"
+```
 
 ## Environment Variable
 Export the environment variable QUANT_CONFIG before running the server. It must point to the location of maxabs_quant_g3.json.
@@ -18,7 +19,7 @@ Example:
 export QUANT_CONFIG='/root/vllm-fork/.static_quant/1.22.0/Llama-4-Maverick-17B-128E-Instruct/maxabs_quant_g3.json'
 ```
 
-Run vLLM Server
+## Run vLLM Server
 
 Start the vLLM server with quantization enabled:
 
@@ -31,7 +32,7 @@ vllm serve meta-llama/Llama-4-Maverick-17B-128E-Instruct \
   --max-model-len 2048
 ```
 
-Notes
+## Notes
 
 1. The dump_stats_path in maxabs_quant_g3.json must be an absolute path.
 2. QUANT_CONFIG must be exported before running vllm serve.
