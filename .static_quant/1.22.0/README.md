@@ -1,5 +1,5 @@
-# Static Quantization 
-The below steps are given for an model Llama-4-Maverick-17B-128E-Instruct as example 
+# Static Quantization
+The below steps are given for an model Llama-4-Maverick-17B-128E-Instruct as example
 
 ## Configuration
 
@@ -16,6 +16,7 @@ Example:
 Export the environment variable QUANT_CONFIG before running the server. It must point to the location of maxabs_quant_g3.json.
 
 Example:
+
 ```bash 
 export QUANT_CONFIG='/root/vllm-fork/.static_quant/1.22.0/Llama-4-Maverick-17B-128E-Instruct/maxabs_quant_g3.json'
 ```
