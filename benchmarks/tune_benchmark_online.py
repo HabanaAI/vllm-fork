@@ -273,7 +273,16 @@ def objective(trial, args):
         decode_block_bucket_max = None
 
     # currently only fixed block size: 128, 256 are supported
-    block_size = trial.suggest_int('block_size', 128, 256, step=128)
+    if args.tune_block_size:
+        block_size = trial.suggest_int('block_size', 128, 256, step=128)
+    else:
+        if "--block-size" in benchmark_cmd_list:
+            index = benchmark_cmd_list.index("--block-size")
+            block_size = int(benchmark_cmd_list[index + 1])
+        else:
+            block_size = 128  # default block size
+        trial.set_user_attr("block_size", block_size)
+
 
     set_trial_value(prompt_bs_bucket_min, prompt_bs_bucket_step, prompt_bs_bucket_max,
                     prompt_seq_bucket_min, prompt_seq_bucket_step, prompt_seq_bucket_max,
@@ -478,6 +487,11 @@ if __name__ == "__main__":
         type=int,
         required=False,
         help="Tuning range for VLLM_DECODE_BLOCK_BUCKET_MAX in format of min max step",
+    )
+    parser.add_argument(
+        "--tune-block-size",
+        action="store_true",
+        help="Whether to tune block size.",
     )
 
     # Add optuna related configurations
