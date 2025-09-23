@@ -62,21 +62,31 @@ async def P_first_token_generator(generator_p,
                                   decode_instance: str = None,
                                   req_len: int = None):
     first_decode = True
-    async for chunk in generator_p:
-        yield chunk
-    if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(prefill_instance=prefill_instance,
-                               req_len=req_len)
 
-    async for chunk in generator_d:
-        if first_decode:
-            first_decode = False
-            continue
-        yield chunk
-    if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(decode_instance=decode_instance,
-                               req_len=req_len)
+    try:
+        async for chunk in generator_p:
+            yield chunk
+    finally:
+        if callback_owner:
+            callback_owner.exception_handler(
+                prefill_instance=prefill_instance,
+                decode_instance=None,
+                req_len=req_len
+            )
 
+    try:
+        async for chunk in generator_d:
+            if first_decode:
+                first_decode = False
+                continue
+            yield chunk
+    finally:
+        if callback_owner:
+            callback_owner.exception_handler(
+                prefill_instance=None,
+                decode_instance=decode_instance,
+                req_len=req_len
+            )
 
 async def D_first_token_generator(generator_p,
                                   generator_d,
@@ -84,18 +94,27 @@ async def D_first_token_generator(generator_p,
                                   prefill_instance: str = None,
                                   decode_instance: str = None,
                                   req_len: int = None):
-    async for _ in generator_p:
-        continue
-    if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(prefill_instance=prefill_instance,
-                               req_len=req_len)
-
-    async for chunk in generator_d:
-        yield chunk
-    if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(decode_instance=decode_instance,
-                               req_len=req_len)
-
+    try:
+        async for _ in generator_p:
+            pass
+    finally:
+        if callback_owner:
+            callback_owner.exception_handler(
+                prefill_instance=prefill_instance,
+                decode_instance=None,
+                req_len=req_len
+            )
+    
+    try:
+        async for chunk in generator_d:
+            yield chunk
+    finally:
+        if callback_owner:
+            callback_owner.exception_handler(
+                prefill_instance=None,
+                decode_instance=decode_instance,
+                req_len=req_len
+            )
 
 class SchedulingPolicy(ABC):
 
@@ -514,7 +533,6 @@ class Proxy:
             return fake_len
 
     def exception_handler(self, prefill_instance=None, decode_instance=None, req_len=None):
-        logger.warning(" exception_handler +++")
         if prefill_instance or decode_instance:
             try:
                 self.on_done(
@@ -602,16 +620,14 @@ class Proxy:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("[0] Client disconnected during create_completion")
-                    self.exception_handler(prefill_instance, decode_instance, total_length)
+                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                except Exception as e:
+                    logger.error("[1] Exception in wrapped_generator: %s", str(e))
+                    raise
             return StreamingResponse(wrapped_generator(), media_type=media_type)
-        except CancelledError:
-            logger.warning("[1] Client disconnected (outer CancelledError in create_completion)")
-            self.exception_handler(prefill_instance, decode_instance, total_length)
         except Exception:
             exc_info = sys.exc_info()
             print("Error occurred in disagg proxy server")
-            self.exception_handler(prefill_instance, decode_instance, total_length)
             print(exc_info)
 
     async def create_chat_completion(self, raw_request: Request):
@@ -693,18 +709,16 @@ class Proxy:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("[0] Client disconnected during create_completion")
-                    self.exception_handler(prefill_instance, decode_instance, total_length)
+                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                except Exception as e:
+                    logger.error("[1] Exception in wrapped_generator: %s", str(e))
+                    raise
             return StreamingResponse(wrapped_generator(), media_type=media_type)
-        except CancelledError:
-            logger.warning("[1] Client disconnected (outer CancelledError in create_completion)")
-            self.exception_handler(prefill_instance, decode_instance, total_length)
         except Exception:
             exc_info = sys.exc_info()
             error_messages = [str(e) for e in exc_info if e]
             print("Error occurred in disagg proxy server")
             print(error_messages)
-            self.exception_handler(prefill_instance, decode_instance, total_length)
             return StreamingResponse(content=iter(error_messages),
                                      media_type="application/json")
 
