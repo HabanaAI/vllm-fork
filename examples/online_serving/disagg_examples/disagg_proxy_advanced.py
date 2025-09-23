@@ -49,10 +49,10 @@ def log_info_red(msg):
     logger.info("%s%s%s", escape_codes['red'], msg, escape_codes['reset'])
 
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=60 * 60 * 60,
-                                        connect=60000,
-                                        sock_read=120000,
-                                        sock_connect=30000)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=None,
+                                        connect=None,
+                                        sock_read=None,
+                                        sock_connect=None)
 
 
 async def P_first_token_generator(generator_p,
@@ -513,9 +513,26 @@ class Proxy:
             logger.error("Unsupported prompt type: %s", type(prompt))
             return fake_len
 
+    def exception_handler(self, prefill_instance=None, decode_instance=None, req_len=None):
+        logger.warning(" exception_handler +++")
+        if prefill_instance or decode_instance:
+            try:
+                self.on_done(
+                    prefill_instance=prefill_instance,
+                    decode_instance=decode_instance,
+                    req_len=req_len
+                )
+            except Exception as e:
+                logger.error(f"Error releasing instances: {e}")
+                raise
+
     async def create_completion(self, raw_request: Request):
         try:
             request = await raw_request.json()
+
+            total_length = 0
+            prefill_instance = None
+            decode_instance = None
 
             if len(self.prefill_instances) > 0:
                 kv_prepare_request = request.copy()
@@ -540,7 +557,7 @@ class Proxy:
                             kv_prepare_request):
                         value += chunk
                 except HTTPException as http_exc:
-                    self.remove_instance_endpoint("prefill", prefill_instance)
+                    self.exception_handler(prefill_instance, decode_instance, total_length)
                     raise http_exc
 
             # Perform kv recv and decoding stage
@@ -561,7 +578,7 @@ class Proxy:
                 generator_d = self.forward_request(
                     f"http://{decode_instance}/v1/completions", request)
             except HTTPException as http_exc:
-                self.remove_instance_endpoint("decode", decode_instance)
+                self.exception_handler(prefill_instance, decode_instance, total_length)
                 raise http_exc
 
             if request.get("stream", False):
@@ -585,46 +602,25 @@ class Proxy:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("Client disconnected during create_completion")
-                    raise
-                finally:
-                    logger.warning(" finally======================+++++++++++++++++++++++++++++++++++++++++++++++")
-                    if decode_instance:
-                        try:
-                            #self.decode_cycler.schedule_completion(
-                            #    decode_instance, request
-                            #)
-                            logger.info(f"Released decode load from {decode_instance}")
-                        except Exception as e:
-                            logger.error(f"Error releasing decode load: {e}")
-
-                    # 这里如果 prefill 也需要释放，可以加上类似逻辑
-                    if prefill_instance:
-                        try:
-                            #self.prefill_cycler.schedule_completion(
-                            #    prefill_instance, request
-                            #)
-                            logger.info(f"Released prefill load from {prefill_instance}")
-                        except Exception as e:
-                            logger.error(f"Error releasing prefill load: {e}")
-
+                    logger.warning("[0] Client disconnected during create_completion")
+                    self.exception_handler(prefill_instance, decode_instance, total_length)
             return StreamingResponse(wrapped_generator(), media_type=media_type)
-
-            #response = StreamingResponse(final_generator,
-            #                             media_type=media_type)
-            #return response
         except CancelledError:
-            # 最外层兜底
-            logger.warning("Client disconnected (outer CancelledError in create_completion)")
-            raise
+            logger.warning("[1] Client disconnected (outer CancelledError in create_completion)")
+            self.exception_handler(prefill_instance, decode_instance, total_length)
         except Exception:
             exc_info = sys.exc_info()
             print("Error occurred in disagg proxy server")
+            self.exception_handler(prefill_instance, decode_instance, total_length)
             print(exc_info)
 
     async def create_chat_completion(self, raw_request: Request):
         try:
             request = await raw_request.json()
+
+            total_length = 0
+            prefill_instance = None
+            decode_instance = None
 
             # add params to request
             kv_prepare_request = request.copy()
@@ -652,7 +648,7 @@ class Proxy:
                         kv_prepare_request):
                     value += chunk
             except HTTPException as http_exc:
-                self.remove_instance_endpoint("prefill", prefill_instance)
+                self.exception_handler(prefill_instance, decode_instance, total_length)
                 raise http_exc
             # Perform kv recv and decoding stage
             decode_instance = self.schedule(self.decode_cycler,
@@ -673,7 +669,7 @@ class Proxy:
                     "http://" + decode_instance + "/v1/chat/completions",
                     request)
             except HTTPException as http_exc:
-                self.remove_instance_endpoint("decode", decode_instance)
+                self.exception_handler(prefill_instance, decode_instance, total_length)
                 raise http_exc
 
             if request.get("stream", False):
@@ -692,14 +688,23 @@ class Proxy:
                 if request.get("stream", False)
                 else "application/json"
             )
-            response = StreamingResponse(final_generator,
-                                         media_type=media_type)
-            return response
+            async def wrapped_generator():
+                try:
+                    async for chunk in final_generator:
+                        yield chunk
+                except CancelledError:
+                    logger.warning("[0] Client disconnected during create_completion")
+                    self.exception_handler(prefill_instance, decode_instance, total_length)
+            return StreamingResponse(wrapped_generator(), media_type=media_type)
+        except CancelledError:
+            logger.warning("[1] Client disconnected (outer CancelledError in create_completion)")
+            self.exception_handler(prefill_instance, decode_instance, total_length)
         except Exception:
             exc_info = sys.exc_info()
             error_messages = [str(e) for e in exc_info if e]
             print("Error occurred in disagg proxy server")
             print(error_messages)
+            self.exception_handler(prefill_instance, decode_instance, total_length)
             return StreamingResponse(content=iter(error_messages),
                                      media_type="application/json")
 
@@ -797,24 +802,27 @@ class LoadBalancedScheduler(SchedulingPolicy):
         with self.lock:
             if prefill_instance:
                 index = self.prefill_instances.index(prefill_instance)
-                self.prefill_schedule_completion_index += 1
-                log_info_yellow(f"<Prefill completed "
-                                f"{self.prefill_schedule_completion_index}> "
-                                f"instance = {index}, req_len={req_len}")
-
-                self.prefill_bs_counter[index] -= 1
-                all_zero = True
-                for index, _ in enumerate(self.prefill_instances):
-                    if self.prefill_bs_counter[index] != 0:
-                        all_zero = False
-                        break
-                if all_zero:
-                    log_info_red("<Prefill in idle state>")
-                    for index, _ in enumerate(self.prefill_instances):
-                        self.prefill_utils_counter[index] = 0
+                if self.prefill_bs_counter[index] == 0:
+                    logger.warning("No alive requests for prefill instance, skipping...")
                 else:
-                    index = self.prefill_instances.index(prefill_instance)
-                    self.prefill_utils_counter[index] -= req_len
+                    self.prefill_schedule_completion_index += 1
+                    log_info_yellow(f"<Prefill completed "
+                                    f"{self.prefill_schedule_completion_index}> "
+                                    f"instance = {index}, req_len={req_len}")
+
+                    self.prefill_bs_counter[index] -= 1
+                    all_zero = True
+                    for index, _ in enumerate(self.prefill_instances):
+                        if self.prefill_bs_counter[index] != 0:
+                            all_zero = False
+                            break
+                    if all_zero:
+                        log_info_red("<Prefill in idle state>")
+                        for index, _ in enumerate(self.prefill_instances):
+                            self.prefill_utils_counter[index] = 0
+                    else:
+                        index = self.prefill_instances.index(prefill_instance)
+                        self.prefill_utils_counter[index] -= req_len
 
             if decode_instance:
                 index = self.decode_instances.index(decode_instance)
