@@ -840,30 +840,33 @@ class LoadBalancedScheduler(SchedulingPolicy):
 
             if decode_instance:
                 index = self.decode_instances.index(decode_instance)
-                self.decode_schedule_completion_index += 1
-                log_info_blue(f"<Decode completed "
-                              f"{self.decode_schedule_completion_index}> "
-                              f"instance = {index}, req_len={req_len}")
-
-                self.decode_bs_counter[index] -= 1
-                all_zero = True
-                for index, _ in enumerate(self.decode_instances):
-                    if self.decode_bs_counter[index] != 0:
-                        all_zero = False
-                        break
-                if all_zero:
-                    log_info_red("<Decode in idle state>")
-                    self.decode_kv_utils_counter = [0] * len(
-                        self.decode_instances)
+                if self.decode_bs_counter[index] == 0:
+                    logger.warning("No alive requests for decode instance, skipping...")
                 else:
-                    index = self.decode_instances.index(decode_instance)
-                    self.decode_kv_utils_counter[index] -= req_len
-                    log_info_blue(
-                        f"<schedule_completion decode> "
-                        f"decode_bs_counter: {self.decode_bs_counter}")
-                    log_info_blue(f"<schedule_completion decode> "
-                                  f"decode_kv_utils_counter: "
-                                  f"{self.decode_kv_utils_counter}")
+                    self.decode_schedule_completion_index += 1
+                    log_info_blue(f"<Decode completed "
+                                  f"{self.decode_schedule_completion_index}> "
+                                  f"instance = {index}, req_len={req_len}")
+
+                    self.decode_bs_counter[index] -= 1
+                    all_zero = True
+                    for index, _ in enumerate(self.decode_instances):
+                        if self.decode_bs_counter[index] != 0:
+                            all_zero = False
+                            break
+                    if all_zero:
+                        log_info_red("<Decode in idle state>")
+                        self.decode_kv_utils_counter = [0] * len(
+                            self.decode_instances)
+                    else:
+                        index = self.decode_instances.index(decode_instance)
+                        self.decode_kv_utils_counter[index] -= req_len
+                        log_info_blue(
+                            f"<schedule_completion decode> "
+                            f"decode_bs_counter: {self.decode_bs_counter}")
+                        log_info_blue(f"<schedule_completion decode> "
+                                      f"decode_kv_utils_counter: "
+                                      f"{self.decode_kv_utils_counter}")
 
 
 class ProxyServer:
