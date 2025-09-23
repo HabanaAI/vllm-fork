@@ -7,6 +7,7 @@ The below steps are given for an model Llama-4-Maverick-17B-128E-Instruct as exa
 2. Edit it and set the parameter `dump_stats_path` to the absolute path where the repository is cloned.
 
 Example:
+
 ```json
 "dump_stats_path": "/root/vllm-fork/.static_quant/1.22.0/Llama-4-Maverick-17B-128E-Instruct/g3/inc_output"
 ```
