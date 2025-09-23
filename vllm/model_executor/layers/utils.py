@@ -3,7 +3,7 @@
 """Utility methods for model layers."""
 from typing import Callable, Optional
 
-import torch,time
+import torch
 from vllm import _custom_ops as ops
 from vllm import envs
 from vllm.platforms import current_platform
@@ -49,7 +49,6 @@ def apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
         output_tokens_tensor, vocab_size, num_seqs)
     # Apply repetition penalties as a custom op
     from vllm._custom_ops import apply_repetition_penalties
-
     apply_repetition_penalties(logits, prompt_mask, output_mask,
                                repetition_penalties)
 

@@ -3856,7 +3856,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         bool(model_input.multi_modal_kwargs and \
                        ('pixel_values')in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
-                logger.info(f"libin debug execute_model {execute_model_kwargs['input_ids'].shape=}")
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if ('pixel_values') in execute_model_kwargs and \

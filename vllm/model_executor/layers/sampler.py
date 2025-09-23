@@ -199,9 +199,7 @@ class Sampler(nn.Module):
         self.should_modify_greedy_probs_inplace = False
         # Add HPU cache class variables  
         self._prompt_tokens_hpu_cache: Optional[torch.Tensor] = None  
-        self._prompt_mask_hpu_cache: Optional[torch.Tensor] = None  
         self._cached_seq_ids: Optional[set] = None
-        self._last_prompt_mask: Optional[torch.Tensor] = None
         
 
     def _init_sampling_tensors(
@@ -236,11 +234,9 @@ class Sampler(nn.Module):
         # Check if batch composition changed - if so, invalidate prompt cache
             
         # After tensors are created, update cache
-        logger.info(f"libin debug init_sampling {self._cached_seq_ids=} {current_seq_ids}")
         if self._cached_seq_ids != current_seq_ids:
             self._prompt_tokens_hpu_cache = None
             self._cached_seq_ids = current_seq_ids
-            self._prompt_mask_hpu_cache = None
 
             
 

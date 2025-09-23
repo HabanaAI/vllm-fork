@@ -14,11 +14,7 @@ from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData,
 from vllm.utils import (PyObjectCache, async_tensor_h2d,
                         is_pin_memory_available, make_tensor_with_pad,
                         make_tensor_with_pad_align)
-from vllm.logger import init_logger
 _SAMPLING_EPS = 1e-5
-
-logger = init_logger(__name__)
-
 pin_memory = is_pin_memory_available()
 is_hpu = current_platform.is_hpu()
 
@@ -416,7 +412,6 @@ class SamplingTensors:
     repetition_penalties: torch.Tensor
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
-
 
     @classmethod
     def from_sampling_metadata(
