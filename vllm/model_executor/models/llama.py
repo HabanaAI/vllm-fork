@@ -24,6 +24,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
+import os
 from collections.abc import Iterable
 from typing import Any, Optional, Union
 
@@ -36,6 +37,7 @@ from vllm.attention import Attention, AttentionType
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
@@ -56,7 +58,7 @@ from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
-                    is_pp_missing_parameter,
+                    get_input_mask, is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 
@@ -146,6 +148,8 @@ class LlamaAttention(nn.Module):
     ) -> None:
         super().__init__()
         layer_idx = extract_layer_index(prefix)
+        self.enable_zero_padding = os.environ.get('VLLM_ZERO_PADDING',
+                                                  'false').lower() == 'true'
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
         self.total_num_heads = num_heads
@@ -239,6 +243,13 @@ class LlamaAttention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
+        attn_metadata = get_forward_context().attn_metadata
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
+            valid_len = attn_metadata.seq_lens_tensor
+            mask = get_input_mask(hidden_states, valid_len)
+            hidden_states = hidden_states * mask.unsqueeze(-1)
+
         if self.split_qkv:
             q, k, v, _ = self.qkv_proj(hidden_states)
         else:
@@ -247,6 +258,11 @@ class LlamaAttention(nn.Module):
                                 dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v)
+
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
+            attn_output = attn_output * mask.unsqueeze(-1)
+
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -375,6 +391,8 @@ class LlamaModel(nn.Module):
 
         self.config = config
         self.quant_config = quant_config
+        self.enable_zero_padding = os.environ.get('VLLM_ZERO_PADDING',
+                                                  'false').lower() == 'true'
         self.do_mark_step = envs.VLLM_HPU_FORCE_MARK_STEP
         lora_vocab = (lora_config.lora_extra_vocab_size *
                       (lora_config.max_loras or 1)) if lora_config else 0
@@ -433,6 +451,13 @@ class LlamaModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
+        if is_hpu:
+            attn_metadata = get_forward_context().attn_metadata
+            if (self.enable_zero_padding
+                    and attn_metadata.seq_lens_tensor is not None):
+                valid_len = attn_metadata.seq_lens_tensor
+                mask = get_input_mask(hidden_states, valid_len)
+                hidden_states = hidden_states * mask.unsqueeze(-1)
         if is_hpu and self.do_mark_step:
             import habana_frameworks.torch as htorch
             htorch.core.mark_step()
