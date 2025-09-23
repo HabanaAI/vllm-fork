@@ -568,7 +568,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
             mixed_qkv_non_spec = F.conv1d(
                 mixed_qkv.transpose(1, 2).contiguous(),
-                self.conv1d.weight.contiguous(),
+                self.conv1d.weight.contiguous().float(),
                 bias=None,
                 padding=self.conv_kernel_size - 1,
                 groups=(self.conv_dim//self.tp_size)
@@ -580,7 +580,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
                 mixed_qkv,
                 conv_state,
-                self.conv1d.weight,
+                self.conv1d.weight.float(),
                 self.conv1d.bias,
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
