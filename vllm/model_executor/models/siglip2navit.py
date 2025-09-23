@@ -545,7 +545,7 @@ class Siglip2Encoder(nn.Module):
             device=inputs_embeds.device,
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
-        cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
+        # cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = inputs_embeds.size()
         print('inputs_embeds:', inputs_embeds, inputs_embeds.shape)
