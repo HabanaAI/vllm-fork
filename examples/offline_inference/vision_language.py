@@ -826,22 +826,25 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         limit_mm_per_prompt={modality: 1},
         tensor_parallel_size=1,
     )
-    
-    # Ovis 占位符：<image>/<video>
     if modality == "image":
         placeholder = "<image>"
     elif modality == "video":
         placeholder = "<video>"
-    else:
-        raise ValueError("modality must be image or video")
-        
-    prompts = [f"{placeholder}\n{q}" for q in questions]
-    
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    messages = [
+        [{"role": "user", "content": f"{placeholder}\n{question}"}]
+        for question in questions
+    ]
+    prompts = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
     return ModelRequestData(
         engine_args=engine_args,
         prompts=prompts,
     )
-    
+
 
 # PaliGemma
 def run_paligemma(questions: list[str], modality: str) -> ModelRequestData:
