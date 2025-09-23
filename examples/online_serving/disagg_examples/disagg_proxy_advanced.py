@@ -30,6 +30,7 @@ logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 logger.propagate = False
 
+from fastapi.middleware.cors import CORSMiddleware
 
 def log_info_blue(msg):
     logger.info("%s%s%s", escape_codes['cyan'], msg, escape_codes['reset'])
@@ -152,6 +153,25 @@ class Proxy:
                 Depends(self.validate_json_request)
             ])(self.custom_create_chat_completion if self.
                custom_create_chat_completion else self.create_chat_completion)
+
+        self.router.options("/v1/completions")(lambda: None)
+        self.router.options("/v1/chat/completions")(lambda: None)
+        self.router.options("/v1/models")(lambda: None)
+        self.router.options("/status")(lambda: None)
+        self.router.options("/health")(lambda: None)
+        self.router.options("/ping")(lambda: None)
+        self.router.options("/tokenize")(lambda: None)
+        self.router.options("/detokenize")(lambda: None)
+        self.router.options("/version")(lambda: None)
+        self.router.options("/v1/embeddings")(lambda: None)
+        self.router.options("/pooling")(lambda: None)
+        self.router.options("/score")(lambda: None)
+        self.router.options("/v1/score")(lambda: None)
+        self.router.options("/rerank")(lambda: None)
+        self.router.options("/v1/rerank")(lambda: None)
+        self.router.options("/v2/rerank")(lambda: None)
+        self.router.options("/invocations")(lambda: None)
+
         self.router.get("/status",
                         response_class=JSONResponse)(self.get_status)
         self.router.post("/instances/add",
@@ -861,6 +881,14 @@ class ProxyServer:
 
     def run_server(self):
         app = FastAPI()
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
         app.include_router(self.proxy_instance.router)
         config = uvicorn.Config(app,
                                 host="0.0.0.0",
