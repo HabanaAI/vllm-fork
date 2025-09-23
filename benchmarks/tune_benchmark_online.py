@@ -11,7 +11,9 @@ import signal
 import subprocess
 import re
 import threading
+import time
 import dateutil.parser as date_parser
+from datetime import datetime, timedelta
 
 import optuna
 from optuna.storages import RDBStorage
@@ -299,12 +301,14 @@ def objective(trial, args):
         server_process = subprocess.Popen(vllm_server_cmd, shell=True,
                                           stdout=server_log_pipe, stderr=server_log_pipe,
                                           preexec_fn=os.setsid)  # assign a new group id
-        server_process.wait(timeout=args.time_out)
-        # client_process =
-        # parse the server log
-        warmup_time = parse_server_log(server_log_file)
-    except subprocess.TimeoutExpired:
-        print(f"Command {vllm_server_cmd} timed out after {args.time_out} seconds.")
+        server_start_time = datetime.now()
+        # Sleep for server process to start and begin logging
+        time.sleep(30)
+        while server_process and not server_started(server_log_file) and \
+            (datetime.now() - server_start_time).total_seconds() < args.time_out:
+            # Sleep for 10 seconds before checking again
+            time.sleep(10)
+
         if server_started(server_log_file):
             warmup_time = parse_server_log(server_log_file)
             # start the client benchmark
@@ -312,6 +316,11 @@ def objective(trial, args):
                                               preexec_fn=os.setsid)
             client_process.wait()  # wait for finish
             throughput = parse_client_log(client_log_file)
+        elif (datetime.now() - server_start_time).total_seconds() >= args.time_out:
+            raise TimeoutError
+
+    except TimeoutError:
+        print(f"Command {vllm_server_cmd} timed out after {args.time_out} seconds.")
     except subprocess.CalledProcessError as e:
         print(f"Command {vllm_server_cmd} failed with error {e.stderr}.")
     except Exception as e:
