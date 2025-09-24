@@ -73,7 +73,7 @@ def main():
             model=MODEL_PATH,
             # tokenizer defaults to the same repo unless you override it
             trust_remote_code=True,          # Ovis2.5 custom processors
-            dtype="bfloat16",                # Gaudi-friendly dtype
+            dtype="float32",                # Gaudi-friendly dtype
             device=device_choice,            # force HPU if available
             tensor_parallel_size=1,          # adjust if you have multiple HPUs and shard the model
             # Multimodal knobs (commonly safe defaults)
