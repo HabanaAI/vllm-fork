@@ -600,7 +600,9 @@ class Siglip2Encoder(nn.Module):
         print("DEBUG after:", after)  # tensor([12312])
 
         # 3) cumsum 回到原设备
-        cu_seqlens = after.to(gt.device).cumsum(dim=0, dtype=torch.int32)
+        # after 已经在 CPU: tensor([12312])
+        cu_cpu = after.cumsum(dim=0, dtype=torch.int32)  # 在 CPU 累加成 int32
+        cu_seqlens = cu_cpu.to(gt.device)                # 再搬回 hpu:0
         print("DEBUG cu_seqlens:", cu_seqlens)
 
         # cu_seqlens = torch.tensor([12312], dtype=torch.int32)
