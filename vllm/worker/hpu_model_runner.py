@@ -1513,6 +1513,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
+    def _is_fla_model(self):
+        return hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim")
+
     def _use_graphs(self, batch_size, seq_len):
         if self.enforce_eager:
             return False
@@ -1713,8 +1716,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_positions.append(list(range(context_len, seq_len)))
 
             # TODO: if seq_len < conv_kernel_dim, padding token should be masked in the prompt stage
-            if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
-                conv_state_indices_list.append(list(range(seq_len + 1 - self.vllm_config.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
+            if self._is_fla_model:
+                conv_state_indices_list.append(list(range(seq_len + 1 - \
+                    self.vllm_config.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
 
             token_types_ids = seq_group_metadata.token_type_ids
             token_types.append(token_types_ids) if token_types_ids else []
@@ -1898,11 +1902,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
-        if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
+        if self._is_fla_model:
             input_stride = input_tokens_tensor.size(-1)
             conv_state_indices = conv_state_indices_list[0]
             for idx in range(1, len(conv_state_indices_list)):
-                conv_state_indices = conv_state_indices + [item + input_stride * idx for item in conv_state_indices_list[idx]]
+                conv_state_indices = conv_state_indices + [item + input_stride * idx \
+                    for item in conv_state_indices_list[idx]]
             conv_state_indices = torch.tensor(conv_state_indices,
                                               dtype=torch.long,
                                               device='cpu')
@@ -1932,7 +1937,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if len(mamba_prefill_indices) > 0:
             if len(mamba_prefill_indices) < input_tokens_tensor.size(0):
                 padding_len = input_tokens_tensor.size(0) - len(mamba_prefill_indices)
-                mamba_prefill_indices = mamba_prefill_indices + list(range(max(mamba_prefill_indices) + 1, max(mamba_prefill_indices) + 1 + padding_len))
+                mamba_prefill_indices = mamba_prefill_indices + \
+                    list(range(max(mamba_prefill_indices) + 1, \
+                    max(mamba_prefill_indices) + 1 + padding_len))
             mamba_cache_prefill_indices = torch.tensor(mamba_prefill_indices,
                                                        dtype=torch.long,
                                                        device='cpu')
@@ -1979,7 +1986,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             encoder_seq_lens_tensor = self.move_to_device(
                 encoder_seq_lens_tensor)
 
-        if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
+        if self._is_fla_model:
             conv_state_indices = self.move_to_device(conv_state_indices)
         else:
             conv_state_indices = None
@@ -2340,7 +2347,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if len(mamba_decode_indices) > 0:
             if len(mamba_decode_indices) < input_tokens.size(0):
                 padding_len = input_tokens.size(0) - len(mamba_decode_indices)
-                mamba_decode_indices = mamba_decode_indices + list(range(max(mamba_decode_indices) + 1, max(mamba_decode_indices) + 1 + padding_len))
+                mamba_decode_indices = mamba_decode_indices + \
+                    list(range(max(mamba_decode_indices) + 1, \
+                    max(mamba_decode_indices) + 1 + padding_len))
             mamba_cache_decode_indices = torch.tensor(mamba_decode_indices,
                                                       dtype=torch.long,
                                                       device='cpu')
@@ -3067,6 +3076,31 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _inc_preprocess(self):
         self._remove_duplicate_submodules()
 
+    def add_fla_dummy_data(self, inputs) -> None:
+        assert self._is_fla_model
+        conv_dim = self.vllm_config.model_config.hf_config.linear_conv_kernel_dim
+        bs, seq_len = inputs.input_tokens.shape
+        mamba_cache_indices = list(range(bs))
+        mamba_cache_indices = torch.tensor(mamba_cache_indices,
+                                           dtype=torch.long,
+                                           device='cpu')
+        if inputs.attn_metadata.is_prompt:
+            conv_state_indices = []
+            for i in range(bs):
+                conv_state_indices += list(range(i * seq_len, i * seq_len + conv_dim - 1))
+            conv_state_indices = torch.tensor(conv_state_indices,
+                                              dtype=torch.long,
+                                              device='cpu')
+            conv_state_indices = self.move_to_device(conv_state_indices)
+            mamba_cache_prefill_indices = \
+                self.move_to_device(mamba_cache_indices)
+            inputs.attn_metadata.conv_state_indices = conv_state_indices
+            inputs.attn_metadata.mamba_cache_prefill_indices = mamba_cache_prefill_indices
+        else:
+            mamba_cache_decode_indices = \
+                mamba_cache_indices.to(self.device, non_blocking=True)
+            inputs.attn_metadata.mamba_cache_decode_indices = mamba_cache_decode_indices
+
     def warmup_scenario(self,
                         batch_size,
                         seq_len,
@@ -3156,6 +3190,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         {"input_tokens": inputs.input_tokens}, src=0)
                 else:
                     broadcast_tensor_dict(src=0)
+            if self._is_fla_model:
+                self.add_fla_dummy_data(inputs)
             if is_prompt or self.is_single_step:
                 intermediate_tensors = None
                 if not get_pp_group().is_first_rank:
@@ -3968,7 +4004,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            use_graphs = False if is_prompt else True
+            if self._is_fla_model:
+                use_graphs = False if is_prompt else True
+            else:
+                use_graphs = self._use_graphs(batch_size_padded, seq_len)
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None
@@ -4019,7 +4058,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 "intermediate_tensors": intermediate_tensors,
                 "lora_mask": lora_mask,
                 "virtual_engine": model_input.virtual_engine,
-                "is_dummy_run": is_dummy_run,
                 **(model_input.multi_modal_kwargs or {}),
             }
             if previous_hidden_states is not None:

@@ -544,13 +544,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        is_dummy_run = None,
     ):
         forward_context = get_forward_context()
         attn_metadata: AttentionMetadata = forward_context.attn_metadata
-
-        if is_dummy_run:
-            return hidden_states
 
         conv_state = self.conv_state
         ssm_state = self.ssm_state
@@ -866,7 +862,6 @@ class Qwen3NextDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
         positions: torch.Tensor = None,
-        is_dummy_run = None,
         **kwargs: object,
     ):
         if residual is None:
@@ -879,7 +874,6 @@ class Qwen3NextDecoderLayer(nn.Module):
         if self.layer_type == "linear_attention":
             self_attention_output = self.linear_attn(
                 hidden_states=hidden_states,
-                is_dummy_run=is_dummy_run,
             )
         elif self.layer_type == "full_attention":
             self_attention_output = self.self_attn(
@@ -972,7 +966,6 @@ class Qwen3NextModel(nn.Module):
         positions: torch.Tensor,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
-        is_dummy_run = None,
     ) -> torch.Tensor:
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
@@ -990,7 +983,6 @@ class Qwen3NextModel(nn.Module):
                 hidden_states=hidden_states,
                 residual=residual,
                 positions=positions,
-                is_dummy_run=is_dummy_run
             )
 
         if not get_pp_group().is_last_rank:
@@ -1206,10 +1198,8 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ):
-        is_dummy_run = kwargs.get('is_dummy_run')
-
         hidden_states = self.model(input_ids, positions, intermediate_tensors,
-                inputs_embeds, is_dummy_run)
+                inputs_embeds)
 
         return hidden_states
 
