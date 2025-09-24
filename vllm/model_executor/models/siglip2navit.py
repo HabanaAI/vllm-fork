@@ -572,7 +572,8 @@ class Siglip2Encoder(nn.Module):
         print('emb:',emb.shape)
         position_embeddings = (emb.cos(), emb.sin())
         print('position_embeddings:',position_embeddings)
-        print(position_embeddings.flatten()[:10])
+        print(position_embeddings[0].flatten()[:10])
+        print(position_embeddings[1].flatten()[:10])
 
         print('grid_thws', grid_thws)
         print(grid_thws.shape, grid_thws.dtype, grid_thws.device)
