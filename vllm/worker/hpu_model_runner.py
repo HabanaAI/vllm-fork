@@ -1716,7 +1716,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_positions.append(list(range(context_len, seq_len)))
 
             # TODO: if seq_len < conv_kernel_dim, padding token should be masked in the prompt stage
-            if self._is_fla_model:
+            if self._is_fla_model():
                 conv_state_indices_list.append(list(range(seq_len + 1 - \
                     self.vllm_config.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
 
@@ -1902,7 +1902,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
-        if self._is_fla_model:
+        if self._is_fla_model():
             input_stride = input_tokens_tensor.size(-1)
             conv_state_indices = conv_state_indices_list[0]
             for idx in range(1, len(conv_state_indices_list)):
@@ -1986,7 +1986,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             encoder_seq_lens_tensor = self.move_to_device(
                 encoder_seq_lens_tensor)
 
-        if self._is_fla_model:
+        if self._is_fla_model():
             conv_state_indices = self.move_to_device(conv_state_indices)
         else:
             conv_state_indices = None
@@ -3077,7 +3077,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._remove_duplicate_submodules()
 
     def add_fla_dummy_data(self, inputs) -> None:
-        assert self._is_fla_model
+        assert self._is_fla_model()
         conv_dim = self.vllm_config.model_config.hf_config.linear_conv_kernel_dim
         bs, seq_len = inputs.input_tokens.shape
         mamba_cache_indices = list(range(bs))
@@ -3190,7 +3190,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         {"input_tokens": inputs.input_tokens}, src=0)
                 else:
                     broadcast_tensor_dict(src=0)
-            if self._is_fla_model:
+            if self._is_fla_model():
                 self.add_fla_dummy_data(inputs)
             if is_prompt or self.is_single_step:
                 intermediate_tensors = None
@@ -4005,7 +4005,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     ctx_blocks = seq_len
                 seq_len = 1
 
-            if self._is_fla_model:
+            if self._is_fla_model():
                 use_graphs = False if is_prompt else True
             else:
                 use_graphs = self._use_graphs(batch_size, seq_len)
