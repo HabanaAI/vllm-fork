@@ -587,7 +587,7 @@ class Siglip2Encoder(nn.Module):
 
         # 1) 拆出 T 和 H*W，并确保是整型
         T  = gt[:, 0]
-        HW = (gt[:, 1].to(dtype=torch.int32) * gt[:, 2].to(dtype=torch.int32))
+        HW = (gt[:, 1].to(dtype=torch.int64) * gt[:, 2].to(dtype=torch.int64))
 
         print("DEBUG T:", T)          # 期望: tensor([1])
         print("DEBUG HW:", HW)        # 期望: tensor([12312])
@@ -597,7 +597,7 @@ class Siglip2Encoder(nn.Module):
         print("DEBUG after:", after)  # 期望: tensor([12312])
 
         # 3) cumsum（回到原设备、按 int32 累加）
-        cu_seqlens = after.to(gt.device).cumsum(dim=0, dtype=torch.int32)
+        cu_seqlens = after.to(gt.device).cumsum(dim=0, dtype=torch.int64)
         print("DEBUG cu_seqlens:", cu_seqlens)  # 期望: tensor([12312], dtype=torch.int32)
 
         # cu_seqlens = torch.tensor([12312], dtype=torch.int32)
