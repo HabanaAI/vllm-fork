@@ -582,7 +582,7 @@ class Siglip2Encoder(nn.Module):
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
 
-        cu_seqlens = torch.tensor([12312], dtype=torch.int32)
+        # cu_seqlens = torch.tensor([12312], dtype=torch.int32)
         
         print('cu_seqlens:', cu_seqlens)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
