@@ -610,9 +610,21 @@ class Siglip2Encoder(nn.Module):
         print('cu_seqlens:', cu_seqlens)
         # cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
 
-        cu64 = cu_seqlens.to(torch.int64)
-        cu64 = torch.nn.functional.pad(cu64, (1, 0), value=0)
-        cu_seqlens = cu64.to(torch.int32)
+        # cu_seqlens 此时是 HPU:int32，形如 tensor([12312], device='hpu:0', dtype=torch.int32)
+        import habana_frameworks.torch.core as htcore
+        
+        # 1) 先把最后一个长度同步到 Host，变成 Python int（彻底绕开 HPU 上的拼接/填充）
+        last = int(cu_seqlens[-1].detach().cpu().item())
+
+        # 2) 在 HPU 上用这个标量重新构造目标张量
+        cu_seqlens = torch.tensor([0, last], dtype=torch.int32, device=cu_seqlens.device)
+
+        # 3) 立刻物化，避免 lazy/graph 把它当常量路径给“优化没了”
+        htcore.mark_step()
+
+        # 4) 再做一次 Host 侧校验（可留着 debug）
+        print("padded:", cu_seqlens.detach().cpu().tolist())  # 期望 [0, 12312]
+
         print('cu_seqlens_after_pad:', cu_seqlens)
 
         reverse_indices = torch.argsort(window_index)
