@@ -102,7 +102,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
     ) -> None:
-        print(" < hlin hlin hlin > send_kv_caches_and_hidden_states")
         input_tokens_tensor = model_input.input_tokens
         seq_lens = model_input.attn_metadata.seq_lens
         slot_mapping_flat = model_input.attn_metadata.slot_mapping.flatten()
@@ -152,7 +151,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         kv_caches: List[torch.Tensor]
     ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForGPUWithSamplingMetadata"]:
-        print(" < hlin hlin hlin > recv_kv_caches_and_hidden_states")
         bypass_model_exec = True
         input_tokens_tensor = model_input.input_tokens
         seq_lens = model_input.attn_metadata.seq_lens
@@ -249,10 +247,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         assert len(input_tokens_list) == len(kv_caches_send_list)
         assert len(input_tokens_list) == len(hidden_states_list)
         for idx, input_tokens in enumerate(input_tokens_list):
-            if len(input_tokens) == 1:  # we think this is a padding sequence, so we skip it
-                print(" < tony tony tony > len(input_tokens) == 1")
-                continue
-            print(" input_tokens=", input_tokens)
             store_key_prefix = self.tensor_hash(input_tokens)
             store_kvcache_key = f"{store_key_prefix}_{self.rank}"
             store_hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
