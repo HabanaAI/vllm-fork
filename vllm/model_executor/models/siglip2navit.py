@@ -610,13 +610,9 @@ class Siglip2Encoder(nn.Module):
         print('cu_seqlens:', cu_seqlens)
         # cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
 
-        cu_seqlens = torch.cat(
-            [torch.zeros(1, dtype=cu_seqlens.dtype, device=cu_seqlens.device),
-            cu_seqlens],
-            dim=0,
-        )
-        # 期望: tensor([    0, 12312], device='hpu:0', dtype=torch.int32)
-
+        cu64 = cu_seqlens.to(torch.int64)
+        cu64 = torch.nn.functional.pad(cu64, (1, 0), value=0)
+        cu_seqlens = cu64.to(torch.int32)
         print('cu_seqlens_after_pad:', cu_seqlens)
 
         reverse_indices = torch.argsort(window_index)
