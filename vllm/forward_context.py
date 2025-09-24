@@ -127,7 +127,7 @@ def set_forward_context(attn_metadata: Any,
             import os
             if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('true', '1'):
                 if hidden_states_dtype == torch.float8_e4m3fn:
-                    per_rank_bytes = request_batch_size * padded_seq_length * hidden_size + batchsize * num_experts_per_tok * 2 * 2
+                    per_rank_bytes = request_batch_size * padded_seq_length * hidden_size + batchsize * num_experts_per_tok * (4 + 2)
                 else:
                     per_rank_bytes = request_batch_size * padded_seq_length * hidden_size * 2 + batchsize * num_experts_per_tok * (4 + 2)
 
