@@ -586,9 +586,10 @@ class Siglip2Encoder(nn.Module):
         gt = grid_thws
 
         # 1) 拆列，转 int64 + CPU，规避溢出和设备坑
-        T_cpu  = gt[:, 0].to(dtype=torch.int64, device="cpu").contiguous()
-        HW_cpu = (gt[:, 1].to(torch.int64, device="cpu") *
-                gt[:, 2].to(torch.int64, device="cpu")).contiguous()
+        T_cpu  = gt[:, 0].to('cpu').to(torch.int64).contiguous()
+        x1 = gt[:, 1].to('cpu').to(torch.int64).contiguous()
+        x2 = gt[:, 2].to('cpu').to(torch.int64).contiguous()
+        HW_cpu = (x1 * x2)
 
         print("DEBUG dtype:", gt.dtype, "device:", gt.device)
         print("DEBUG T:", T_cpu)
