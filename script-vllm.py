@@ -79,8 +79,8 @@ def main():
             # Multimodal knobs (commonly safe defaults)
             # You may tune/extend according to your repo version:
             max_model_len=4096,       # ← 降到 4k/8k，先稳住
-#           block_size=8,             # ← OOM/碎片还在就开小一点
-            max_num_seqs=2,
+            block_size=8,             # ← OOM/碎片还在就开小一点
+            max_num_seqs=1,
             limit_mm_per_prompt={"image": 1},    # allow 1 image per prompt
             disable_mm_preprocessor_cache=False  # memoize preprocessing for repeated runs
     )
