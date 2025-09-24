@@ -73,12 +73,12 @@ def main():
             model=MODEL_PATH,
             # tokenizer defaults to the same repo unless you override it
             trust_remote_code=True,          # Ovis2.5 custom processors
-            dtype="float32",                # Gaudi-friendly dtype
+            dtype="float64",                # Gaudi-friendly dtype
             device=device_choice,            # force HPU if available
             tensor_parallel_size=1,          # adjust if you have multiple HPUs and shard the model
             # Multimodal knobs (commonly safe defaults)
             # You may tune/extend according to your repo version:
-            max_model_len=4096,       # ← 降到 4k/8k，先稳住
+            max_model_len=2048,       # ← 降到 4k/8k，先稳住
             block_size=8,             # ← OOM/碎片还在就开小一点
             max_num_seqs=1,
             limit_mm_per_prompt={"image": 1},    # allow 1 image per prompt

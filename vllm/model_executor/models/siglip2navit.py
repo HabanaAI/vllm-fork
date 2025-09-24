@@ -100,6 +100,7 @@ class Siglip2VisionEmbeddings(nn.Module):
         
         print('grid shape in siglip:', grid_thws.shape, grid_thws)
         print('pixel shape in siglip:', pixel_values.shape, pixel_values)
+        print(pixel_values.flatten()[:10])
         
         target_dtype = self.patch_embedding.weight.dtype
         if isinstance(self.patch_embedding, LinearBase):
@@ -113,6 +114,7 @@ class Siglip2VisionEmbeddings(nn.Module):
                 pixel_values.to(dtype=target_dtype))
             patch_embeds = patch_embeds.reshape(-1, self.embed_dim)
         print('patch_embeds:', patch_embeds.shape, patch_embeds)
+        print(patch_embeds.flatten()[:10])
 
         if self.preserve_original_pe:
             assert grid_thws is not None
@@ -136,6 +138,7 @@ class Siglip2VisionEmbeddings(nn.Module):
                 pos_embed_new[cnt:cnt + volume] = pe
                 cnt += volume
             print('pos_embed:', pos_embed_new.shape, pos_embed_new)
+            print(pos_embed_new.flatten()[:10])
             patch_embeds = patch_embeds + pos_embed_new
 
         return patch_embeds
@@ -536,6 +539,7 @@ class Siglip2Encoder(nn.Module):
         """
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
         print('rotary_pos_emb',rotary_pos_emb)
+        print(rotary_pos_emb.flatten()[:10])
         
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
         print('window:',window_index)
@@ -549,6 +553,7 @@ class Siglip2Encoder(nn.Module):
 
         seq_len, _ = inputs_embeds.size()
         print('inputs_embeds:', inputs_embeds, inputs_embeds.shape)
+        print(inputs_embeds.flatten()[:10])
         inputs_embeds = inputs_embeds.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         print('merge_unit:', self.spatial_merge_unit, self.spatial_merge_unit)
@@ -567,6 +572,7 @@ class Siglip2Encoder(nn.Module):
         print('emb:',emb.shape)
         position_embeddings = (emb.cos(), emb.sin())
         print('position_embeddings:',position_embeddings)
+        print(position_embeddings.flatten()[:10])
 
         print('grid_thws', grid_thws)
         print(grid_thws.shape, grid_thws.dtype, grid_thws.device)
@@ -674,12 +680,15 @@ class Siglip2VisionTransformer(nn.Module):
         
         hidden_states = self.embeddings(pixel_values, grid_thws)
         print('hidden:',hidden_states.shape, hidden_states)
+        print(hidden_states.flatten()[:10])
 
         last_hidden_state = self.encoder(hidden_states, grid_thws)
         print('last_hidden:',last_hidden_state.shape, last_hidden_state)
+        print(last_hidden_state.flatten()[:10])
         
         last_hidden_state = self.post_layernorm(last_hidden_state)
         print('last_hidden_state:',last_hidden_state.shape, last_hidden_state)
+        print(last_hidden_state.flatten()[:10])
 
         return last_hidden_state
 
