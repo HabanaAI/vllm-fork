@@ -33,7 +33,7 @@ model_name="Maverick"
  
 mkdir -p benchmark_logs
 
-QUANT_CONFIG="/vllm-fork/llama4-scripts/suresh-quant/maxabs_quant_g3.json" \
+QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json" \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
@@ -66,6 +66,7 @@ vllm serve ${model} \
     --kv-cache-dtype fp8_inc \
     --gpu_memory_utilization ${gpu_utils} \
     --quantization inc \
+    --enable-expert-parallel \
     --override-generation-config='{"attn_temperature_tuning": true}' \
     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
 pid=$(($!-1))
