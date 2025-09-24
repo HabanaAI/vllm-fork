@@ -10,7 +10,6 @@ import os
 import signal
 import subprocess
 import re
-import threading
 import time
 import dateutil.parser as date_parser
 from datetime import datetime, timedelta
@@ -19,37 +18,10 @@ import optuna
 from optuna.storages import RDBStorage
 from functools import partial
 
-
-class LogPipe(threading.Thread):
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.daemon = False
-        self.fdRead, self.fdWrite = os.pipe()
-        self.pipeReader = os.fdopen(self.fdRead)
-        self.start()
-        self.end = False
-
-    def fileno(self):
-        """Return the write file descriptor of the pipe
-        """
-        return self.fdWrite
-
-    def run(self):
-        """Run the thread, logging everything.
-        """
-        for line in iter(self.pipeReader.readline, b""):
-            val = line.strip("\n")
-            if val:
-                print(val, flush=True)
-            if self.end:
-                break
-        self.pipeReader.close()
-
-    def close(self):
-        """Close the write end of the pipe.
-        """
-        os.close(self.fdWrite)
-        self.end = True
+from tune_benchmark_common import LogPipe
+from tune_benchmark_common import retrieve_block_size_value
+from tune_benchmark_common import update_cmd_args
+from tune_benchmark_common import parse_log_for_warmup_time
 
 
 def parse_client_log(log_file):
@@ -76,40 +48,6 @@ def server_started(server_log_file):
     return False
 
 
-def parse_server_log(log_file):
-    with open(log_file) as f:
-        lines = f.readlines()
-
-    warmup_start = None
-    warmup_end = None
-    for line in lines:
-        index_start = line.find("INFO")
-        index_end = line.find("[Warmup][Graph/prompt]")
-        if not warmup_start and index_start != -1 and index_end != -1 and index_start < index_end:
-            warmup_start = line[index_start:index_end]
-            break
-    for line in reversed(lines):
-        index_start = line.find("INFO")
-        index_end = line.find("[Warmup][Graph/decode]")
-        if not warmup_end and index_start != -1 and index_end != -1 and index_start < index_end:
-            warmup_end = line[index_start:index_end]
-            break
-
-    print("warmup_start: ", warmup_start)
-    print("warmup_end: ", warmup_end)
-    if warmup_start and warmup_end:
-        try:
-            start_time = date_parser.parse(warmup_start, fuzzy=True)
-            end_time = date_parser.parse(warmup_end, fuzzy=True)
-            warmup_total_sec = (end_time - start_time).total_seconds()
-            return warmup_total_sec
-        except ValueError as e:
-            print(e)
-            return float("inf")
-    else:
-        return float("inf")
-
-
 def set_trial_value(prompt_bs_bucket_min, prompt_bs_bucket_step, prompt_bs_bucket_max,
                     prompt_seq_bucket_min, prompt_seq_bucket_step, prompt_seq_bucket_max,
                     decode_bs_bucket_min, decode_bs_bucket_step, decode_bs_bucket_max,
@@ -118,32 +56,32 @@ def set_trial_value(prompt_bs_bucket_min, prompt_bs_bucket_step, prompt_bs_bucke
     if print_only:
         # prompt related configurations
         if prompt_bs_bucket_min:
-            print(f"  VLLM_PROMPT_BS_BUCKET_MIN={prompt_bs_bucket_min}")
+            print(f"\t VLLM_PROMPT_BS_BUCKET_MIN={prompt_bs_bucket_min}")
         if prompt_bs_bucket_step:
-            print("  VLLM_PROMPT_BS_BUCKET_STEP=" + str(prompt_bs_bucket_step))
+            print(f"\t VLLM_PROMPT_BS_BUCKET_STEP={prompt_bs_bucket_step}")
         if prompt_bs_bucket_max:
-            print("  VLLM_PROMPT_BS_BUCKET_MAX=" + str(prompt_bs_bucket_max))
+            print(f"\t VLLM_PROMPT_BS_BUCKET_MAX={prompt_bs_bucket_max}")
         if prompt_seq_bucket_min:
-            print("  VLLM_PROMPT_SEQ_BUCKET_MIN=" + str(prompt_seq_bucket_min))
+            print(f"\t VLLM_PROMPT_SEQ_BUCKET_MIN={prompt_seq_bucket_min}")
         if prompt_seq_bucket_step:
-            print("  VLLM_PROMPT_SEQ_BUCKET_STEP=" + str(prompt_seq_bucket_step))
+            print(f"\t VLLM_PROMPT_SEQ_BUCKET_STEP={prompt_seq_bucket_step}")
         if prompt_seq_bucket_max:
-            print("  VLLM_PROMPT_SEQ_BUCKET_MAX=" + str(prompt_seq_bucket_max))
+            print(f"\t VLLM_PROMPT_SEQ_BUCKET_MAX={prompt_seq_bucket_max}")
 
         # decode related configurations
         if decode_bs_bucket_min:
-            print("  VLLM_DECODE_BS_BUCKET_MIN=" + str(decode_bs_bucket_min))
+            print(f"\t VLLM_DECODE_BS_BUCKET_MIN={decode_bs_bucket_min}")
         if decode_bs_bucket_step:
-            print("  VLLM_DECODE_BS_BUCKET_STEP=" + str(decode_bs_bucket_step))
+            print(f"\t VLLM_DECODE_BS_BUCKET_STEP={decode_bs_bucket_step}")
         if decode_bs_bucket_max:
-            print("  VLLM_DECODE_BS_BUCKET_MAX=" + str(decode_bs_bucket_max))
+            print(f"\t VLLM_DECODE_BS_BUCKET_MAX={decode_bs_bucket_max}")
         if decode_block_bucket_min:
-            print("  VLLM_DECODE_BLOCK_BUCKET_MIN=" + str(decode_block_bucket_min))
+            print(f"\t VLLM_DECODE_BLOCK_BUCKET_MIN={decode_block_bucket_min}")
         if decode_block_bucket_step:
-            print("  VLLM_DECODE_BLOCK_BUCKET_STEP=" + str(decode_block_bucket_step))
+            print(f"\t VLLM_DECODE_BLOCK_BUCKET_STEP={decode_block_bucket_step}")
         if decode_block_bucket_max:
-            print("  VLLM_DECODE_BLOCK_BUCKET_MAX=" + str(decode_block_bucket_max))
-        print("  Block_Size=", str(block_size))
+            print(f"\t VLLM_DECODE_BLOCK_BUCKET_MAX={decode_block_bucket_max}")
+        print(f"\t Block_Size={block_size}")
     else:
         # prompt related configurations
         if prompt_bs_bucket_min:
@@ -272,17 +210,14 @@ def objective(trial, args):
     else:
         decode_block_bucket_max = None
 
+    server_cmd_list = args.vllm_server_cmd.split()
     # currently only fixed block size: 128, 256 are supported
     if args.tune_block_size:
         block_size = trial.suggest_int('block_size', 128, 256, step=128)
+        server_cmd_list = update_cmd_args(server_cmd_list, "--block-size", str(block_size))
     else:
-        if "--block-size" in benchmark_cmd_list:
-            index = benchmark_cmd_list.index("--block-size")
-            block_size = int(benchmark_cmd_list[index + 1])
-        else:
-            block_size = 128  # default block size
+        block_size = retrieve_block_size_value(server_cmd_list)
         trial.set_user_attr("block_size", block_size)
-
 
     set_trial_value(prompt_bs_bucket_min, prompt_bs_bucket_step, prompt_bs_bucket_max,
                     prompt_seq_bucket_min, prompt_seq_bucket_step, prompt_seq_bucket_max,
@@ -290,10 +225,7 @@ def objective(trial, args):
                     decode_block_bucket_min, decode_block_bucket_step, decode_block_bucket_max,
                     block_size)
 
-    vllm_server_cmd = args.vllm_server_cmd
-    if not '--block-size' in vllm_server_cmd:
-        vllm_server_cmd = vllm_server_cmd + " --block-size " + str(block_size)
-
+    vllm_server_cmd = " ".join(server_cmd_list)
     server_log_file = f"tuning_online_benchmark_server_{trial.number}.log"
     vllm_server_cmd = vllm_server_cmd + " 2>&1 | tee " + server_log_file
     print(vllm_server_cmd)
@@ -314,12 +246,12 @@ def objective(trial, args):
         # Sleep for server process to start and begin logging
         time.sleep(30)
         while server_process and not server_started(server_log_file) and \
-            (datetime.now() - server_start_time).total_seconds() < args.time_out:
+                (datetime.now() - server_start_time).total_seconds() < args.time_out:
             # Sleep for 10 seconds before checking again
             time.sleep(10)
 
         if server_started(server_log_file):
-            warmup_time = parse_server_log(server_log_file)
+            warmup_time = parse_log_for_warmup_time(server_log_file)
             # start the client benchmark
             client_process = subprocess.Popen(benchmark_serving_cmd, shell=True,
                                               preexec_fn=os.setsid)
@@ -327,7 +259,6 @@ def objective(trial, args):
             throughput = parse_client_log(client_log_file)
         elif (datetime.now() - server_start_time).total_seconds() >= args.time_out:
             raise TimeoutError
-
     except TimeoutError:
         print(f"Command {vllm_server_cmd} timed out after {args.time_out} seconds.")
     except subprocess.CalledProcessError as e:
@@ -554,8 +485,8 @@ if __name__ == "__main__":
     print("Number of finished trials: ", len(study.trials))
 
     for i, best_trial in enumerate(study.best_trials):
-        print("The {}-th Pareto solution was found at Trial#{}.".format(i, best_trial.number))
-        print("  Params: {}".format(best_trial.params))
+        print(f"The {i}-th Pareto solution was found at Trial# {best_trial.number}.")
+        print(f"\t Params: {best_trial.params}")
         set_trial_value(best_trial.params.get("prompt_bs_bucket_min"), best_trial.params.get("prompt_bs_bucket_step"),
                         best_trial.params.get("prompt_bs_bucket_max"), best_trial.params.get("prompt_seq_bucket_min"),
                         best_trial.params.get("prompt_seq_bucket_step"), best_trial.params.get("prompt_seq_bucket_max"),
@@ -565,6 +496,6 @@ if __name__ == "__main__":
                         best_trial.params.get("decode_block_bucket_max"),
                         best_trial.params.get("block_size"), print_only=True)
         best_values = best_trial.values
-        print("  [Throughput(tokens/s), Warmup-Time(sec)]: {}".format(best_values))
+        print(f"\t [Throughput(tokens/s), Warmup-Time(sec)]: {best_values}")
 
     exit(0)

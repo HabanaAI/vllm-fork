@@ -12,53 +12,24 @@ import os
 import signal
 import subprocess
 import re
-import threading
 import dateutil.parser as date_parser
 
 import optuna
 from optuna.storages import RDBStorage
 from functools import partial
 
-
-class LogPipe(threading.Thread):
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.daemon = False
-        self.fdRead, self.fdWrite = os.pipe()
-        self.pipeReader = os.fdopen(self.fdRead)
-        self.start()
-        self.end = False
-
-    def fileno(self):
-        """Return the write file descriptor of the pipe
-        """
-        return self.fdWrite
-
-    def run(self):
-        """Run the thread, logging everything.
-        """
-        for line in iter(self.pipeReader.readline, b""):
-            val = line.strip("\n")
-            if val:
-                print(val)
-            if self.end:
-                break
-        self.pipeReader.close()
-
-    def close(self):
-        """Close the write end of the pipe.
-        """
-        os.close(self.fdWrite)
-        self.end = True
+from tune_benchmark_common import LogPipe
+from tune_benchmark_common import retrieve_block_size_value
+from tune_benchmark_common import update_cmd_args
+from tune_benchmark_common import parse_log_for_warmup_time
 
 
 def parse_log(log_file):
-    with open(log_file) as f:
-        lines = f.readlines()
-
     throughput = 0
-    warmup_time = calculate_warmup_time(lines)
+    warmup_time = parse_log_for_warmup_time(log_file)
     if warmup_time < float("inf"):
+        with open(log_file) as f:
+            lines = f.readlines()
         for line in reversed(lines):
             if line.startswith("Throughput: "):
                 pattern = r"(\d+(\.?\d+)?)\s*" + re.escape("total tokens/s")
@@ -67,38 +38,6 @@ def parse_log(log_file):
                     throughput = float(match_throughput.group(1))
                 break
     return throughput, warmup_time
-
-
-def calculate_warmup_time(lines):
-    warmup_start = None
-    warmup_end = None
-
-    for line in lines:
-        index_start = line.find("INFO")
-        index_end = line.find("[Warmup][Graph/prompt]")
-        if not warmup_start and index_start != -1 and index_end != -1 and index_start < index_end:
-            warmup_start = line[index_start:index_end]
-            break
-    for line in reversed(lines):
-        index_start = line.find("INFO")
-        index_end = line.find("[Warmup][Graph/decode]")
-        if not warmup_end and index_start != -1 and index_end != -1 and index_start < index_end:
-            warmup_end = line[index_start:index_end]
-            break
-
-    print("warmup_start: ", warmup_start)
-    print("warmup_end: ", warmup_end)
-    if warmup_start and warmup_end:
-        try:
-            start_time = date_parser.parse(warmup_start, fuzzy=True)
-            end_time = date_parser.parse(warmup_end, fuzzy=True)
-            warmup_total_sec = (end_time - start_time).total_seconds()
-            return warmup_total_sec
-        except ValueError as e:
-            print(e)
-            return float("inf")
-    else:
-        return float("inf")
 
 
 def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step,
@@ -111,7 +50,7 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
     last_block = last_block + decode_block_step  # add 1 more step size as buffer
 
     if print_only:
-        # although we don't tune VLLM_PROMPT_BS_BUCKET_MIN, still print out the value here
+        # we don't tune VLLM_PROMPT_BS_BUCKET_MIN, but print out the value here
         print("\t VLLM_PROMPT_BS_BUCKET_MIN=" + str(os.getenv("VLLM_PROMPT_BS_BUCKET_MIN", 1)))  # default:1
         if prompt_bs_bucket_step:
             print(f"\t VLLM_PROMPT_BS_BUCKET_STEP={prompt_bs_bucket_step}")
@@ -143,7 +82,6 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
             os.environ["VLLM_PROMPT_BS_BUCKET_STEP"] = str(prompt_bs_bucket_step)
         if prompt_bs_bucket_max:
             os.environ["VLLM_PROMPT_BS_BUCKET_MAX"] = str(prompt_bs_bucket_max)
-
         os.environ["VLLM_PROMPT_SEQ_BUCKET_MIN"] = str(args.input_len)
         if prompt_seq_step:
             os.environ["VLLM_PROMPT_SEQ_BUCKET_STEP"] = str(prompt_seq_step)
@@ -163,11 +101,7 @@ def objective(trial, args):
     if args.tune_block_size:
         block_size = trial.suggest_int('block_size', 128, 256, step=128)
     else:
-        if "--block-size" in benchmark_cmd_list:
-            index = benchmark_cmd_list.index("--block-size")
-            block_size = int(benchmark_cmd_list[index + 1])
-        else:
-            block_size = 128  # default block size
+        block_size = retrieve_block_size_value(benchmark_cmd_list)
         trial.set_user_attr("block_size", block_size)
 
     if args.prompt_bs_bucket_step_range:
@@ -203,7 +137,6 @@ def objective(trial, args):
                                   args.decode_bs_range[0],
                                   args.decode_bs_range[1],
                                   step=args.decode_bs_range[2])
-    # currently only fixed block size: 128, 256 are supported
     max_num_seqs = max(prompt_bs_bucket_max, decode_bs) if prompt_bs_bucket_max else decode_bs
     trial.set_user_attr("max_num_seqs", max_num_seqs)
     set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max,
@@ -237,16 +170,6 @@ def objective(trial, args):
         logpipe.close()
 
     return throughput, warmup_time
-
-
-def update_cmd_args(benchmark_cmd, cmd_arg, cmd_arg_value):
-    if cmd_arg in benchmark_cmd:  # update cmd_arg value in benchmark_throughput_args
-        index = benchmark_cmd.index(cmd_arg)
-        if index < len(benchmark_cmd) - 1:
-            benchmark_cmd[index + 1] = cmd_arg_value
-    else:
-        benchmark_cmd.extend([cmd_arg, cmd_arg_value])
-    return benchmark_cmd
 
 
 def construct_benchmark_cmd(args, benchmark_cmd_list, max_num_seqs, block_size):
