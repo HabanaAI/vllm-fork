@@ -569,6 +569,7 @@ class Siglip2Encoder(nn.Module):
         print('position_embeddings:',position_embeddings)
 
         print('grid_thws', grid_thws)
+        print(grid_thws.shape, grid_thws.dtype, grid_thws.device)
         # cu_seqlens = torch.repeat_interleave(
         #     grid_thws[:, 1] * grid_thws[:, 2], grid_thws[:, 0]
         # ).cumsum(
@@ -582,17 +583,16 @@ class Siglip2Encoder(nn.Module):
         #     dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         # )
 
-        # 强制在 CPU 上做 repeat_interleave，避免某些设备/后端的坑
         gt = grid_thws  # 你的输入
 
-        # 1) 拆出 T 和 H*W，并确保是整型 & 在 CPU
-        T  = gt[:, 0].to(dtype=torch.int64, device="cpu").contiguous()
-        HW = (gt[:, 1] * gt[:, 2]).to(dtype=torch.int64, device="cpu").contiguous()
+        # 1) 拆出 T 和 H*W，并确保是整型
+        T  = gt[:, 0]
+        HW = (gt[:, 1].to(dtype=torch.int32) * gt[:, 2].to(dtype=torch.int32))
 
         print("DEBUG T:", T)          # 期望: tensor([1])
         print("DEBUG HW:", HW)        # 期望: tensor([12312])
 
-        # 2) repeat_interleave（CPU上）
+        # 2) repeat_interleave
         after = torch.repeat_interleave(HW, T)
         print("DEBUG after:", after)  # 期望: tensor([12312])
 
