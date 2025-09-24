@@ -104,9 +104,6 @@ HfOverrides = Union[dict[str, Any], Callable[[PretrainedConfig],
                                              PretrainedConfig]]
 
 
-ModelDType = Literal["auto", "half", "float16", "bfloat16", "float", "float32"]
-MambaDType = Literal["auto", "float32"]
-
 @runtime_checkable
 class SupportsHash(Protocol):
 
@@ -236,6 +233,7 @@ def is_init_field(cls: ConfigType, name: str) -> bool:
 
 TokenizerMode = Literal["auto", "slow", "mistral", "custom"]
 ModelDType = Literal["auto", "half", "float16", "bfloat16", "float", "float32"]
+MambaDType = Literal["auto", "float32"]
 
 
 @config
