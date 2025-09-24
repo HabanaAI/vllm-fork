@@ -640,7 +640,6 @@ class HpuModelAdapter(torch.nn.Module):
             )
             kwargs['input_ids'] = input_ids
             kwargs['positions'] = positions
-
         kwargs.update({'inputs_embeds': inputs_embeds})
         # done compute the visual tokens and others
         kwargs.pop('pixel_values', None)
@@ -2675,6 +2674,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     lora_request, seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
+        img_args = int(img_args)
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
             img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
@@ -3177,7 +3177,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_buckets = 0
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
-            phase, bs, seq_len, graph = profile.split('_')
+            if len(profile.split('_')) == 5:
+                phase, bs, seq_len, graph, img_args = profile.split('_')
+            else:
+                phase, bs, seq_len, graph = profile.split('_')
+                img_args = None
             is_prompt = phase == 'prompt'
             ctx = 0
             if not is_prompt:
@@ -3187,10 +3191,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
-            if self.is_mm_run():
-                img_args = (int(seq_len) //
-                            self.model.model.config.mm_tokens_per_image
-                            if self.is_mm_optimized else int(seq_len))
             self.warmup_scenario(
                 int(bs),
                 int(seq_len),
