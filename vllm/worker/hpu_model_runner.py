@@ -1115,10 +1115,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 prompt_tokens = prompt_tokens[context_len:]
                 prefix_block_tables.append(computed_block_nums)
             elif self.scheduler_config.chunked_prefill_enabled:
-                if seq_group_metadata.block_tables is not None:
+                if (context_len > 0 and
+                        seq_group_metadata.block_tables is not None):
                     # Prefill has chunked before.
+                    # Consider the context length part of the block table
+                    # NOTE: the context length must be multiple of block size
                     block_table = seq_group_metadata.block_tables[seq_id]
-                    prefix_block_tables.append(block_table)
+                    num_context_blocks = (context_len // self.block_size)
+                    context_blocks = block_table[:num_context_blocks]
+                    prefix_block_tables.append(context_blocks)
                 else:
                     # The first prefill.
                     prefix_block_tables.append([])
@@ -1223,7 +1228,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                  seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if any(context_lens):
-            assert not self.scheduler_config.chunked_prefill_enabled
             # prefix caching
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
@@ -1743,6 +1747,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     and seq_group_metadata.sampling_params.prompt_logprobs \
                         is not None and seq_group_metadata.is_prompt:
                     paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
+
+            if (self.scheduler_config.chunked_prefill_enabled and
+                    sampling_metadata.selected_token_indices.shape[0] != len(
+                    paddings)):
+                # Needs to trim the paddings based on whether it need to sample
+                # for cases such as chunked prefill
+                paddings_trimmed = []
+                for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                    if seq_group_metadata.do_sample:
+                        paddings_trimmed.append(paddings[i])
+                paddings = paddings_trimmed
+                assert (sampling_metadata.selected_token_indices.shape[0]
+                        == len(paddings)), ("Selected token indices are not "
+                                            "the same size with paddings.")
 
             paddings = torch.tensor(
                 paddings_prompt_logprobs
@@ -2916,7 +2934,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         hash_hex = hash_object.hexdigest()
                         return int(hash_hex[:16], 16)
 
-                    cur_time = time.time()
                     attn_metadata = self.model.forward_update_meta_only(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
@@ -2961,7 +2978,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             end_block_idx = start_block_idx + num_blocks
 
                             kv_cache_shape = (61, num_blocks * self.block_size,
-                                              1, k_v_head_size)
+                                              k_v_head_size)
                             if get_tensor_model_parallel_rank() == 0:
                                 current_tokens = input_tokens_tensor_cpu[
                                     idx][:slen]
@@ -3034,7 +3051,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 key_cache_current_layer = \
                                     kv_cache_current_layer[0]
 
-                                key = kv_cache_for_cur_seq[i].squeeze(-2).view(
+                                key = kv_cache_for_cur_seq[i].view(
                                     -1, self.block_size, k_v_head_size)
                                 self.cache_k(key, key_cache_current_layer,
                                              block_indices_tensor, None)
@@ -3059,11 +3076,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             async_recv_kv_caches(model, model_input,
                                                  attn_metadata, kv_caches)
                     else:
+                        cur_time = time.time()
                         hidden_states, bypass_model_exec = \
                             sync_recv_kv_caches(model, model_input,
                                                 attn_metadata, kv_caches)
-                    now = time.time()
-                    logger.info("KV transfer recv time: %s", now - cur_time)
+                        now = time.time()
+                        logger.info("KV recv time: %s", now - cur_time)
 
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
@@ -3090,7 +3108,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # NOTE: the send operation is non-blocking
                 need_send_kv = self.need_send_kv(model_input, kv_caches, warmup_mode)
                 if need_send_kv:
-                    cur_time = time.time()
 
                     def sync_send_kv_caches(hidden_states):
                         get_kv_transfer_group(
@@ -3104,8 +3121,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             hidden_states,
                         )
 
-                    def fetch_kv_to_host(model, model_input, kv_caches,
-                                         hidden_states):
+                    def fetch_kv_to_host_default(model, model_input, kv_caches,
+                                                 hidden_states):
                         input_tokens_tensor_cpu = model_input.input_tokens.to(
                             "cpu"
                         )  # shape: [batch_size, seq_len_padding_to_128]
@@ -3114,7 +3131,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         seq_lens = model_input.attn_metadata.seq_lens
                         start_layer = model.model.start_layer
                         end_layer = model.model.end_layer
-                        num_kv_heads = 1
                         k_v_head_size = 576
                         kv_caches_send_list = []
                         hidden_states_list = []
@@ -3137,7 +3153,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             for layer_id in range(start_layer, end_layer):
                                 kv_cache = kv_caches[layer_id - start_layer]
                                 key_cache = kv_cache[0].reshape(
-                                    -1, num_kv_heads, k_v_head_size)
+                                    -1, k_v_head_size)
 
                                 keys.append(
                                     key_cache.index_select(
@@ -3158,13 +3174,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                     def send_kv(input_tokens_list, kv_caches_send_list,
                                 hidden_states_list):
-                        cur_time = time.time()
                         get_kv_transfer_group(
                         ).send_kv_caches_and_hidden_states_cpu(
                             input_tokens_list, kv_caches_send_list,
                             hidden_states_list)
-                        now = time.time()
-                        logger.info("KV send time: %s", now - cur_time)
+
+                    def fetch_kv_to_host(model, model_input, kv_caches,
+                                         hidden_states):
+                        if self.scheduler_config.chunked_prefill_enabled:
+                            return self.fetch_kv_to_host_chunked(
+                                model, model_input, kv_caches, hidden_states)
+                        else:
+                            return fetch_kv_to_host_default(
+                                model, model_input, kv_caches, hidden_states)
 
                     def async_send_kv_caches(hidden_states):
                         (input_tokens_list,
@@ -3175,6 +3197,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                              kv_caches,
                                              hidden_states,
                                              )
+                        if not input_tokens_list:
+                            return
                         self.pd_executor_pool.submit(
                             send_kv,
                             input_tokens_list,
@@ -3182,13 +3206,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             hidden_states_list,
                         )
 
-                    if self.use_async_kv_transfer_in_pd:
-                        async_send_kv_caches(hidden_states)
-                    else:
-                        sync_send_kv_caches(hidden_states)
-
-                    now = time.time()
-                    logger.info("KV send time: %f", now - cur_time)
+                    if get_world_group().rank == 0:
+                        if self.use_async_kv_transfer_in_pd:
+                            async_send_kv_caches(hidden_states)
+                        else:
+                            cur_time = time.time()
+                            sync_send_kv_caches(hidden_states)
+                            now = time.time()
+                            logger.info("KV send time: %f", now - cur_time)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
@@ -3254,7 +3279,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                 if need_send_kv and self.skip_prefill_sampling:
                     # prefill and skip prefill sampling return dummy output
-                    output = self._delayed_sampler_outputs(model_input)
+                    output = self._dummy_sampler_outputs(model_input)
                 else:
                     with self.profiler.record_event(
                             'internal', ('sample_'
@@ -3442,11 +3467,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_ids = seq_group.seq_ids
             seq_outputs = []
             for seq_id in seq_ids:
-                next_token_id = next_token_ids[batch_idx][0]
+                seq_next_token_ids = next_token_ids[batch_idx]
+                batch_idx += 1
+                if not seq_next_token_ids:
+                    continue
+                next_token_id = seq_next_token_ids[0]
                 seq_outputs.append(
                     SequenceOutput(seq_id, next_token_id,
                                    {next_token_id: zero_logprob}))
-                batch_idx += 1
             sampler_outputs.append(
                 CompletionSequenceGroupOutput(seq_outputs, None))
         return SamplerOutput(sampler_outputs)
@@ -3495,3 +3523,154 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 logger.debug('Skip patching with %s as last token is empty',
                              real_out)
         self.has_patched_prev_output = True
+
+    def get_attn_block_indices(self, attn_metadata):
+        slot_mapping = attn_metadata.slot_mapping.flatten()
+        indices = torch.div(slot_mapping,
+                            self.block_size,
+                            rounding_mode="floor")
+        indices = indices.unflatten(0, (-1, self.block_size))[:, 0]
+        return indices
+
+    @staticmethod
+    def has_kv_to_send(model_input):
+        seq_groups_to_sample = model_input.sampling_metadata.seq_groups
+        if not seq_groups_to_sample:
+            return False
+
+        seq_lens = model_input.attn_metadata.seq_lens
+        for idx, slen in enumerate(seq_lens):
+            if slen == 1:
+                continue
+            # Only at the last chunk, we get full kv cache
+            seq_group_to_sample = seq_groups_to_sample[idx]
+            if not seq_group_to_sample.do_sample:
+                continue
+            # One or more needs to sample which indicates the last chunk
+            return True
+
+        return False
+
+    def fetch_kv_to_host_chunked(self, model, model_input, kv_caches,
+                                 hidden_states):
+        if not self.has_kv_to_send(model_input):
+            return None, None, None
+
+        torch.hpu.synchronize()  # sync here may hurt performance.
+        seq_lens = model_input.attn_metadata.seq_lens
+        start_layer = model.model.start_layer
+        end_layer = model.model.end_layer
+        kv_caches_send_list = []
+        hidden_states_list = []
+        input_tokens_list = []
+        htorch.core.mark_step()
+
+        seq_groups_to_sample = model_input.sampling_metadata.seq_groups
+        attn_metadata = model_input.attn_metadata
+        # Need consider the context lens for chunked prefill
+        context_lens_tensor = model_input.attn_metadata.context_lens_tensor
+        context_lens = context_lens_tensor.cpu().tolist()
+
+        # For sequence not do sample, hidden states is missing
+        hidden_states_idx = 0
+
+        # Use block indices for current query
+        block_indices = self.get_attn_block_indices(attn_metadata)
+        max_query_blocks = (attn_metadata.slot_mapping.size(1) +
+                            self.block_size - 1) // self.block_size
+        start_query_block = 0
+
+        # Handle the block list for context (chunked prefill)
+        block_list = attn_metadata.block_list
+        max_context_blocks = (block_list.size(-1) //
+                              len(seq_lens) if block_list is not None else 0)
+        start_context_block = 0
+
+        htorch.core.mark_step()
+        for idx, slen in enumerate(seq_lens):
+            if slen == 1:
+                hidden_states_idx += 1
+                start_query_block += max_query_blocks
+                start_context_block += max_context_blocks
+                continue
+
+            # Only at the last chunk, we get full kv cache
+            seq_group_to_sample = seq_groups_to_sample[idx]
+            if not seq_group_to_sample.do_sample:
+                # If it doesn't sample, the hidden states is
+                # not present, hidden_states_idx is not
+                # incremented
+                start_query_block += max_query_blocks
+                start_context_block += max_context_blocks
+                continue
+
+            context_len = context_lens[idx]
+            query_len = slen - context_len
+
+            # get the full prompt tokens from sampling meta
+            # instead of input tokens considering if chunked
+            seq_ids = list(seq_group_to_sample.seq_data.keys())
+            assert len(seq_ids) == 1
+            seq_data = seq_group_to_sample.seq_data[seq_ids[0]]
+            current_tokens_cpu = seq_data.get_token_ids()[:slen]
+
+            # ==== graph should start here ======
+
+            # First get the block indices for the current query
+            num_blocks = (query_len + self.block_size - 1) // self.block_size
+            end_query_block = start_query_block + num_blocks
+            block_indices_seq = block_indices[
+                start_query_block:end_query_block]
+            if block_list is not None:
+                # Consider the context blocks
+                # NOTE: context_len must be multiple of block
+                num_context_blocks = context_len // self.block_size
+                end_context_block = start_context_block + num_context_blocks
+                context_blocks = block_list[
+                    start_context_block:end_context_block]
+                block_indices_seq = torch.concat(
+                    (context_blocks, block_indices_seq), dim=0)
+
+            keys = []
+            for layer_id in range(start_layer, end_layer):
+                kv_cache = kv_caches[layer_id - start_layer]
+                key_cache = kv_cache[0]
+                # cache shape for MLA:
+                # (num_blocks, block_size, head_size)
+                key = key_cache.index_select(0, block_indices_seq)
+                # reshape to (1, seq_len, head_size)
+                key = key.reshape(1, -1, key.shape[-1])
+                keys.append(key)
+
+            keys = torch.cat(keys, dim=0)
+            kv_cache_to_sent = keys.cpu()
+            current_hidden_states = hidden_states[hidden_states_idx].unsqueeze(
+                0).cpu()
+
+            # ==== graph should end here ======
+            htorch.core.mark_step()
+            torch.hpu.synchronize()
+
+            kv_caches_send_list.append(kv_cache_to_sent)
+            hidden_states_list.append(current_hidden_states)
+            input_tokens_list.append(current_tokens_cpu)
+
+            hidden_states_idx += 1
+            start_query_block += max_query_blocks
+            start_context_block += max_context_blocks
+
+        return input_tokens_list, kv_caches_send_list, hidden_states_list
+
+    def _dummy_sampler_outputs(self, model_input):
+        if self.scheduler_config.chunked_prefill_enabled:
+            # Some sequence may not need to sample for chunked prefill
+            next_token_ids = [
+                [DUMMY_TOKEN_ID] if seq_group.do_sample else []
+                for seq_group in model_input.sampling_metadata.seq_groups
+            ]
+        else:
+            next_token_ids = [[DUMMY_TOKEN_ID]] * len(
+                model_input.sampling_metadata.seq_groups)
+        sampler_output = self._make_decode_output(
+            next_token_ids, model_input.sampling_metadata.seq_groups)
+        return sampler_output

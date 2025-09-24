@@ -1541,6 +1541,10 @@ class SchedulerConfig:
     # on the remaining max_num_batched_tokens.
     enable_chunked_prefill: bool = False
 
+    # The chunk size for chunked prefill.
+    # If not specified, the remaining max_num_batched_tokens will be allocated
+    prefill_chunk_size: Optional[int] = None
+
     is_multimodal_model: bool = False
 
     # NOTE: The following multimodal encoder budget will be initialized to
@@ -1638,9 +1642,14 @@ class SchedulerConfig:
         self.encoder_cache_size = self.max_num_batched_tokens
 
         if self.enable_chunked_prefill:
-            logger.info(
-                "Chunked prefill is enabled with max_num_batched_tokens=%d.",
-                self.max_num_batched_tokens)
+            if self.prefill_chunk_size:
+                logger.info(
+                    f"Chunked prefill is enabled with prefill_chunk_size="
+                    f"{self.prefill_chunk_size}.")
+            else:
+                logger.info(
+                    f"Chunked prefill is enabled with max_num_batched_tokens="
+                    f"{self.max_num_batched_tokens}.")
 
         self.chunked_prefill_enabled = self.enable_chunked_prefill
         self._verify_args()
@@ -3373,16 +3382,6 @@ class VllmConfig:
             self.compilation_config.level = CompilationLevel.NO_COMPILATION
 
         current_platform.check_and_update_config(self)
-
-        # If MLA is enabled, force disable chunked prefill and prefix caching
-        if self.model_config and self.model_config.use_mla:
-            logger.info("MLA is enabled; forcing chunked prefill and prefix "
-                        "caching to be disabled.")
-            self.scheduler_config.enable_chunked_prefill = False
-            self.scheduler_config.chunked_prefill_enabled = False
-
-            if self.cache_config is not None:
-                self.cache_config.enable_prefix_caching = False
 
         if not self.instance_id:
             self.instance_id = random_uuid()[:5]
