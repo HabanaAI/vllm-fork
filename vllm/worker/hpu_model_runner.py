@@ -1514,8 +1514,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return self.model
 
     def _is_fla_model(self):
-        return hasattr(self.model_config.hf_config,
-                       "linear_conv_kernel_dim")
+        return hasattr(self.model_config.hf_config, "linear_conv_kernel_dim")
 
     def _use_graphs(self, batch_size, seq_len):
         if self.enforce_eager:
