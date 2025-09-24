@@ -385,9 +385,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         self.conv_kernel_size = config.linear_conv_kernel_dim
         self.layer_idx = extract_layer_index(prefix)
-        self.fla_layer_idx = self.layer_idx // config.full_attention_interval * (
-            config.full_attention_interval -
-            1) + self.layer_idx % config.full_attention_interval
+        self.fla_layer_idx = self.layer_idx // config.full_attention_interval *
+            (config.full_attention_interval - 1) +
+            self.layer_idx % config.full_attention_interval
         self.activation = config.hidden_act
         self.act = ACT2FN[config.hidden_act]
         self.layer_norm_epsilon = config.rms_norm_eps
@@ -577,7 +577,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         )
         query, key, value, z, b, a = self.fix_query_key_value_ordering(
             projected_states_qkvz, projected_states_ba)
-        query, key, value = (x.reshape(x.shape[0], x.shape[1], -1) for x in (query, key, value))
+        query, key, value = (x.reshape(x.shape[0], x.shape[1], -1) \
+            for x in (query, key, value))
         mixed_qkv = torch.cat((query, key, value), dim=-1)
 
         mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
@@ -586,8 +587,16 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         if attn_metadata.is_prompt:
             bs, seq_len, qkv_dim = mixed_qkv.shape
             conv_state_indices = attn_metadata.conv_state_indices
-            prefill_conv_state = torch.index_select(mixed_qkv.reshape(-1, qkv_dim), dim=0, index=conv_state_indices).reshape(bs, -1, qkv_dim)
-            conv_state.index_copy_(dim=0, index=mamba_cache_prefill_indices, source=prefill_conv_state)
+            prefill_conv_state = torch.index_select(
+                mixed_qkv.reshape(-1, qkv_dim),
+                dim=0,
+                index=conv_state_indices
+            ).reshape(bs, -1, qkv_dim)
+            conv_state.index_copy_(
+                dim=0,
+                index=mamba_cache_prefill_indices,
+                source=prefill_conv_state
+            )
 
             mixed_qkv_non_spec = F.conv1d(
                 mixed_qkv.transpose(1, 2).contiguous(),
@@ -597,7 +606,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 groups=(self.conv_dim//self.tp_size)
             )
             mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
-            mixed_qkv_non_spec = mixed_qkv_non_spec[:, :, :seq_len].transpose(1, 2)
+            mixed_qkv_non_spec = \
+                mixed_qkv_non_spec[:, :, :seq_len].transpose(1, 2)
 
         else:
             mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
@@ -608,7 +618,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
             )
-            conv_state.index_copy_(0, mamba_cache_decode_indices, cur_conv_state)
+            conv_state.index_copy_(0,
+                                   mamba_cache_decode_indices,
+                                   cur_conv_state)
 
         query, key, value = torch.split(
             mixed_qkv_non_spec,
@@ -619,9 +631,18 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             ],
             dim=-1,
         )
-        query_non_spec = query.reshape(query.shape[0], query.shape[1], -1, self.head_k_dim)
-        key_non_spec = key.reshape(key.shape[0], key.shape[1], -1, self.head_k_dim)
-        value_non_spec = value.reshape(value.shape[0], value.shape[1], -1, self.head_v_dim)
+        query_non_spec = query.reshape(query.shape[0],
+                                       query.shape[1],
+                                       -1,
+                                       self.head_k_dim)
+        key_non_spec = key.reshape(key.shape[0],
+                                   key.shape[1],
+                                   -1,
+                                   self.head_k_dim)
+        value_non_spec = value.reshape(value.shape[0],
+                                       value.shape[1],
+                                       -1,
+                                       self.head_v_dim)
 
         beta = b.sigmoid()
         g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
@@ -642,9 +663,15 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            ssm_state.index_copy_(dim=0, index=mamba_cache_prefill_indices, source=last_recurrent_state)
+            ssm_state.index_copy_(dim=0,
+                                  index=mamba_cache_prefill_indices,
+                                  source=last_recurrent_state)
         else:
-            recurrent_state = torch.index_select(ssm_state, dim=0, index=mamba_cache_decode_indices)
+            recurrent_state = torch.index_select(
+                ssm_state,
+                dim=0,
+                index=mamba_cache_decode_indices,
+            )
             core_attn_out, last_recurrent_state = (
                 torch_recurrent_gated_delta_rule(
                     query_non_spec,
@@ -656,7 +683,11 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            ssm_state.index_copy_(dim=0, index=mamba_cache_decode_indices, source=last_recurrent_state)
+            ssm_state.index_copy_(
+                dim=0,
+                index=mamba_cache_decode_indices,
+                source=last_recurrent_state,
+            )
 
         z_shape_og = z.shape
         # reshape input data into 2D tensor
@@ -664,7 +695,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         z = z.reshape(-1, z.shape[-1])
         core_attn_out = self.norm(core_attn_out, z).to(hidden_states.dtype)
         core_attn_out = core_attn_out.reshape(z_shape_og)
-        core_attn_out = core_attn_out.reshape(core_attn_out.shape[0], core_attn_out.shape[1], -1)
+        core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
+                                              core_attn_out.shape[1],
+                                              -1)
 
         output, _ = self.out_proj(core_attn_out)
         return output
@@ -887,8 +920,7 @@ class Qwen3NextDecoderLayer(nn.Module):
 
         if self.layer_type == "linear_attention":
             self_attention_output = self.linear_attn(
-                hidden_states=hidden_states,
-            )
+                hidden_states=hidden_states, )
         elif self.layer_type == "full_attention":
             self_attention_output = self.self_attn(
                 hidden_states=hidden_states,
@@ -1212,7 +1244,7 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
         **kwargs: object,
     ):
         hidden_states = self.model(input_ids, positions, intermediate_tensors,
-                inputs_embeds)
+                                   inputs_embeds)
 
         return hidden_states
 

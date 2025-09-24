@@ -39,10 +39,10 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, Cohere2Config,
                                              MiniMaxVL01Config, MllamaConfig,
                                              MLPSpeculatorConfig, MPTConfig,
                                              NemotronConfig, NVLM_D_Config,
-                                             OvisConfig, RWConfig,
-                                             SkyworkR1VChatConfig, SolarConfig,
-                                             Telechat2Config, UltravoxConfig,
-                                             Qwen3NextConfig)
+                                             OvisConfig, Qwen3NextConfig,
+                                             RWConfig, SkyworkR1VChatConfig,
+                                             SolarConfig, Telechat2Config,
+                                             UltravoxConfig)
 # yapf: enable
 from vllm.transformers_utils.utils import check_gguf_file
 from vllm.utils import resolve_obj_by_qualname

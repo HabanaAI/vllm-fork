@@ -1316,6 +1316,8 @@ class ModelConfig:
                     "in the hf_config, cannot determine the num of "
                     f"{block_type.value} layers")
 
+            return sum(t == 1 for t in attn_type_list[start:end])
+
     def get_multimodal_config(self) -> "MultiModalConfig":
         """
         Get the multimodal configuration of the model.

@@ -1514,7 +1514,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return self.model
 
     def _is_fla_model(self):
-        return hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim")
+        return hasattr(self.model_config.hf_config,
+                       "linear_conv_kernel_dim")
 
     def _use_graphs(self, batch_size, seq_len):
         if self.enforce_eager:
@@ -1938,7 +1939,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if self._is_fla_model() and len(mamba_prefill_indices) > 0:
             if len(mamba_prefill_indices) < input_tokens_tensor.size(0):
-                padding_len = input_tokens_tensor.size(0) - len(mamba_prefill_indices)
+                padding_len = input_tokens_tensor.size(0) - len(
+                    mamba_prefill_indices)
                 mamba_prefill_indices = mamba_prefill_indices + \
                     list(range(max(mamba_prefill_indices) + 1, \
                     max(mamba_prefill_indices) + 1 + padding_len))
@@ -1994,7 +1996,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             conv_state_indices = None
 
         if mamba_cache_prefill_indices is not None:
-            mamba_cache_prefill_indices = self.move_to_device(mamba_cache_prefill_indices)
+            mamba_cache_prefill_indices = self.move_to_device(
+                mamba_cache_prefill_indices)
 
         token_types_tensor = self.move_to_device(token_types_tensor)
         attn_metadata = self.attn_backend.make_metadata(
@@ -2350,7 +2353,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.mamba_cache_table, total_seq_ids)
             if len(mamba_decode_indices) > 0:
                 if len(mamba_decode_indices) < input_tokens.size(0):
-                    padding_len = input_tokens.size(0) - len(mamba_decode_indices)
+                    padding_len = input_tokens.size(0) - len(
+                        mamba_decode_indices)
                     mamba_decode_indices = mamba_decode_indices + \
                         list(range(max(mamba_decode_indices) + 1, \
                         max(mamba_decode_indices) + 1 + padding_len))
@@ -2571,7 +2575,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_lora_requests,
             decode_slot_mapping,
             decode_lora_ids,
-        ) = self._prepare_decode(decode_reqs, total_seq_ids=seq_ids, align_worker=align_worker)
+        ) = self._prepare_decode(decode_reqs,
+                                 total_seq_ids=seq_ids,
+                                 align_worker=align_worker)
 
         selected_token_indices = None
         if not self.is_pooler:
