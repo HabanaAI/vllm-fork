@@ -10,7 +10,7 @@ from vllm import LLM, SamplingParams
 from vllm.platforms import current_platform
 from vllm.v1.metrics.reader import Counter, Gauge, Histogram, Metric, Vector
 
-MODEL = "facebook/opt-125m"
+MODEL = "/mnt/weka/data/huggingface-models/facebook/opt-125m"
 DTYPE = "half"
 
 
