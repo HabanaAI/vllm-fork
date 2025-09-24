@@ -40,7 +40,7 @@ class LogPipe(threading.Thread):
         for line in iter(self.pipeReader.readline, b""):
             val = line.strip("\n")
             if val:
-                print(val)
+                print(val, flush=True)
             if self.end:
                 break
         self.pipeReader.close()
