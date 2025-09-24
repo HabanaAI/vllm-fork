@@ -38,6 +38,7 @@ mkdir -p benchmark_logs
     #--model ${model} \VLLM_SKIP_WARMUP=true \
 
 QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json" \
+VLLM_EXPONENTIAL_BUCKETING=false \
 PT_HPU_LAZY_MODE=1 \
 VLLM_SKIP_WARMUP=true \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
@@ -54,12 +55,32 @@ HABANA_VISIBLE_DEVICES="ALL" \
 VLLM_EP_SIZE=${ep_size} \
 PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
 PT_HPU_WEIGHT_SHARING=0 \
-vllm serve ${model} \
-  --quantization inc \
-  --kv-cache-dtype fp8_inc \
-  --weights-load-device cpu \
-  --tensor-parallel-size 8 \
-  --max-model-len 131072 2>&1 | tee benchmark_logs/${log_name}_serving.log &
+python3 -m vllm.entrypoints.openai.api_server \
+    --port 18080 \
+    --model ${model} \
+    --tensor-parallel-size ${tp_parrallel} \
+    --max-num-seqs ${bs} \
+    --disable-log-requests \
+    --dtype bfloat16 \
+    --use-v2-block-manager \
+    --num_scheduler_steps ${multi_step} \
+    --max-model-len ${total_len} \
+    --max-num-batched-tokens 131072 \
+    --use-padding-aware-scheduling \
+    --block-size ${block_size} \
+    --gpu_memory_utilization ${gpu_utils} \
+    --enable-expert-parallel \
+    --kv-cache-dtype fp8_inc \
+    --quantization="inc" \
+    --override-generation-config='{"attn_temperature_tuning": true}' \
+    --trust_remote_code  2>&1 | tee benchmark_logs/${log_name}_serving.log &
+# vllm serve ${model} \
+#   --quantization inc \
+#   --kv-cache-dtype fp8_inc \
+#   --weights-load-device cpu \
+#   --tensor-parallel-size 8 \
+#   --enable-expert-parallel \
+#   --max-model-len 131072
 pid=$(($!-1))
 
 # vllm serve ${model} \
