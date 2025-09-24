@@ -27,6 +27,10 @@ export VLLM_DECODE_BS_BUCKET_MAX=64
 export VLLM_DECODE_BLOCK_BUCKET_MIN=20 
 export VLLM_DECODE_BLOCK_BUCKET_STEP=64 
 export VLLM_DECODE_BLOCK_BUCKET_MAX=864 
+export VLLM_SKIP_WARMUP=true
+export VLLM_PROFILER_ENABLED=1
+export VLLM_TORCH_PROFILER_DIR=./profile-internvl
+export HABANA_PROFILE=1
 numactl --cpunodebind=0 --membind=0 \
 python3 -m vllm.entrypoints.openai.api_server --host $HOST --port $PORT \
  --block-size 128 --model  $MODEL --revision 4ab0878ea80e4fbfdb33699086404a249673702c \
