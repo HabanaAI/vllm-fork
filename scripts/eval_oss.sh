@@ -63,3 +63,7 @@ lm-eval --model vllm \
     --tasks ${task_name} \
     --batch_size $batch_size \
     --limit $limit
+
+
+lm-eval --model local-chat-completions --model_args pretrained=/software/users/jaythaku/sglang/code/gpt-oss-20b-BF16,base_url=http://localhost:8080/v1/chat/completions,max_gen_toks=1024,num_concurrent=1 \
+--tasks gsm8k --apply_chat_template  --include_path vllm-fork/gsm8k/  --limit 64 --batch_size 32 

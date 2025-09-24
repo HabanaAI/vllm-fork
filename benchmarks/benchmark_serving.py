@@ -326,6 +326,13 @@ async def benchmark(
         )
     else:
         print("Initial test run completed. Starting main benchmark run...")
+        try:
+            # print out
+            print(f"Prompt: {test_prompt}")
+            print(f"Generated text: {test_output.generated_text}")
+            print(f"test_output: {test_output}")
+        except:
+            print("Failed to print out the generated text.")
 
     if lora_modules:
         # For each input request, choose a LoRA module at random.
