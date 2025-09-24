@@ -8,7 +8,7 @@ database-style KVStore.
 """
 import hashlib
 import time
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import torch
 
@@ -491,6 +491,30 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         return remote_kv, hidden
 
+    def recv_kv_caches_or_hidden_states_cpu(
+            self, prefix: str, is_kv: bool = True) -> Optional[torch.Tensor]:
+        """Receive KV caches or hidden states from the KV store."""
+        if prefix is None:
+            raise ValueError("Prefix cannot be None.")
+
+        if is_kv:
+            load_kvcache_key = f"{prefix}_0"
+            remote_kv = self.kv_store.get_tensor(load_kvcache_key,
+                                                 dtype=self.dtype)
+            if remote_kv is None:
+                logger.warning("KV cache miss for key: %s", load_kvcache_key)
+            return remote_kv
+        else:
+            # hidden_states always use bf16.
+            load_hidden_key = f"{prefix}_hidden_0"
+            hidden = self.kv_store.get_tensor(load_hidden_key)
+
+            if hidden is None:
+                # didn't find any match.
+                logger.warning("Hidden states cache miss for key: %s",
+                               load_hidden_key)
+            return hidden
+
     def _wait_for_key(self, key, timeout_in_seconds=None):
         if timeout_in_seconds is None:
             # default to 10 seconds
@@ -501,6 +525,9 @@ class MooncakeStoreConnector(KVConnectorBase):
                 return False
             time.sleep(0.01)
         return True
+
+    def is_key_exist(self, prefix: str) -> bool:
+        return self.kv_store.is_exist(prefix)
 
     @staticmethod
     def tensor_hash(tensor: torch.Tensor) -> int:
