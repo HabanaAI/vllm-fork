@@ -410,7 +410,7 @@ if __name__ == "__main__":
         nargs=3,
         type=int,
         required=False,
-        help="Tuning range for VLLM_DECODE_BLOCK_STEP in format of min max step. Suggest a factor of 128.",
+        help="Tuning range for VLLM_DECODE_BLOCK_BUCKET_STEP in format of min max step. Suggest a factor of 128.",
     )
     parser.add_argument(
         "--decode-block-bucket-max-range",
