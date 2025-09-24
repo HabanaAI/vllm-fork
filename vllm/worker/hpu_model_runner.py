@@ -1049,6 +1049,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _check_config(self, batch_size, seq_len, attn_metadata, warmup_mode):
         phase = self._phase(attn_metadata)
+        is_prompt = attn_metadata.is_prompt
         num_blocks = self._num_blocks(attn_metadata)
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
@@ -1057,6 +1058,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             phase = phase.value
             logger.warning(
                 "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
+                batch_size, seq_len, num_blocks)
+        elif is_prompt:
+            logger.warning(
+                "Configuration: (%s, %s, %s, %s) was warmed-up!", phase,
                 batch_size, seq_len, num_blocks)
 
     def _prepare_prompt(
@@ -2946,15 +2951,22 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             model_input.attn_metadata.seq_lens_tensor
                         seq_lens = seq_lens_tensor.tolist()  #2D list
                         hidden_states_list = []
+                        KV_SHAPE = (61, 128, 1, 576)
+                        HIDDEN_SHAPE = (1, 7168)
                         start_block_idx = 0
                         k_v_head_size = 576
                         bypass_model_exec = True
                         htorch.core.mark_step()
                         for idx, slen in enumerate(seq_lens):
+                            print(" aaa async_recv_kv_caches+++")
                             if slen == 1:
+                                dummy_hidden = torch.zeros(HIDDEN_SHAPE, device="hpu")
+                                dummy_kv = torch.zeros(KV_SHAPE, device="hpu")
+
                                 hidden_states_list.append(
-                                    hidden_states_list[0])
+                                    dummy_hidden)
                                 # skip the seq with only one token
+                                print(" bbb async_recv_kv_caches+++")
                                 continue
                             num_blocks = (slen + self.block_size -
                                           1) // self.block_size
