@@ -37,7 +37,7 @@ mkdir -p benchmark_logs
 #python3 -m vllm.entrypoints.openai.api_server \
     #--model ${model} \VLLM_SKIP_WARMUP=true \
 
-QUANT_CONFIG="/workdir/vllm-fork-llama4/llama4-scripts/suresh-quant/maxabs_quant_g3.json" \
+QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json" \
 PT_HPU_LAZY_MODE=1 \
 VLLM_SKIP_WARMUP=true \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
