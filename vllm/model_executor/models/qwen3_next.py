@@ -184,21 +184,34 @@ def torch_recurrent_gated_delta_rule(
     scale = 1 / (query.shape[-1] ** 0.5)
     query = query * scale
 
-    core_attn_out = torch.zeros(batch_size, sequence_length, num_heads, v_head_dim).to(value)
     recurrent_state = recurrent_state.to(value)
 
-    for i in range(num_heads):
-        q_t = query[:, :, i]
-        k_t = key[:, :, i]
-        v_t = value[:, :, i]
-        g_t = g[:, :, i].exp().unsqueeze(-1).unsqueeze(-1)
-        beta_t = beta[:, :, i].unsqueeze(-1)
+    if num_heads > 1:
+        core_attn_out = torch.zeros(batch_size, sequence_length, num_heads, v_head_dim).to(value)
+        for i in range(num_heads):
+            q_t = query[:, :, i]
+            k_t = key[:, :, i]
+            v_t = value[:, :, i]
+            g_t = g[:, :, i].exp().unsqueeze(-1).unsqueeze(-1)
+            beta_t = beta[:, :, i].unsqueeze(-1)
+
+            recurrent_state = recurrent_state * g_t
+            kv_mem = (recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
+            delta = (v_t - kv_mem) * beta_t
+            recurrent_state = recurrent_state + k_t.unsqueeze(-1) * delta.unsqueeze(-2)
+            core_attn_out[:, :, i] = (recurrent_state * q_t.unsqueeze(-1)).sum(dim=-2)
+    else:
+        q_t = query.squeeze(-2)
+        k_t = key.squeeze(-2)
+        v_t = value.squeeze(-2)
+        g_t = g.squeeze(-1).exp().unsqueeze(-1).unsqueeze(-1)
+        beta_t = beta
 
         recurrent_state = recurrent_state * g_t
         kv_mem = (recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
         delta = (v_t - kv_mem) * beta_t
-        recurrent_state = recurrent_state + k_t.unsqueeze(-1) * delta.unsqueeze(-2)
-        core_attn_out[:, :, i] = (recurrent_state * q_t.unsqueeze(-1)).sum(dim=-2)
+        recurrent_state.add_(k_t.unsqueeze(-1) * delta.unsqueeze(-2))
+        core_attn_out = (recurrent_state * q_t.unsqueeze(-1)).sum(dim=-2).unsqueeze(-2)
 
     if not output_final_state:
         recurrent_state = None
