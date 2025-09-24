@@ -20,7 +20,7 @@ jobs:
       is_version_branch: ${{ steps.extract_pr.outputs.is_version_branch }}
     steps:
       - name: 'Checkout Repository'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: habana_main
           fetch-depth: 0
@@ -61,7 +61,7 @@ jobs:
     needs: [read_codeowners]
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.read_codeowners.outputs.pr_branch }}
           token: ${{ secrets.GH_PAT }}
@@ -77,7 +77,7 @@ jobs:
     needs: [read_codeowners]
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         ref: ${{ needs.read_codeowners.outputs.pr_branch }}
         token: ${{ secrets.GH_PAT }}
@@ -99,7 +99,7 @@ jobs:
         tests_list: ${{ steps.tests.outputs.tests_list }}
     steps:
         - name: Checkout Repository
-          uses: actions/checkout@v4
+          uses: actions/checkout@v5
           with:
             ref: ${{ needs.read_codeowners.outputs.pr_branch }}
             token: ${{ secrets.GH_PAT }}
@@ -316,7 +316,7 @@ jobs:
       if: always() && needs.TestRun.result != 'skipped' && needs.read_codeowners.result != 'skipped'
       steps:
         - name: Checkout Repository
-          uses: actions/checkout@v4
+          uses: actions/checkout@v5
           with:
             fetch-depth: 0
             token: ${{ secrets.GH_PAT }}
