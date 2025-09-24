@@ -583,22 +583,24 @@ class Siglip2Encoder(nn.Module):
         #     dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         # )
 
-        gt = grid_thws  # 你的输入
+        gt = grid_thws
 
-        # 1) 拆出 T 和 H*W，并确保是整型
-        T  = gt[:, 0]
-        HW = (gt[:, 1].to(dtype=torch.int64) * gt[:, 2].to(dtype=torch.int64))
+        # 1) 拆列，转 int64 + CPU，规避溢出和设备坑
+        T_cpu  = gt[:, 0].to(dtype=torch.int64, device="cpu").contiguous()
+        HW_cpu = (gt[:, 1].to(torch.int64, device="cpu") *
+                gt[:, 2].to(torch.int64, device="cpu")).contiguous()
 
-        print("DEBUG T:", T)          # 期望: tensor([1])
-        print("DEBUG HW:", HW)        # 期望: tensor([12312])
+        print("DEBUG dtype:", gt.dtype, "device:", gt.device)
+        print("DEBUG T:", T_cpu)
+        print("DEBUG HW:", HW_cpu)  # 这里应是 tensor([12312])
 
-        # 2) repeat_interleave
-        after = torch.repeat_interleave(HW, T)
-        print("DEBUG after:", after)  # 期望: tensor([12312])
+        # 2) repeat_interleave 在 CPU 做
+        after = torch.repeat_interleave(HW_cpu, T_cpu)
+        print("DEBUG after:", after)  # tensor([12312])
 
-        # 3) cumsum（回到原设备、按 int32 累加）
-        cu_seqlens = after.to(gt.device).cumsum(dim=0, dtype=torch.int64)
-        print("DEBUG cu_seqlens:", cu_seqlens)  # 期望: tensor([12312], dtype=torch.int32)
+        # 3) cumsum 回到原设备
+        cu_seqlens = after.to(gt.device).cumsum(dim=0, dtype=torch.int32)
+        print("DEBUG cu_seqlens:", cu_seqlens)
 
         # cu_seqlens = torch.tensor([12312], dtype=torch.int32)
         
