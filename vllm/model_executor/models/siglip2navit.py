@@ -608,13 +608,9 @@ class Siglip2Encoder(nn.Module):
         # cu_seqlens = torch.tensor([12312], dtype=torch.int32)
         
         print('cu_seqlens:', cu_seqlens)
-        cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
+        # cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
 
-        # cu_seqlens = torch.cat(
-        #     [torch.zeros(1, dtype=cu_seqlens.dtype, device=cu_seqlens.device),
-        #     cu_seqlens],
-        #     dim=0,
-        # )
+        cu_seqlens = torch.cat([torch.zeros(1, dtype=cu_seqlens.dtype, device="cpu"), cu_seqlens.cpu()]).to("hpu")
 
         print('cu_seqlens_after_pad:', cu_seqlens)
 
