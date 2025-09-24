@@ -24,8 +24,9 @@ class MambaCacheParams:
 
 class MambaCacheManager(ConstantSizeCache):
 
-    def __init__(self, vllm_config: VllmConfig, dtype: torch.dtype, device: torch.device,
-                 num_mamba_layers: int, conv_state_shape: tuple[int, int],
+    def __init__(self, vllm_config: VllmConfig, dtype: torch.dtype,
+                 device: torch.device, num_mamba_layers: int,
+                 conv_state_shape: tuple[int, int],
                  temporal_state_shape: tuple[int, int]):
 
         # Determine max batch size to set size of MambaCache
@@ -36,14 +37,16 @@ class MambaCacheManager(ConstantSizeCache):
 
         self.device = device
 
-        conv_state = torch.empty(size=(num_mamba_layers, self.max_batch_size + 32) +
-                                 conv_state_shape,
-                                 dtype=dtype,
-                                 device=self.device)
-        temporal_state = torch.empty(size=(num_mamba_layers, self.max_batch_size + 32) +
-                                     temporal_state_shape,
-                                     dtype=dtype,
-                                     device=self.device)
+        conv_state = torch.empty(
+            size=(num_mamba_layers, self.max_batch_size * 2 + 1) +
+            conv_state_shape,
+            dtype=dtype,
+            device=self.device)
+        temporal_state = torch.empty(
+            size=(num_mamba_layers, self.max_batch_size * 2 + 1) +
+            temporal_state_shape,
+            dtype=dtype,
+            device=self.device)
 
         self._mamba_cache = (conv_state, temporal_state)
 
@@ -71,6 +74,7 @@ class MambaCacheManager(ConstantSizeCache):
         The buffer is used to maintain the Mamba Cache during the CUDA graph
         replay runs.
         """
-        return self._mamba_cache, torch.as_tensor([PAD_SLOT_ID] * self.max_batch_size,
+        return self._mamba_cache, torch.as_tensor([PAD_SLOT_ID] *
+                                                  self.max_batch_size,
                                                   dtype=torch.int32,
                                                   device=self.device)

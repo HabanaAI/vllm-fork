@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from vllm import _custom_ops as ops
 from vllm.attention.backends.utils import PAD_SLOT_ID
 
-import habana_frameworks.torch as htorch
 
 def causal_conv1d_fn(x: torch.Tensor,
                      weight: torch.Tensor,
@@ -93,14 +92,13 @@ def causal_conv1d_update(x: torch.Tensor,
             indices 0 and 3
     out: (batch, dim) or (batch, seq, dim)
     """
-    if activation not in [None, "silu", "swish"]:
-        raise NotImplementedError("activation must be None, silu, or swish")
-    activation_val = activation in ["silu", "swish"]
-
-    prev_conv_state = torch.index_select(conv_state, dim=0, index=conv_state_indices)
+    prev_conv_state = torch.index_select(conv_state,
+                                         dim=0,
+                                         index=conv_state_indices)
     new_conv_state = torch.concat([prev_conv_state, x], dim=1)
 
-    output = (new_conv_state * weight.squeeze(1).transpose(0, 1).unsqueeze(0)).sum(dim=1)
+    output = (new_conv_state * 
+              weight.squeeze(1).transpose(0, 1).unsqueeze(0)).sum(dim=1)
     if bias is not None:
         output.add_(bias)
     output = F.silu(output).unsqueeze(1)

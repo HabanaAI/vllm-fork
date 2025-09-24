@@ -10,7 +10,6 @@ from einops import rearrange
 from torch import nn
 from transformers.activations import ACT2FN
 
-from vllm import envs
 from vllm.attention import Attention, AttentionBackend, AttentionMetadata
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import (CacheConfig, ModelConfig, SpeculativeConfig,
@@ -18,14 +17,14 @@ from vllm.config import (CacheConfig, ModelConfig, SpeculativeConfig,
 from vllm.distributed import (divide, get_ep_group, get_pp_group,
                               get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
-from vllm.forward_context import ForwardContext, get_forward_context
+from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
-from vllm.model_executor.layers.layernorm import RMSNormGated
 from vllm.model_executor.layers.fused_moe import FusedMoE
 # yapf conflicts with isort for this block
 # yapf: disable
 from vllm.model_executor.layers.layernorm import (
     GemmaRMSNorm as Qwen3NextRMSNorm)
+from vllm.model_executor.layers.layernorm import RMSNormGated
 # yapf: enable
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                MergedColumnParallelLinear,
@@ -39,7 +38,7 @@ from vllm.model_executor.layers.mamba.mamba_mixer2 import (
 from vllm.model_executor.layers.mamba.mamba_utils import (
     MambaStateDtypeCalculator, MambaStateShapeCalculator)
 from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
-    causal_conv1d_fn, causal_conv1d_update)
+    causal_conv1d_update)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.quantization.gptq import GPTQConfig
 from vllm.model_executor.layers.quantization.gptq_marlin import (
@@ -49,16 +48,11 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, sharded_weight_loader)
-from vllm.model_executor.models.mamba_cache import (MambaCacheManager,
-                                                    MambaCacheParams)
 from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.utils import set_weight_attrs
-from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import Qwen3NextConfig
-from vllm.triton_utils import tl, triton
-from vllm.utils import LayerBlockType, direct_register_custom_op
 
 from .interfaces import (HasInnerState, IsHybrid, MixtureOfExperts,
                          SupportsLoRA, SupportsPP)
@@ -66,8 +60,6 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
-
-import habana_frameworks.torch.core as htcore
 
 logger = init_logger(__name__)
 
@@ -89,10 +81,11 @@ def torch_chunk_gated_delta_rule(
     if use_qk_l2norm_in_kernel:
         head_dim = query.size(-1)
         inv_scale = head_dim**-0.5
-        query = F.rms_norm(query, (head_dim,), eps=1e-6) * inv_scale
-        key = F.rms_norm(key, (head_dim,), eps=1e-6) * inv_scale
+        query = F.rms_norm(query, (head_dim, ), eps=1e-6) * inv_scale
+        key = F.rms_norm(key, (head_dim, ), eps=1e-6) * inv_scale
     query, key, value, beta, g = [
-        x.transpose(1, 2).contiguous().to(torch.float32) for x in (query, key, value, beta, g)
+        x.transpose(1, 2).contiguous().to(torch.float32)
+        for x in (query, key, value, beta, g)
     ]
 
     batch_size, sequence_length, num_heads, k_head_dim = key.shape
@@ -105,22 +98,30 @@ def torch_chunk_gated_delta_rule(
         beta = F.pad(beta, (0, pad_size))
         g = F.pad(g, (0, pad_size))
     tot_heads = num_heads + pad_size
-    scale = 1 / (query.shape[-1] ** 0.5)
+    scale = 1 / (query.shape[-1]**0.5)
     query = query * scale
 
     v_beta = value * beta.unsqueeze(-1)
     k_beta = key * beta.unsqueeze(-1)
     # reshape to chunks
     query, key, value, k_beta, v_beta = [
-        x.reshape(x.shape[0], x.shape[1], -1, chunk_size, x.shape[-1]) for x in (query, key, value, k_beta, v_beta)
+        x.reshape(x.shape[0], x.shape[1], -1, chunk_size, x.shape[-1])
+        for x in (query, key, value, k_beta, v_beta)
     ]
     g = g.reshape(g.shape[0], g.shape[1], -1, chunk_size)
-    mask = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=0)
+    mask = torch.triu(torch.ones(chunk_size,
+                                 chunk_size,
+                                 dtype=torch.bool,
+                                 device=query.device),
+                      diagonal=0)
 
     # chunk decay
     g = g.cumsum(dim=-1)
-    decay_mask = ((g.unsqueeze(-1) - g.unsqueeze(-2)).tril().exp().float()).tril()
-    attn = -((torch.matmul(k_beta.contiguous(), key.transpose(-1, -2).contiguous())) * decay_mask).masked_fill(mask, 0)
+    decay_mask = ((g.unsqueeze(-1) - 
+                   g.unsqueeze(-2)).tril().exp().float()).tril()
+    attn = -((torch.matmul(k_beta.contiguous(),
+                           key.transpose(-1, -2).contiguous())) *
+             decay_mask).masked_fill(mask, 0)
     for i in range(1, chunk_size):
         row = attn[..., i, :i].clone()
         sub = attn[..., :i, :i].clone()
@@ -128,34 +129,44 @@ def torch_chunk_gated_delta_rule(
     attn = attn + torch.eye(chunk_size, dtype=attn.dtype, device=attn.device)
     value = attn @ v_beta
     k_cumdecay = attn @ (k_beta * g.exp().unsqueeze(-1))
-    last_recurrent_state = (
-        torch.zeros(batch_size, sequence_length, k_head_dim, v_head_dim).to(value)
-        if initial_state is None
-        else initial_state.to(value)
+    last_recurrent_state = (torch.zeros(batch_size, sequence_length,
+                                        k_head_dim, v_head_dim).to(value) if
+                            initial_state is None else initial_state.to(value)
     )
     core_attn_out = torch.zeros_like(value)
-    mask = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=1)
+    mask = torch.triu(torch.ones(chunk_size,
+                                 chunk_size,
+                                 dtype=torch.bool,
+                                 device=query.device),
+                      diagonal=1)
 
     # for each chunk
     for i in range(0, tot_heads // chunk_size):
         q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
-        attn = (q_i @ k_i.transpose(-1, -2) * decay_mask[:, :, i]).masked_fill_(mask, 0)
+        attn = (q_i @ k_i.transpose(-1, -2) * 
+                decay_mask[:, :, i]).masked_fill_(mask, 0)
         v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
         v_new = v_i - v_prime
         attn_inter = (q_i * g[:, :, i, :, None].exp()) @ last_recurrent_state
         core_attn_out[:, :, i] = attn_inter + attn @ v_new
         last_recurrent_state = (
-            last_recurrent_state * g[:, :, i, -1, None, None].exp()
-            + (k_i * (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(-1, -2) @ v_new
+            last_recurrent_state * g[:, :, i, -1, None, None].exp() +
+            (k_i *
+             (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(
+                 -1, -2) @ v_new
         )
 
     if not output_final_state:
         last_recurrent_state = None
     else:
         last_recurrent_state = last_recurrent_state.to(initial_dtype)
-    core_attn_out = core_attn_out.reshape(core_attn_out.shape[0], core_attn_out.shape[1], -1, core_attn_out.shape[-1])
+    core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
+                                          core_attn_out.shape[1],
+                                          -1,
+                                          core_attn_out.shape[-1])
     core_attn_out = core_attn_out[:, :, :num_heads]
-    core_attn_out = core_attn_out.transpose(1, 2).contiguous().to(initial_dtype)
+    core_attn_out = core_attn_out.transpose(1,
+                                            2).contiguous().to(initial_dtype)
     return core_attn_out, last_recurrent_state
 
 
@@ -173,21 +184,23 @@ def torch_recurrent_gated_delta_rule(
     if use_qk_l2norm_in_kernel:
         head_dim = query.size(-1)
         inv_scale = head_dim**-0.5
-        query = F.rms_norm(query, (head_dim,), eps=1e-6) * inv_scale
-        key = F.rms_norm(key, (head_dim,), eps=1e-6) * inv_scale
+        query = F.rms_norm(query, (head_dim, ), eps=1e-6) * inv_scale
+        key = F.rms_norm(key, (head_dim, ), eps=1e-6) * inv_scale
     query, key, value, beta, g = [
-        x.transpose(1, 2).contiguous().to(torch.float32) for x in (query, key, value, beta, g)
+        x.transpose(1, 2).contiguous().to(torch.float32)
+        for x in (query, key, value, beta, g)
     ]
 
     batch_size, sequence_length, num_heads, k_head_dim = key.shape
     v_head_dim = value.shape[-1]
-    scale = 1 / (query.shape[-1] ** 0.5)
+    scale = 1 / (query.shape[-1]**0.5)
     query = query * scale
 
     recurrent_state = recurrent_state.to(value)
 
     if num_heads > 1:
-        core_attn_out = torch.zeros(batch_size, sequence_length, num_heads, v_head_dim).to(value)
+        core_attn_out = torch.zeros(batch_size, sequence_length, num_heads,
+                                    v_head_dim).to(value)
         for i in range(num_heads):
             q_t = query[:, :, i]
             k_t = key[:, :, i]
@@ -198,8 +211,10 @@ def torch_recurrent_gated_delta_rule(
             recurrent_state = recurrent_state * g_t
             kv_mem = (recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
             delta = (v_t - kv_mem) * beta_t
-            recurrent_state = recurrent_state + k_t.unsqueeze(-1) * delta.unsqueeze(-2)
-            core_attn_out[:, :, i] = (recurrent_state * q_t.unsqueeze(-1)).sum(dim=-2)
+            recurrent_state = recurrent_state + k_t.unsqueeze(
+                -1) * delta.unsqueeze(-2)
+            core_attn_out[:, :, i] = (recurrent_state *
+                                      q_t.unsqueeze(-1)).sum(dim=-2)
     else:
         q_t = query.squeeze(-2)
         k_t = key.squeeze(-2)
@@ -211,13 +226,15 @@ def torch_recurrent_gated_delta_rule(
         kv_mem = (recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
         delta = (v_t - kv_mem) * beta_t
         recurrent_state.add_(k_t.unsqueeze(-1) * delta.unsqueeze(-2))
-        core_attn_out = (recurrent_state * q_t.unsqueeze(-1)).sum(dim=-2).unsqueeze(-2)
+        core_attn_out = (recurrent_state *
+                         q_t.unsqueeze(-1)).sum(dim=-2).unsqueeze(-2)
 
     if not output_final_state:
         recurrent_state = None
     else:
         recurrent_state = recurrent_state.to(initial_dtype)
-    core_attn_out = core_attn_out.transpose(1, 2).contiguous().to(initial_dtype)
+    core_attn_out = core_attn_out.transpose(1,
+                                            2).contiguous().to(initial_dtype)
     return core_attn_out, recurrent_state
 
 
@@ -243,8 +260,6 @@ class Qwen3NextSparseMoeBlock(nn.Module):
                 f"the number of experts {config.num_experts}.")
 
         # Load balancing settings.
-        vllm_config = get_current_vllm_config()
-
         self.n_logical_experts = self.n_routed_experts
         self.n_redundant_experts = 0
         self.n_physical_experts = (self.n_logical_experts +
@@ -370,7 +385,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         self.conv_kernel_size = config.linear_conv_kernel_dim
         self.layer_idx = extract_layer_index(prefix)
-        self.fla_layer_idx = self.layer_idx // config.full_attention_interval * (config.full_attention_interval - 1)+ self.layer_idx % config.full_attention_interval
+        self.fla_layer_idx = self.layer_idx // config.full_attention_interval * (
+            config.full_attention_interval -
+            1) + self.layer_idx % config.full_attention_interval
         self.activation = config.hidden_act
         self.act = ACT2FN[config.hidden_act]
         self.layer_norm_epsilon = config.rms_norm_eps
@@ -419,10 +436,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 ], self.tp_size, self.tp_rank)
             })
 
-        conv_state_shape = (
-            vllm_config.scheduler_config.max_num_seqs * 2 + 1,
-            self.conv_kernel_size - 1,
-            divide(self.conv_dim, self.tp_size),
+        conv_state_shape = (vllm_config.scheduler_config.max_num_seqs * 2 + 1,
+                            self.conv_kernel_size - 1,
+                            divide(self.conv_dim, self.tp_size),
         )
         temporal_state_shape = (
             vllm_config.scheduler_config.max_num_seqs * 2 + 1,
@@ -431,13 +447,11 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         )
 
         self.conv_state = torch.empty(conv_state_shape,
-                                 dtype=torch.float32,
-                                 device=self.conv1d.weight.device)
+                                      dtype=torch.float32,
+                                      device=self.conv1d.weight.device)
         self.ssm_state = torch.empty(temporal_state_shape,
                                      dtype=torch.float32,
                                      device=self.conv1d.weight.device)
-
-        # selective projection used to make dt, B and C input dependant
 
         # time step projection (discretization)
         # instantiate once and copy inv_dt in init_weights of PretrainedModel
@@ -921,7 +935,6 @@ class Qwen3NextModel(nn.Module):
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
-        parallel_config = vllm_config.parallel_config
         lora_config = vllm_config.lora_config
         speculative_config = vllm_config.speculative_config
 

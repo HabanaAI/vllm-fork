@@ -328,8 +328,10 @@ class RMSNormGated(nn.Module):
         norm_before_gate: bool = False,
         dtype: Optional[torch.dtype] = None,
     ):
-        """If group_size is not None, we do GroupNorm with each group having group_size elements.
-        group_size=None is equivalent to group_size=hidden_size (i.e. there's only 1 group).
+        """
+        If group_size is not None, we do GroupNorm with each group having
+        group_size elements. group_size=None is equivalent to
+        group_size=hidden_size (i.e. there's only 1 group).
         """
         super().__init__()
         self.eps = eps
@@ -343,7 +345,9 @@ class RMSNormGated(nn.Module):
         torch.nn.init.ones_(self.weight)
 
     def forward(self, hidden_states, gate=None):
-        """If z is not None, we do norm(x) * silu(z) if norm_before_gate, else norm(x * silu(z))
+        """
+        If z is not None, we do norm(x) * silu(z)
+        if norm_before_gate, else norm(x * silu(z))
         """
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)

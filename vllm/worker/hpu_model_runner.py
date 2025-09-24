@@ -1716,10 +1716,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
 
-            # TODO: if seq_len < conv_kernel_dim, padding token should be masked in the prompt stage
+            # TODO: if seq_len < conv_kernel_dim, padding token should be
+            # masked in the prompt stage
             if self._is_fla_model():
                 conv_state_indices_list.append(list(range(seq_len + 1 - \
-                    self.vllm_config.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
+                self.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
 
             token_types_ids = seq_group_metadata.token_type_ids
             token_types.append(token_types_ids) if token_types_ids else []
@@ -1907,8 +1908,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_stride = input_tokens_tensor.size(-1)
             conv_state_indices = conv_state_indices_list[0]
             for idx in range(1, len(conv_state_indices_list)):
-                conv_state_indices = conv_state_indices + [item + input_stride * idx \
-                    for item in conv_state_indices_list[idx]]
+                conv_state_indices = conv_state_indices + [i + \
+                    input_stride * idx for i in conv_state_indices_list[idx]]
             conv_state_indices = torch.tensor(conv_state_indices,
                                               dtype=torch.long,
                                               device='cpu')
@@ -2873,9 +2874,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_groups',
             'window_attn_bias',
             'use_window_sdpa',
-            'conv_state_indices',  # To select last several tokens of prefill to create conv_state
-            'mamba_cache_decode_indices',  # To provide index_select tensor for the decode phase
-            'mamba_cache_prefill_indices', # To provide index_copy tensor for the prefill phase  
+            'conv_state_indices',
+            'mamba_cache_decode_indices',
+            'mamba_cache_prefill_indices',
         ])
         return attention_metadata
 
@@ -3078,7 +3079,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def add_fla_dummy_data(self, inputs) -> None:
         assert self._is_fla_model()
-        conv_dim = self.vllm_config.model_config.hf_config.linear_conv_kernel_dim
+        conv_dim = self.model_config.hf_config.linear_conv_kernel_dim
         bs, seq_len = inputs.input_tokens.shape
         mamba_cache_indices = list(range(bs))
         mamba_cache_indices = torch.tensor(mamba_cache_indices,
@@ -3087,7 +3088,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if inputs.attn_metadata.is_prompt:
             conv_state_indices = []
             for i in range(bs):
-                conv_state_indices += list(range(i * seq_len, i * seq_len + conv_dim - 1))
+                conv_state_indices += list(range(i * seq_len, \
+                    i * seq_len + conv_dim - 1))
             conv_state_indices = torch.tensor(conv_state_indices,
                                               dtype=torch.long,
                                               device='cpu')
@@ -3095,11 +3097,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             mamba_cache_prefill_indices = \
                 self.move_to_device(mamba_cache_indices)
             inputs.attn_metadata.conv_state_indices = conv_state_indices
-            inputs.attn_metadata.mamba_cache_prefill_indices = mamba_cache_prefill_indices
+            inputs.attn_metadata.mamba_cache_prefill_indices = \
+                mamba_cache_prefill_indices
         else:
             mamba_cache_decode_indices = \
                 mamba_cache_indices.to(self.device, non_blocking=True)
-            inputs.attn_metadata.mamba_cache_decode_indices = mamba_cache_decode_indices
+            inputs.attn_metadata.mamba_cache_decode_indices = \
+                mamba_cache_decode_indices
 
     def warmup_scenario(self,
                         batch_size,
@@ -4006,7 +4010,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 seq_len = 1
 
             if self._is_fla_model():
-                use_graphs = False if is_prompt else True
+                use_graphs = not is_prompt
             else:
                 use_graphs = self._use_graphs(batch_size, seq_len)
 
