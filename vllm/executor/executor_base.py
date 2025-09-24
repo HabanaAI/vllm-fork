@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import array
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Awaitable, Callable, Dict, Hashable, List, Optional,
+                    Set, Tuple, Union)
 
 import torch.nn as nn
 from typing_extensions import TypeVar
@@ -16,7 +17,7 @@ from vllm.lora.request import LoRARequest
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import ExecuteModelRequest, PoolerOutput
-from vllm.utils import make_async
+from vllm.utils import make_async, sha256
 from vllm.worker.worker_base import WorkerBase
 
 logger = init_logger(__name__)
@@ -282,7 +283,7 @@ class DistributedExecutorBase(ExecutorBase):
         # This is non-None when the execute model loop is running
         # in the parallel workers. It's a coroutine in the AsyncLLMEngine case.
         self.parallel_worker_tasks: Optional[Union[Any, Awaitable[Any]]] = None
-
+        self.cached_execute_model_reqs: Dict[int, ExecuteModelRequest] = {}
         super().__init__(*args, **kwargs)
 
     def execute_model(
@@ -398,3 +399,180 @@ class DistributedExecutorBase(ExecutorBase):
         `stop_remote_worker_execution_loop`.
         The API is idempotent (guarantee only 1 loop run at any moment)."""
         raise NotImplementedError
+
+    def _compute_execute_model_req_patch(
+        self,
+        prev_cache: Dict[Hashable, Dict[str, Any]],
+        execute_model_req: Any,
+        tracked_attrs: List[str],
+    ) -> Dict[Hashable, Dict[str, Any]]:
+        """Build a minimal patch describing changes since the previous cache.
+
+        Compares the current execute_model_req data with the prev_cache and
+        returns only the differences per sequence key:
+        - For list/array/tuple attrs: returns the newly appended slice.
+        - For other attrs: returns the new value if it changed.
+        If a sequence key is new, returns the full set of tracked attributes and
+        attaches the group's sampling_params.
+
+        Args:
+            prev_cache: Per-sequence cached values from the previous request.
+            execute_model_req: Current execute-model request carrying
+                               sequence data.
+            tracked_attrs: Attribute names to compare/track incrementally.
+
+        Returns:
+            A dict keyed by sequence key with only the incremental changes.
+        """
+        patch_by_key: Dict[Hashable, Dict[str, Any]] = {}
+        for seq_group in execute_model_req.seq_group_metadata_list:
+            sampling_params = seq_group.sampling_params
+            for seq_key, seq_data in seq_group.seq_data.items():
+                if seq_key in prev_cache:
+                    prev_entry = prev_cache[seq_key]
+                    patch: Dict[str, Any] = {}
+                    for attr in tracked_attrs:
+                        curr_val = getattr(seq_data, attr)
+                        prev_val = prev_entry[attr]
+                        if isinstance(curr_val, (list, array.array, tuple)):
+                            if len(curr_val) > len(prev_val):
+                                patch[attr] = curr_val[len(prev_val):]
+                        else:
+                            if curr_val != prev_val:
+                                patch[attr] = curr_val
+                    patch_by_key[seq_key] = patch
+                else:
+                    patch_by_key[seq_key] = {
+                        attr: getattr(seq_data, attr)
+                        for attr in tracked_attrs
+                    }
+                    patch_by_key[seq_key]["sampling_params"] = sampling_params
+
+        return patch_by_key
+
+    def _update_cache_with_new_tokens(
+        self,
+        cache: Optional[Dict[Hashable, Dict[str, Any]]],
+        execute_model_req: Any,
+        tracked_attrs: List[str],
+    ) -> Dict[Hashable, Dict[str, Any]]:
+        """Merge current per-sequence data into the cache in-place.
+
+        For each tracked attribute:
+        - list/array: append only the new tail
+        - tuple: append the new tail as a tuple
+        - other: overwrite with the current value
+
+        Args:
+            cache: Mutable cache from previous calls; created if None.
+            execute_model_req: Current execute-model request carrying
+                               sequence data.
+            tracked_attrs: Attribute names to append/overwrite.
+
+        Returns:
+            The updated cache mapping by sequence key.
+        """
+        if cache is None:
+            cache = {}
+
+        for seq_group in execute_model_req.seq_group_metadata_list:
+            for seq_key, seq_data in seq_group.seq_data.items():
+                if seq_key not in cache:
+                    cache[seq_key] = {
+                        attr: (list(getattr(seq_data, attr)) if isinstance(
+                            getattr(seq_data, attr),
+                            (list, array.array)) else getattr(seq_data, attr))
+                        for attr in tracked_attrs
+                    }
+                else:
+                    cached_entry = cache[seq_key]
+                    for attr in tracked_attrs:
+                        curr_val = getattr(seq_data, attr)
+                        if isinstance(curr_val, (list, array.array)):
+                            cached_entry[attr].extend(
+                                curr_val[len(cached_entry[attr]):])
+                        elif isinstance(curr_val, tuple):
+                            cached_entry[attr] += tuple(
+                                curr_val[len(cached_entry[attr]):])
+                        else:
+                            cached_entry[attr] = curr_val
+
+        return cache
+
+    def _strip_patch_data_from_execute_model_req(
+            self, execute_model_req: Any) -> None:
+        """Clear per-request mutable fields after patch extraction.
+
+        Resets sequence- and group-level fields so the base request is lean
+        and safe to cache/reuse without duplicating incremental data.
+        """
+        for seq_group in execute_model_req.seq_group_metadata_list:
+            seq_group.sampling_params = None
+            for seq_data in seq_group.seq_data.values():
+                seq_data._cached_all_token_ids = []
+                seq_data._new_appended_tokens = []
+                seq_data._output_token_ids = array.array("l", [])
+                seq_data._prompt_token_ids = array.array("l", [])
+                seq_data._prompt_token_ids_tuple = ()
+                seq_data._num_computed_tokens = 0
+                seq_data._stage = seq_data._stage.value
+
+    def prepare_execute_model_req_patch(
+        self,
+        execute_model_req: Optional[Any],
+    ) -> Tuple[Any, Dict[Hashable, Dict[str, Any]], bool]:
+        """Produce an incremental patch and optionally reuse a cached
+        base request.
+
+        Computes a patch containing only the changes since the last request,
+        updates the internal cache with newly observed data, strips mutable
+        fields from the current request, and decides if the previous base
+        request can be reused (based on a content hash).
+
+        Args:
+            execute_model_req: Current execute-model request or None.
+
+        Returns:
+            A tuple of:
+            - Either the virtual_engine (if reusing cached base) or
+              the request.
+            - The computed patch dict keyed by sequence key.
+            - A boolean indicating whether the base request was reused.
+        """
+        tracked_attrs: List[str] = [
+            "_cached_all_token_ids",
+            "_new_appended_tokens",
+            "_num_computed_tokens",
+            "_output_token_ids",
+            "_prompt_token_ids",
+            "_prompt_token_ids_tuple",
+            "_cumulative_logprob",
+        ]
+        execute_model_req_patch: Dict[Hashable, Dict[str, Any]] = {}
+        use_cached_base_req = False
+        if execute_model_req is not None:
+            virtual_engine = execute_model_req.virtual_engine
+            if virtual_engine in self.cached_execute_model_reqs:
+                prev_execute_model_req_hash, cached_execute_model_req = (
+                    self.cached_execute_model_reqs[virtual_engine])
+            else:
+                prev_execute_model_req_hash, cached_execute_model_req = "", {}
+            execute_model_req_patch = self._compute_execute_model_req_patch(
+                cached_execute_model_req, execute_model_req, tracked_attrs)
+            self.cached_execute_model_reqs[
+                virtual_engine] = self._update_cache_with_new_tokens(
+                    cached_execute_model_req, execute_model_req, tracked_attrs)
+            self._strip_patch_data_from_execute_model_req(execute_model_req)
+
+            new_execute_model_req_hash = sha256(execute_model_req)
+            self.cached_execute_model_reqs[virtual_engine] = (
+                new_execute_model_req_hash,
+                self.cached_execute_model_reqs[virtual_engine],
+            )
+            if prev_execute_model_req_hash == new_execute_model_req_hash:
+                use_cached_base_req = True
+        return (
+            virtual_engine if use_cached_base_req else execute_model_req,
+            execute_model_req_patch,
+            use_cached_base_req,
+        )

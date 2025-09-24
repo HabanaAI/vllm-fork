@@ -4,14 +4,16 @@
 # Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
 ###############################################################################
 
+import array
 import contextlib
 import gc
 import gzip
 import json
 import os
 import queue
+import threading
 import time
-from typing import List, Optional, Set, Tuple, Type
+from typing import Dict, List, Optional, Set, Tuple, Type, Union
 
 import habana_frameworks.torch as htorch  # noqa:F401
 import torch
@@ -21,13 +23,14 @@ from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 import vllm.envs as envs
 from vllm.config import ParallelConfig, VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
-                              init_distributed_environment)
+                              get_tp_group, init_distributed_environment)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.prompt_adapter.request import PromptAdapterRequest
-from vllm.sequence import ExecuteModelRequest
+from vllm.sequence import (ExecuteModelRequest, IntermediateTensors,
+                           SequenceStage)
 from vllm.utils import (bind_kv_cache, hpu_backend_string, hpu_device_string,
                         is_fake_hpu)
 from vllm.worker.cache_engine import CacheEngine
@@ -123,6 +126,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
+
+        self.all_cached_seq_data: Dict[int, dict] = {}
+        self.cached_execute_model_req: Dict[int, ExecuteModelRequest] = {}
+        self.lock = threading.Lock()
 
     def full_trace_handler(self, dir_name, use_gzip=False):
 
@@ -235,10 +242,132 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             self.model_runner.mem_margin = hpu_memory_margin
             self._warm_up_model()
 
+    def _apply_patch_to_execute_model_req(
+        self,
+        new_execute_model_req: ExecuteModelRequest,
+        cached_seq_data: dict,
+        execute_model_req_patch: dict,
+    ) -> dict:
+        """
+        Merge an incremental patch into the per-VE sequence cache and reflect
+        it onto the in-flight ExecuteModelRequest.
+
+        Args:
+            new_execute_model_req: Request containing seq_group_metadata_list.
+            cached_seq_data: Cache mapping sequence keys to cached values.
+            execute_model_req_patch: Patch mapping sequences to updated fields.
+
+        Returns:
+            The updated VE-local cache (same object as cached_seq_data).
+        """
+        active_keys = set()  # keys seen in this request; used for pruning
+        # Prune only during decode (is_prompt=False). On some ranks is_prompt
+        # can be None; treat explicit False as decode.
+        should_prune = any(
+            getattr(seq_group, "is_prompt", None) is False
+            for seq_group in new_execute_model_req.seq_group_metadata_list)
+
+        def _as_array_l(val):
+            if isinstance(val, array.array):
+                return val
+            return array.array("l", val)
+
+        for seq_idx, seq_group in enumerate(
+                new_execute_model_req.seq_group_metadata_list):
+            for key, seq_data in seq_group.seq_data.items():
+                active_keys.add(key)
+
+                # Get or initialize cached data
+                initial_data = {
+                    '_cached_all_token_ids': [],
+                    '_new_appended_tokens': [],
+                    '_output_token_ids': array.array("l"),
+                    '_prompt_token_ids': array.array("l"),
+                    '_prompt_token_ids_tuple': (),
+                    '_cumulative_logprob': None,
+                    '_num_computed_tokens': 0,
+                }
+                cached_data = cached_seq_data.setdefault(key, initial_data)
+
+                # Get patch data
+                patch_data = execute_model_req_patch.get(key, {})
+
+                for attr_key in initial_data:
+                    cur = cached_data.get(attr_key)
+                    patch_val = patch_data.get(attr_key, None)
+
+                    if isinstance(cur, array.array):
+                        if patch_val is not None:
+                            cur.extend(_as_array_l(patch_val))
+                        cached_data[attr_key] = cur
+                        setattr(seq_data, attr_key,
+                                array.array("l", cur))  # avoid aliasing
+                    elif isinstance(cur, list):
+                        if patch_val:
+                            cur.extend(patch_val)
+                        cached_data[attr_key] = cur
+                        setattr(seq_data, attr_key,
+                                list(cur))  # avoid aliasing
+                    elif isinstance(cur, tuple):
+                        if patch_val:
+                            cur = cur + tuple(patch_val)
+                        cached_data[attr_key] = cur
+                        setattr(seq_data, attr_key, cur)
+                    else:
+                        # Scalars
+                        if attr_key in patch_data:
+                            cached_data[attr_key] = patch_val
+                        setattr(seq_data, attr_key, cached_data.get(attr_key))
+
+                # sampling_params lives on seq_group; cache it for continuity
+                sp = patch_data.get('sampling_params')
+                if sp is not None:
+                    cached_data['sampling_params'] = sp
+                if (seq_group.sampling_params is None
+                        and 'sampling_params' in cached_data):
+                    seq_group.sampling_params = cached_data['sampling_params']
+
+                # Normalize stage enum.
+                if isinstance(seq_data._stage, int):
+                    seq_data._stage = SequenceStage(seq_data._stage)
+
+        # Prune only during decode steps to prevent unbounded growth while
+        # preserving prompt-batch data across prefill micro-batches.
+        if should_prune:
+            for key in list(cached_seq_data.keys()):
+                if key not in active_keys:
+                    cached_seq_data.pop(key, None)
+
+        return cached_seq_data
+
     def execute_model(
         self,
-        execute_model_req: Optional[ExecuteModelRequest] = None,
+        execute_model_req: Optional[Union[ExecuteModelRequest, Tuple]] = None,
     ) -> Optional[List[SamplerOutput]]:
+        if isinstance(execute_model_req, tuple):
+            assert len(execute_model_req) == 3, (
+                "execute_model_req must be a tuple of length 3, got "
+                f"{len(execute_model_req)}")
+            (execute_model_req, execute_model_req_patch,
+             use_cached_base_req) = execute_model_req
+
+            if use_cached_base_req:
+                ve = execute_model_req
+                assert ve in self.cached_execute_model_req, (
+                    f"Virtual engine {ve} not found in "
+                    "cached_execute_model_req")
+                execute_model_req = self.cached_execute_model_req[ve]
+
+            if execute_model_req is not None:
+                ve = execute_model_req.virtual_engine
+                cached_seq_data = self.all_cached_seq_data.get(ve, {})
+                self.all_cached_seq_data[ve] = (
+                    self._apply_patch_to_execute_model_req(
+                        execute_model_req,
+                        cached_seq_data,
+                        execute_model_req_patch,
+                    ))
+
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION     - will log graph compilations per engine step, only when there was any - highly recommended to use alongside PT_HPU_METRICS_GC_DETAILS! # noqa:E501
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL - will log graph compilations per engine step, always, even if there were none # noqa:E501
         # VLLM_HPU_LOG_STEP_CPU_FALLBACKS         - will log cpu fallbacks per engine step, only when there was any # noqa:E501
@@ -280,8 +409,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             ) if log_cpu_fallbacks else contextlib.nullcontext()
             with gc_ctx as gc_local_metric, \
                 cpu_fallback_ctx as cpu_fallback_local_metric:
-                output = LocalOrDistributedWorkerBase.execute_model(
-                    self, execute_model_req)
+                output = self._execute_model(execute_model_req)
             if (log_graph_compilation and gc_local_metric.stats()[0][1]
                     > 0) or log_graph_compilation_all:
                 msg = ("VLLM_HPU_STEP_GRAPH_COMPILATION: "
@@ -292,11 +420,69 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 msg = ("VLLM_HPU_STEP_CPU_FALLBACK: "
                        f"{cpu_fallback_local_metric.stats()}, {input_stats}")
                 logger.warning(msg)
-
+            if execute_model_req is not None:
+                self.cached_execute_model_req[
+                    execute_model_req.virtual_engine] = execute_model_req
             return output
 
-        output = LocalOrDistributedWorkerBase.execute_model(
-            self, execute_model_req)
+        output = self._execute_model(execute_model_req)
+        if execute_model_req is not None:
+            self.cached_execute_model_req[
+                execute_model_req.virtual_engine] = execute_model_req
+        return output
+
+    def _execute_model(
+        self,
+        execute_model_req: Optional[ExecuteModelRequest] = None,
+    ) -> Optional[List[SamplerOutput]]:
+        """Executes at least one model step on the given sequences, unless no
+        sequences are provided."""
+        with self.lock:
+            inputs = self.prepare_input(execute_model_req)
+            if inputs is None:
+                return None
+
+            model_input, worker_input, kwargs = inputs
+            num_steps = worker_input.num_steps
+            if (execute_model_req is not None
+                    and execute_model_req.spec_step_idx):
+                kwargs["spec_step_idx"] = execute_model_req.spec_step_idx
+
+            self.execute_worker(worker_input)
+
+            # If there is no input, we don't need to execute the model.
+            if worker_input.num_seq_groups == 0:
+                return []
+
+            intermediate_tensors = None
+            if not get_pp_group().is_first_rank:
+                intermediate_tensors = get_pp_group().recv_tensor_dict(
+                    all_gather_group=get_tp_group(), deferred=True)
+
+            output = self.model_runner.execute_model(
+                model_input=model_input,
+                kv_caches=self.kv_cache[worker_input.virtual_engine]
+                if self.kv_cache is not None else None,
+                intermediate_tensors=intermediate_tensors,
+                num_steps=num_steps,
+                **kwargs,
+            )
+
+            if not get_pp_group().is_last_rank:
+                # output is IntermediateTensors
+                assert isinstance(output, IntermediateTensors)
+                get_pp_group().send_tensor_dict(
+                    output.tensors, all_gather_group=get_tp_group())
+                return [None]
+
+        if get_pp_group().is_last_rank and get_pp_group().world_size > 1:
+            output = self.model_runner.execute_sample(
+                hidden_states=output,
+                model_input=model_input,
+                num_steps=num_steps,
+            )
+
+        # output is List[SamplerOutput]
         return output
 
     @torch.inference_mode()
@@ -386,6 +572,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+        self.model_runner.bucketing_ctx.num_hpu_blocks = (
+            num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
@@ -538,8 +726,9 @@ def init_worker_distributed_environment(
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
 
-    if parallel_config.pipeline_parallel_size > 1:
-        # torch-ccl xpu need a collective API warm up
+    if parallel_config.pipeline_parallel_size > 1 and \
+        not envs.VLLM_PP_USE_CPU_COMS:
+        # torch-ccl hpu need a collective API warm up
         # before calling send/recv API
         get_pp_group().all_reduce(torch.zeros(1).to('hpu'))
     if torch.distributed.is_initialized():
@@ -560,7 +749,10 @@ def init_worker_distributed_environment(
     # A small all_reduce for warmup & checking conformance.
     device = hpu_device_string()
     dummy_tensor_hpu = torch.ones(1).to(device)
-    torch.distributed.all_reduce(dummy_tensor_hpu)
+    if not envs.VLLM_PP_USE_CPU_COMS:
+        torch.distributed.all_reduce(dummy_tensor_hpu)
+    else:
+        get_tp_group().all_reduce(dummy_tensor_hpu)
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
 
