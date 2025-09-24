@@ -1,5 +1,7 @@
 #!/bin/bash
 tp_parrallel=8
+# in_len=128
+# out_len=128
 in_len=122880
 out_len=8192
 multi_step=1
@@ -33,10 +35,11 @@ model_name="Maverick"
 
 mkdir -p benchmark_logs
 #python3 -m vllm.entrypoints.openai.api_server \
-    #--model ${model} \
+    #--model ${model} \VLLM_SKIP_WARMUP=true \
 
 QUANT_CONFIG="/workdir/vllm-fork-llama4/llama4-scripts/suresh-quant/maxabs_quant_g3.json" \
 PT_HPU_LAZY_MODE=1 \
+VLLM_SKIP_WARMUP=true \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
@@ -51,7 +54,6 @@ HABANA_VISIBLE_DEVICES="ALL" \
 VLLM_EP_SIZE=${ep_size} \
 PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
 PT_HPU_WEIGHT_SHARING=0 \
-VLLM_SKIP_WARMUP=true \
 vllm serve ${model} \
   --quantization inc \
   --kv-cache-dtype fp8_inc \
@@ -112,29 +114,29 @@ sleep 10s
 echo ${pid}
 
 ########################################################## Concurrency 64 Sonnet #################################################################
-max_concurrency_client=16
-in_len=122880
-out_len=8192
-start_time=$(date +%s)
-echo "Start to benchmark"
-python3 ../benchmarks/benchmark_serving.py \
-    --backend vllm \
-    --model ${model} \
-    --tokenizer ${tokenizer} \
-    --dataset-name sonnet \
-    --dataset-path ../benchmarks/sonnet.txt \
-    --request-rate ${request_rate} \
-    --percentile-metrics ttft,tpot,itl,e2el \
-    --ignore-eos \
-    --num-prompts ${num_prompts} \
-    --port 18080 \
-    --sonnet-input-len ${in_len} \
-    --sonnet-output-len ${out_len} \
-    --sonnet-prefix-len 100 \
-    --max-concurrency ${max_concurrency_client} \
-    --save-result 2>&1 | tee benchmark_logs/g3-${model_name}-in${in_len}-out${out_len}-req${request_rate}-num_prompts${num_prompts}-concurrency${max_concurrency_client}.log
-end_time=$(date +%s)
-echo "Time elapsed: $((end_time - start_time))s"
-sleep 10
+# max_concurrency_client=16
+# in_len=122880
+# out_len=8192
+# start_time=$(date +%s)
+# echo "Start to benchmark"
+# python3 ../benchmarks/benchmark_serving.py \
+#     --backend vllm \
+#     --model ${model} \
+#     --tokenizer ${tokenizer} \
+#     --dataset-name sonnet \
+#     --dataset-path ../benchmarks/sonnet.txt \
+#     --request-rate ${request_rate} \
+#     --percentile-metrics ttft,tpot,itl,e2el \
+#     --ignore-eos \
+#     --num-prompts ${num_prompts} \
+#     --port 18080 \
+#     --sonnet-input-len ${in_len} \
+#     --sonnet-output-len ${out_len} \
+#     --sonnet-prefix-len 100 \
+#     --max-concurrency ${max_concurrency_client} \
+#     --save-result 2>&1 | tee benchmark_logs/g3-${model_name}-in${in_len}-out${out_len}-req${request_rate}-num_prompts${num_prompts}-concurrency${max_concurrency_client}.log
+# end_time=$(date +%s)
+# echo "Time elapsed: $((end_time - start_time))s"
+# sleep 10
 
-kill ${pid}
+# kill ${pid}
