@@ -1660,9 +1660,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             assert len(seq_ids) == 1
             seq_id = seq_ids[0]
 
-            mamba_prefill_index = FindMambaIndexForPrefill(
-                self.mamba_cache_table, seq_id, self.max_num_seqs + 32)
-            mamba_prefill_indices.append(mamba_prefill_index)
+            if self._is_fla_model():
+                mamba_prefill_index = FindMambaIndexForPrefill(
+                    self.mamba_cache_table, seq_id, self.max_num_seqs * 2 + 1)
+                mamba_prefill_indices.append(mamba_prefill_index)
 
             computed_block_nums = seq_group_metadata.computed_block_nums
             if (self.scheduler_config is not None
@@ -1934,7 +1935,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = None
         context_lens_tensor = None
 
-        if len(mamba_prefill_indices) > 0:
+        if self._is_fla_model() and len(mamba_prefill_indices) > 0:
             if len(mamba_prefill_indices) < input_tokens_tensor.size(0):
                 padding_len = input_tokens_tensor.size(0) - len(mamba_prefill_indices)
                 mamba_prefill_indices = mamba_prefill_indices + \
@@ -2342,20 +2343,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     dtype=torch.long,
                                     device='cpu')
 
-        mamba_decode_indices = FindMambaIndexForDecode(
+        mamba_cache_decode_indices = None
+        if self._is_fla_model():
+            mamba_decode_indices = FindMambaIndexForDecode(
                 self.mamba_cache_table, total_seq_ids)
-        if len(mamba_decode_indices) > 0:
-            if len(mamba_decode_indices) < input_tokens.size(0):
-                padding_len = input_tokens.size(0) - len(mamba_decode_indices)
-                mamba_decode_indices = mamba_decode_indices + \
-                    list(range(max(mamba_decode_indices) + 1, \
-                    max(mamba_decode_indices) + 1 + padding_len))
-            mamba_cache_decode_indices = torch.tensor(mamba_decode_indices,
-                                                      dtype=torch.long,
-                                                      device='cpu')
-        else:
-            mamba_cache_decode_indices = None
-
+            if len(mamba_decode_indices) > 0:
+                if len(mamba_decode_indices) < input_tokens.size(0):
+                    padding_len = input_tokens.size(0) - len(mamba_decode_indices)
+                    mamba_decode_indices = mamba_decode_indices + \
+                        list(range(max(mamba_decode_indices) + 1, \
+                        max(mamba_decode_indices) + 1 + padding_len))
+                mamba_cache_decode_indices = torch.tensor(mamba_decode_indices,
+                                                          dtype=torch.long,
+                                                          device='cpu')
 
         input_tokens = input_tokens.to(  # type: ignore
             self.device, non_blocking=True)

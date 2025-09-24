@@ -420,12 +420,12 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             })
 
         conv_state_shape = (
-            vllm_config.scheduler_config.max_num_seqs + 32,
+            vllm_config.scheduler_config.max_num_seqs * 2 + 1,
             self.conv_kernel_size - 1,
             divide(self.conv_dim, self.tp_size),
         )
         temporal_state_shape = (
-            vllm_config.scheduler_config.max_num_seqs + 32,
+            vllm_config.scheduler_config.max_num_seqs * 2 + 1,
             divide(self.num_v_heads, self.tp_size),
             self.head_k_dim, self.head_v_dim
         )
