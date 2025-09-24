@@ -385,8 +385,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         self.conv_kernel_size = config.linear_conv_kernel_dim
         self.layer_idx = extract_layer_index(prefix)
-        self.fla_layer_idx = self.layer_idx // config.full_attention_interval *
-            (config.full_attention_interval - 1) +
+        self.fla_layer_idx = self.layer_idx // config.full_attention_interval \
+            * (config.full_attention_interval - 1) + \
             self.layer_idx % config.full_attention_interval
         self.activation = config.hidden_act
         self.act = ACT2FN[config.hidden_act]
@@ -648,8 +648,10 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
 
         if self.num_v_heads // self.num_k_heads > 1:
-            query_non_spec = query_non_spec.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
-            key_non_spec = key_non_spec.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
+            query_non_spec = query_non_spec.repeat_interleave(
+                self.num_v_heads // self.num_k_heads, dim=2)
+            key_non_spec = key_non_spec.repeat_interleave(
+                self.num_v_heads // self.num_k_heads, dim=2)
 
         if attn_metadata.is_prompt:
             core_attn_out, last_recurrent_state = (
