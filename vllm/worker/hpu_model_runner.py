@@ -4004,10 +4004,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
+
             if self._is_fla_model:
                 use_graphs = False if is_prompt else True
             else:
-                use_graphs = self._use_graphs(batch_size_padded, seq_len)
+                use_graphs = self._use_graphs(batch_size, seq_len)
+
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None

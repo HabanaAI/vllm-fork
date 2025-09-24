@@ -240,7 +240,8 @@ set_dtype(){
             echo Running with dtype="$dtype" ;;
         "fp8")
             echo Running with dtype="$dtype"
-            export QUANT_CONFIG=${QUANT_CONFIG:-"$BASH_DIR/quantization/${model_name_lower}/maxabs_quant_g2.json"}
+            quant_config=${quant_config:-"$BASH_DIR/quantization/${model_name_lower}/maxabs_quant_g2.json"}
+            export QUANT_CONFIG=${QUANT_CONFIG:-"$quant_config"}
             export PT_HPU_WEIGHT_SHARING=0
             ;;
         "awq")
