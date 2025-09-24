@@ -46,6 +46,14 @@ def hpu_available() -> bool:
         """Return True if torch.hpu exists and is available."""
         return hasattr(torch, "hpu") and torch.hpu.is_available()
 
+def resize_for_vit(img: Image.Image, max_edge=448):
+    w, h = img.size
+    scale = max(w, h) / float(max_edge)
+    if scale > 1:
+        w2, h2 = int(round(w/scale)), int(round(h/scale))
+        img = img.resize((w2, h2), Image.BICUBIC)
+    return img
+
 
 def main():
     
@@ -82,6 +90,7 @@ def main():
     # - "prompt": text containing a "<image>" marker
     # - "multi_modal_data": {"image": [PIL.Image or file paths]}
     img = load_image_from_url(IMAGE_URL)
+    img = resize_for_vit(img, max_edge=448)
     prompt = f"<image>\n{QUESTION}"
     
     requests_batch = [{
