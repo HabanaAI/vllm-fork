@@ -128,6 +128,9 @@ class VisionBuckets:
             else:
                 multimodal_buckets = [int(i) for i in envvar.split(',')]
             self.multimodal_buckets = self._process_buckets(multimodal_buckets)
+        self.graphed_buckets = set()
+        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
+                                          'false').lower() == 'true'
 
     def _process_buckets(self, buckets):
         if not self.is_batch_based:
@@ -147,6 +150,51 @@ class VisionBuckets:
 
     def __repr__(self):
         return str(self.multimodal_buckets)
+
+    def use_graph(self, seq_len):
+        if self.skip_warmup and \
+           self.multimodal_buckets is not None and \
+           seq_len in self.multimodal_buckets:
+            return True
+        return seq_len in self.graphed_buckets
+
+
+class AudioBuckets:
+    '''
+    This class is used to bucket audio tokens
+    '''
+
+    def __init__(self):
+        envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS_AUDIO', "")
+        if envvar == 'None':
+            self.multimodal_buckets = None
+        else:
+            if envvar == "":
+                self.multimodal_buckets = list(range(0, 12801, 1600))
+            else:
+                self.multimodal_buckets = [int(i) for i in envvar.split(',')]
+        self.graphed_buckets = set()
+        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
+                                          'false').lower() == 'true'
+
+    def get_multimodal_bucket(self, curr_num_audio_patches):
+        if self.multimodal_buckets is not None:
+            for mm_bucket in self.multimodal_buckets:
+                if curr_num_audio_patches <= mm_bucket:
+                    return mm_bucket
+            return curr_num_audio_patches
+        else:
+            return 0
+
+    def __repr__(self):
+        return str(self.multimodal_buckets)
+
+    def use_graph(self, seq_len):
+        if self.skip_warmup and \
+           self.multimodal_buckets is not None and \
+           seq_len in self.multimodal_buckets:
+            return True
+        return seq_len in self.graphed_buckets
 
 
 class Singleton(type):
@@ -369,6 +417,10 @@ class HpuModelAdapter(torch.nn.Module):
                 logger.info("[Multimodal] Wrapping Visual Model")
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
+            if self.model_is_mrope and hasattr(self.model, 'audio_tower'):
+                logger.info("[Multimodal] Wrapping Audio Model")
+                self.model.audio_tower = htorch.hpu.wrap_in_hpu_graph(
+                    self.model.audio_tower)
 
             if self.is_mm_optimized:
                 if hasattr(self.model, 'vision_tower'):
@@ -671,14 +723,20 @@ class HpuModelAdapter(torch.nn.Module):
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
             if self.model_is_mrope:
-                image_input = self.model._parse_and_validate_image_input(
-                    **kwargs)
-                video_input = self.model._parse_and_validate_video_input(
-                    **kwargs)
-                inputs_embeds = self.model.get_input_embeddings_v0(
-                    input_ids,
-                    image_input=image_input,
-                    video_input=video_input)
+                if self.model.config.model_type == 'qwen2_5_omni_thinker':
+                    multimodal_embeddings = \
+                      self.model.get_multimodal_embeddings_v0(**kwargs)
+                    inputs_embeds = self.model.get_input_embeddings_v0(
+                        input_ids, multimodal_embeddings)
+                else:
+                    image_input = self.model._parse_and_validate_image_input(
+                        **kwargs)
+                    video_input = self.model._parse_and_validate_video_input(
+                        **kwargs)
+                    inputs_embeds = self.model.get_input_embeddings_v0(
+                        input_ids,
+                        image_input=image_input,
+                        video_input=video_input)
                 input_ids = None
                 kwargs.update({
                     'inputs_embeds': inputs_embeds,
@@ -1430,10 +1488,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _get_mrope_positions_and_delta(self, seq_data, mm_kwargs, context_len):
         image_grid_thw = mm_kwargs.get("image_grid_thw", None)
         video_grid_thw = mm_kwargs.get("video_grid_thw", None)
+        audio_feature_lengths = mm_kwargs.get("audio_feature_lengths", None)
         second_per_grid_ts = mm_kwargs.get("second_per_grid_ts", None)
-        assert image_grid_thw is not None or video_grid_thw is not None, (
+        assert image_grid_thw is not None or video_grid_thw is not None or \
+          audio_feature_lengths is not None, (
             "mrope embedding type requires multi-modal input mapper "
-            "returns 'image_grid_thw' or 'video_grid_thw'.")
+            "returns 'image_grid_thw' or 'video_grid_thw' or "
+            "audio_feature_lengths.")
         hf_config = self.model_config.hf_config
         token_ids = seq_data.get_token_ids()
         mrope_positions, mrope_position_delta = \
@@ -1444,6 +1505,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 video_grid_thw=video_grid_thw,
                 second_per_grid_ts=second_per_grid_ts,
                 context_len=context_len,
+                audio_feature_lengths=audio_feature_lengths,
             )
         assert mrope_positions is not None
         return mrope_positions, mrope_position_delta
@@ -1501,6 +1563,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.is_mm_optimized = is_mm_optimized(model)
         if self.model_is_mrope or self.is_mm_optimized:
             model.vision_buckets = VisionBuckets(self.is_mm_optimized)
+            model.vision_buckets.graphed_buckets = \
+                self.graphed_multimodal_buckets
+            model.audio_buckets = AudioBuckets()
 
     def _prepare_prompt(
         self,
