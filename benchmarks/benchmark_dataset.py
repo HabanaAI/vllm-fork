@@ -364,6 +364,7 @@ class RandomDataset(BenchmarkDataset):
             )
         return requests
 
+
 # -----------------------------------------------------------------------------
 # Random Image Dataset Implementation (Synthetic Data)
 # -----------------------------------------------------------------------------
@@ -371,11 +372,12 @@ class RandomImageDataset(BenchmarkDataset):
     """
     Random Image Dataset.
     """
+
     DEFAULT_INPUT_LEN = 1024
     DEFAULT_OUTPUT_LEN = 128
     DEFAULT_RANGE_RATIO = 0.0
     IS_MULTIMODAL = True
-    
+
     def sample(
         self,
         tokenizer: PreTrainedTokenizerBase,
@@ -384,24 +386,23 @@ class RandomImageDataset(BenchmarkDataset):
         output_len: int = DEFAULT_OUTPUT_LEN,
         range_ratio: float = DEFAULT_RANGE_RATIO,
         enable_multimodal_chat: bool = False,
-        width = 1280,
-        height = 720,
-        img_path = None,
+        width=1280,
+        height=720,
+        img_path=None,
         **kwargs,
     ) -> list:
-
         sampled_requests = []
-         
+
         if img_path is not None:
-            print("random data using image path:",img_path)
+            print("random data using image path:", img_path)
             image = Image.open(img_path).convert("RGB")
             prompt = "Describe this image."
-            print("prompt=",prompt) 
+            print("prompt=", prompt)
         else:
             arr = (np.random.rand(height, width, 3) * 255).astype(np.uint8)
             image = Image.fromarray(arr, mode="RGB")
-            print("random image height=",height)
-            print("random image width=",width)
+            print("random image height=", height)
+            print("random image width=", width)
 
             vocab_size = tokenizer.vocab_size
             num_special_tokens = tokenizer.num_special_tokens_to_add()
@@ -417,25 +418,23 @@ class RandomImageDataset(BenchmarkDataset):
 
             # Add logging for debugging
             logger.info("Sampling input_len from [%s, %s]", input_low, input_high)
-            logger.info("Sampling output_len from [%s, %s]", output_low,
-                        output_high)
+            logger.info("Sampling output_len from [%s, %s]", output_low, output_high)
 
-            input_lens = np.random.randint(input_low,
-                                        input_high + 1,
-                                        size=num_requests)
-            output_lens = np.random.randint(output_low,
-                                            output_high + 1,
-                                            size=num_requests)
+            input_lens = np.random.randint(input_low, input_high + 1, size=num_requests)
+            output_lens = np.random.randint(
+                output_low, output_high + 1, size=num_requests
+            )
             offsets = np.random.randint(0, vocab_size, size=num_requests)
-                                        
+
         for i in range(num_requests):
             if img_path is None:
-                inner_seq = ((offsets[i] + i + np.arange(input_lens[i])) %
-                            vocab_size).tolist()
+                inner_seq = (
+                    (offsets[i] + i + np.arange(input_lens[i])) % vocab_size
+                ).tolist()
                 token_sequence = prefix_token_ids + inner_seq
-                prompt = tokenizer.decode(token_sequence) 
-                output_len = int(output_lens[i]) 
-                              
+                prompt = tokenizer.decode(token_sequence)
+                output_len = int(output_lens[i])
+
             mm_content = process_image(image)
             prompt_len = len(tokenizer(prompt).input_ids)
 
@@ -443,18 +442,19 @@ class RandomImageDataset(BenchmarkDataset):
                 # Note: when chat is enabled the request prompt_len is no longer
                 # accurate and we will be using request output to count the
                 # actual prompt len
-                prompt = self.apply_multimodal_chat_transformation(
-                    prompt, mm_content)            
+                prompt = self.apply_multimodal_chat_transformation(prompt, mm_content)
             sampled_requests.append(
                 SampleRequest(
                     prompt=prompt,
                     prompt_len=prompt_len,
                     expected_output_len=output_len,
                     multi_modal_data=mm_content,
-                ))
+                )
+            )
         self.maybe_oversample_requests(sampled_requests, num_requests)
         return sampled_requests
-    
+
+
 # -----------------------------------------------------------------------------
 # ShareGPT Dataset Implementation
 # -----------------------------------------------------------------------------
