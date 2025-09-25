@@ -800,7 +800,7 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    print("name_or_path:", tokenizer.name_or_path)
+    print("\n\n\nname_or_path:", tokenizer.name_or_path)
     print("fast?", tokenizer.is_fast, "vocab_size:", tokenizer.vocab_size)
     print("bos/eos:", tokenizer.bos_token, tokenizer.eos_token, tokenizer.bos_token_id, tokenizer.eos_token_id)
     print("pad:", tokenizer.pad_token, tokenizer.pad_token_id)
@@ -814,6 +814,8 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
         messages, tokenize=False, add_generation_prompt=True
     )
 
+    print('\n\n\nprompts:', prompts)
+
     return ModelRequestData(
         engine_args=engine_args,
         prompts=prompts,
@@ -825,7 +827,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
     model_name = "/home/disk6/HF_models/Ovis2.5-2B"
 
     tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    print("name_or_path:", tok.name_or_path)
+    print("\n\n\nname_or_path:", tok.name_or_path)
     print("fast?", tok.is_fast, "vocab_size:", tok.vocab_size)
     print("bos/eos:", tok.bos_token, tok.eos_token, tok.bos_token_id, tok.eos_token_id)
     print("pad:", tok.pad_token, tok.pad_token_id)
