@@ -1662,7 +1662,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             if self._is_fla_model():
                 mamba_prefill_index = FindMambaIndexForPrefill(
-                    self.mamba_cache_table, seq_id, self.max_num_seqs * 2 + 1)
+                    self.mamba_cache_table, seq_id, self.max_num_seqs + 32)
                 mamba_prefill_indices.append(mamba_prefill_index)
 
             computed_block_nums = seq_group_metadata.computed_block_nums
