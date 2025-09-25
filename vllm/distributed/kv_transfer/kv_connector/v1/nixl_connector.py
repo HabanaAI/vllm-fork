@@ -957,7 +957,7 @@ class NixlConnectorWorker:
             assert self._tp_size[engine_id] == remote_tp_size
         # We may eventually enable this after asserting equality in cache
         # layout and close outputs.
-        #assert nixl_agent_meta.attn_backend_name == self.backend_name
+        assert nixl_agent_meta.attn_backend_name == "FLASH_ATTN_VLLM_V1" or nixl_agent_meta.attn_backend_name == "HPU_ATTN_V1"
 
         remote_agent_name = self.nixl_wrapper.add_remote_agent(
             nixl_agent_meta.agent_metadata)
