@@ -580,28 +580,20 @@ class Scheduler:
                 return
 
             self.scheduler_profiler.start('internal', 'fetching_kv')
-            if len(seq_group.prompt_token_ids) == 1:
-                print("< tony tony tony > len(seq_group.prompt_token_ids) == 1")
-                hash_prefix = hash_list(seq_group.prompt_token_ids)
-                #kv_cache = [torch.empty(0, device="cpu")]
-                #hidden_states = [torch.empty(0, device="cpu")]
-                kv_cache = torch.zeros((61, 128, 1, 576), device="cpu")
-                hidden_states = torch.zeros((1, 7168), device="cpu")
-
-                put_to_shared_dict(hash_prefix, kv_cache, hidden_states)
-                self.fetching_done.put((seq_group, True))
-                self.fetching_queue.task_done()
-                self.scheduler_profiler.end()
-                continue
 
             hash_prefix = hash_list(seq_group.prompt_token_ids)
-            prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
-                hash_prefix)
-            if kv_cache is not None:
+            if len(seq_group.prompt_token_ids) == 1:
+                print("< tony tony tony > len(seq_group.prompt_token_ids) == 1")
+                # This is a padding seq. Won't be able to fetch KV. skip it.
                 fetching_success = True
-                put_to_shared_dict(prefix, kv_cache, hidden_states)
             else:
-                fetching_success = False
+                prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
+                    hash_prefix)
+                if kv_cache is not None:
+                    fetching_success = True
+                    put_to_shared_dict(prefix, kv_cache, hidden_states)
+                else:
+                    fetching_success = False
             self.fetching_done.put((seq_group, fetching_success))
             self.fetching_queue.task_done()
             self.scheduler_profiler.end()
