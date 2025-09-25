@@ -25,11 +25,13 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.utils import cdiv
 
 from .utils import extract_layer_index, maybe_prefix
 
+is_hpu = current_platform.is_hpu()
 
 class OAIAttention(nn.Module):
 
@@ -223,6 +225,9 @@ class GptOssModel(nn.Module):
     def forward(self, input_ids: torch.Tensor,
                 positions: torch.Tensor) -> torch.Tensor:
         x = self.embedding(input_ids)
+        if is_hpu:
+            import habana_frameworks.torch as htorch
+            htorch.core.mark_step()  
         for layer in self.layers:
             x = layer(x, positions)
         x = self.norm(x)
