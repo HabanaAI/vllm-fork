@@ -1049,7 +1049,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _check_config(self, batch_size, seq_len, attn_metadata, warmup_mode):
         phase = self._phase(attn_metadata)
-        is_prompt = attn_metadata.is_prompt
         num_blocks = self._num_blocks(attn_metadata)
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
