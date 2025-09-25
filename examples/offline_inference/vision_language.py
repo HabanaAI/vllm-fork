@@ -855,7 +855,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
     print('\n\n\nprompts:', prompts)
     
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained('AIDC-AI/Ovis2-1B', trust_remote_code=True)
     messages = [
         [{"role": "user", "content": f"{placeholder}\n{question}"}]
         for question in questions
