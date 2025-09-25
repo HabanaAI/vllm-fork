@@ -907,7 +907,7 @@ def FindMambaIndexForPrefill(
         new_prefill_idx = diff[0]
     else:
         new_prefill_idx = 0
-    
+
     mamba_dict.update({seq_id: new_prefill_idx})
     return new_prefill_idx
 

@@ -117,7 +117,7 @@ def torch_chunk_gated_delta_rule(
 
     # chunk decay
     g = g.cumsum(dim=-1)
-    decay_mask = ((g.unsqueeze(-1) - 
+    decay_mask = ((g.unsqueeze(-1) -
                    g.unsqueeze(-2)).tril().exp().float()).tril()
     attn = -((torch.matmul(k_beta.contiguous(),
                            key.transpose(-1, -2).contiguous())) *
@@ -131,8 +131,7 @@ def torch_chunk_gated_delta_rule(
     k_cumdecay = attn @ (k_beta * g.exp().unsqueeze(-1))
     last_recurrent_state = (torch.zeros(batch_size, sequence_length,
                                         k_head_dim, v_head_dim).to(value) if
-                            initial_state is None else initial_state.to(value)
-    )
+                            initial_state is None else initial_state.to(value))
     core_attn_out = torch.zeros_like(value)
     mask = torch.triu(torch.ones(chunk_size,
                                  chunk_size,
@@ -143,7 +142,7 @@ def torch_chunk_gated_delta_rule(
     # for each chunk
     for i in range(0, tot_heads // chunk_size):
         q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
-        attn = (q_i @ k_i.transpose(-1, -2) * 
+        attn = (q_i @ k_i.transpose(-1, -2) *
                 decay_mask[:, :, i]).masked_fill_(mask, 0)
         v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
         v_new = v_i - v_prime
@@ -153,16 +152,14 @@ def torch_chunk_gated_delta_rule(
             last_recurrent_state * g[:, :, i, -1, None, None].exp() +
             (k_i *
              (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(
-                 -1, -2) @ v_new
-        )
+                 -1, -2) @ v_new)
 
     if not output_final_state:
         last_recurrent_state = None
     else:
         last_recurrent_state = last_recurrent_state.to(initial_dtype)
     core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
-                                          core_attn_out.shape[1],
-                                          -1,
+                                          core_attn_out.shape[1], -1,
                                           core_attn_out.shape[-1])
     core_attn_out = core_attn_out[:, :, :num_heads]
     core_attn_out = core_attn_out.transpose(1,
@@ -436,15 +433,14 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 ], self.tp_size, self.tp_rank)
             })
 
-        conv_state_shape = (vllm_config.scheduler_config.max_num_seqs + 32,
-                            self.conv_kernel_size - 1,
-                            divide(self.conv_dim, self.tp_size),
-        )
-        temporal_state_shape = (
+        conv_state_shape = (
             vllm_config.scheduler_config.max_num_seqs + 32,
-            divide(self.num_v_heads, self.tp_size),
-            self.head_k_dim, self.head_v_dim
+            self.conv_kernel_size - 1,
+            divide(self.conv_dim, self.tp_size),
         )
+        temporal_state_shape = (vllm_config.scheduler_config.max_num_seqs + 32,
+                                divide(self.num_v_heads, self.tp_size),
+                                self.head_k_dim, self.head_v_dim)
 
         self.conv_state = torch.empty(conv_state_shape,
                                       dtype=torch.float32,
@@ -530,7 +526,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         (b, a) = torch.split(mixed_ba, split_arg_list_ba, dim=3)
 
         # [b, sq, ng, np/ng * hn] -> [b, sq, np, hn]
-        value = value.reshape(value.size(0), value.size(1), -1, self.head_v_dim)
+        value = value.reshape(value.size(0), value.size(1), -1,
+                              self.head_v_dim)
         z = z.reshape(z.size(0), z.size(1), -1, self.head_v_dim)
         b = b.reshape(b.size(0), b.size(1), self.num_v_heads // self.tp_size)
         a = a.reshape(a.size(0), a.size(1), self.num_v_heads // self.tp_size)
@@ -590,21 +587,17 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             prefill_conv_state = torch.index_select(
                 mixed_qkv.reshape(-1, qkv_dim),
                 dim=0,
-                index=conv_state_indices
-            ).reshape(bs, -1, qkv_dim)
-            conv_state.index_copy_(
-                dim=0,
-                index=mamba_cache_prefill_indices,
-                source=prefill_conv_state
-            )
+                index=conv_state_indices).reshape(bs, -1, qkv_dim)
+            conv_state.index_copy_(dim=0,
+                                   index=mamba_cache_prefill_indices,
+                                   source=prefill_conv_state)
 
             mixed_qkv_non_spec = F.conv1d(
                 mixed_qkv.transpose(1, 2).contiguous(),
                 self.conv1d.weight.contiguous().float(),
                 bias=None,
                 padding=self.conv_kernel_size - 1,
-                groups=(self.conv_dim//self.tp_size)
-            )
+                groups=(self.conv_dim//self.tp_size))
             mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
             mixed_qkv_non_spec = \
                 mixed_qkv_non_spec[:, :, :seq_len].transpose(1, 2)
@@ -618,8 +611,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
             )
-            conv_state.index_copy_(0,
-                                   mamba_cache_decode_indices,
+            conv_state.index_copy_(0, mamba_cache_decode_indices,
                                    cur_conv_state)
 
         query, key, value = torch.split(
@@ -632,16 +624,13 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             dim=-1,
         )
         query_non_spec = query.reshape(query.shape[0],
-                                       query.shape[1],
-                                       -1,
+                                       query.shape[1], -1,
                                        self.head_k_dim)
         key_non_spec = key.reshape(key.shape[0],
-                                   key.shape[1],
-                                   -1,
+                                   key.shape[1], -1,
                                    self.head_k_dim)
         value_non_spec = value.reshape(value.shape[0],
-                                       value.shape[1],
-                                       -1,
+                                       value.shape[1], -1,
                                        self.head_v_dim)
 
         beta = b.sigmoid()
@@ -650,8 +639,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         if self.num_v_heads // self.num_k_heads > 1:
             query_non_spec = query_non_spec.repeat_interleave(
                 self.num_v_heads // self.num_k_heads, dim=2)
-            key_non_spec = key_non_spec.repeat_interleave(
-                self.num_v_heads // self.num_k_heads, dim=2)
+            key_non_spec = key_non_spec.repeat_interleave(self.num_v_heads //
+                                                          self.num_k_heads,
+                                                          dim=2)
 
         if attn_metadata.is_prompt:
             core_attn_out, last_recurrent_state = (
@@ -698,8 +688,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         core_attn_out = self.norm(core_attn_out, z).to(hidden_states.dtype)
         core_attn_out = core_attn_out.reshape(z_shape_og)
         core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
-                                              core_attn_out.shape[1],
-                                              -1)
+                                              core_attn_out.shape[1], -1)
 
         output, _ = self.out_proj(core_attn_out)
         return output
@@ -1311,5 +1300,3 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
 
     def get_expert_mapping(self) -> list[tuple[str, str, int, str]]:
         return self.model.get_expert_mapping()
-
-

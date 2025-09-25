@@ -1294,7 +1294,6 @@ class ModelConfig:
             if attn_type_list:
                 return sum(t == 1 for t in attn_type_list[start:end])
 
-            
             # Hybrid model Qwen3Next
             layer_types_value = getattr(self.hf_config, "layer_types", None)
             if layer_types_value is not None:
