@@ -580,11 +580,10 @@ class Scheduler:
                 return
 
             self.scheduler_profiler.start('internal', 'fetching_kv')
-
             hash_prefix = hash_list(seq_group.prompt_token_ids)
             if len(seq_group.prompt_token_ids) == 1:
-                print("< tony tony tony > len(seq_group.prompt_token_ids) == 1")
                 # This is a padding seq. Won't be able to fetch KV. skip it.
+                logger.info("seq len is 1, skip fetching kv...")
                 fetching_success = True
             else:
                 prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
