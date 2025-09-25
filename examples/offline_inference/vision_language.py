@@ -800,6 +800,13 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    print("name_or_path:", tokenizer.name_or_path)
+    print("fast?", tokenizer.is_fast, "vocab_size:", tokenizer.vocab_size)
+    print("bos/eos:", tokenizer.bos_token, tokenizer.eos_token, tokenizer.bos_token_id, tokenizer.eos_token_id)
+    print("pad:", tokenizer.pad_token, tokenizer.pad_token_id)
+    print("image_token?:", "<image>" in tokenizer.get_vocab())
+
+
     messages = [
         [{"role": "user", "content": f"<image>\n{question}"}] for question in questions
     ]
@@ -817,6 +824,13 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
 def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
     model_name = "/home/disk7/HF_MODELS/Ovis2.5-2B"
 
+    tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    print("name_or_path:", tok.name_or_path)
+    print("fast?", tok.is_fast, "vocab_size:", tok.vocab_size)
+    print("bos/eos:", tok.bos_token, tok.eos_token, tok.bos_token_id, tok.eos_token_id)
+    print("pad:", tok.pad_token, tok.pad_token_id)
+    print("image_token?:", "<image>" in tok.get_vocab())
+    
     engine_args = EngineArgs(
         model=model_name,
         max_model_len=4096,
@@ -836,6 +850,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         raise ValueError("modality must be image or video")
         
     prompts = [f"{placeholder}\n{q}" for q in questions]
+    print('\n\n\nprompts:', prompts)
     
     return ModelRequestData(
         engine_args=engine_args,
