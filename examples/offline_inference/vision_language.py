@@ -854,6 +854,17 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
     prompts = [f"{placeholder}\n{q}" for q in questions]
     print('\n\n\nprompts:', prompts)
     
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    messages = [
+        [{"role": "user", "content": f"{placeholder}\n{question}"}]
+        for question in questions
+    ]
+    prompts2 = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    print('\n\n\nprompts2:', prompts2)
+
     return ModelRequestData(
         engine_args=engine_args,
         prompts=prompts,
