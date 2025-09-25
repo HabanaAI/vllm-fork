@@ -242,6 +242,39 @@ def run_whisper(question: str, audio_count: int) -> ModelRequestData:
     )
 
 
+# Qwen3-Omni-moe
+def run_qwen3_omni_moe(question: str, audio_count: int):
+    model_name = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
+        limit_mm_per_prompt={"audio": audio_count},
+    )
+
+    audio_in_prompt = "".join(
+        ["<|audio_start|><|audio_pad|><|audio_end|>\n" for idx in range(audio_count)]
+    )
+
+    default_system = (
+        "You are Qwen, a virtual human developed by the Qwen Team, Alibaba "
+        "Group, capable of perceiving auditory and visual inputs, as well as "
+        "generating text and speech."
+    )
+
+    prompt = (
+        f"<|im_start|>system\n{default_system}<|im_end|>\n"
+        "<|im_start|>user\n"
+        f"{audio_in_prompt}{question}<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompt=prompt,
+    )
+
+
 model_example_map = {
     "granite_speech": run_granite_speech,
     "minicpmo": run_minicpmo,
@@ -250,6 +283,7 @@ model_example_map = {
     "qwen2_5_omni": run_qwen2_5_omni,
     "ultravox": run_ultravox,
     "whisper": run_whisper,
+    "qwen3_omni_moe": run_qwen3_omni_moe,
 }
 
 
