@@ -176,6 +176,14 @@ class ChatCompletionNamedToolChoiceParam(OpenAIBaseModel):
     type: Literal["function"] = "function"
 
 
+class ModelInfo(OpenAIBaseModel):
+    id: str
+
+
+class ModelConfigRequest(OpenAIBaseModel):
+    models: Optional[list[ModelInfo]] = None
+
+
 # extra="forbid" is a workaround to have kwargs as a field,
 # see https://github.com/pydantic/pydantic/issues/3125
 class LogitsProcessorConstructor(BaseModel):
