@@ -867,7 +867,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
 
     return ModelRequestData(
         engine_args=engine_args,
-        prompts=prompts,
+        prompts=prompts2,
     )
     
 
