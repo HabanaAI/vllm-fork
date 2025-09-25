@@ -822,7 +822,7 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
 
 # Ovis2_5
 def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
-    model_name = "/home/disk7/HF_MODELS/Ovis2.5-2B"
+    model_name = "/home/disk6/HF_models/Ovis2.5-2B"
 
     tok = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     print("name_or_path:", tok.name_or_path)
