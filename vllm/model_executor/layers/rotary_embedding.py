@@ -1309,7 +1309,7 @@ class MRotaryEmbedding(RotaryEmbedding):
     ) -> tuple[torch.Tensor, int]:
         from vllm.transformers_utils.config import thinker_uses_mrope
         if thinker_uses_mrope(hf_config) and \
-            hf_config.model_type == "qwen2_5_omni":
+            hf_config.model_type in ["qwen2_5_omni","qwen3_omni_moe"]:
             return cls._omni_get_input_positions_tensor(
                 input_tokens=input_tokens,
                 hf_config=hf_config,
