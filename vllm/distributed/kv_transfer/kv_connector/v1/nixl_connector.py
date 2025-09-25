@@ -292,7 +292,8 @@ class NixlConnectorScheduler:
             rounded_num_prompt_tokens = round_down(
                 len(request.prompt_token_ids), self.block_size)
             count = max(rounded_num_prompt_tokens - num_computed_tokens, 0)
-
+            if rounded_num_prompt_tokens == num_computed_tokens:
+                return 0, False
             if count > 0:
                 return count, True
 
@@ -308,6 +309,8 @@ class NixlConnectorScheduler:
             "NIXLConnector update_state_after_alloc: "
             "num_external_tokens=%s, kv_transfer_params=%s",
             num_external_tokens, params)
+        if num_external_tokens == 0:
+            params["do_remote_prefill"] = False
         logger.debug(f'buke update_state_after_alloc: {vars(request)=}')
         if not params:
             return
