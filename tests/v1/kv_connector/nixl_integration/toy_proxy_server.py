@@ -212,7 +212,6 @@ async def _handle_completions(api: str, request: Request):
         p = send_request_to_service(prefill_client_info, api,
                                                  req_data, request_id)
         s2 = time.perf_counter()
-        print(f'libin proxy send to prefill {s2-s1}')
         sys.stdout.flush()
         response = await p
         s3 = time.perf_counter()
@@ -220,8 +219,15 @@ async def _handle_completions(api: str, request: Request):
         response_json = response.json()
         kv_transfer_params = response_json.get('kv_transfer_params', {})
         if kv_transfer_params:
+            remote_block_len = len(kv_transfer_params['remote_block_ids'])
+            logger.debug('buke: cut:', type(kv_transfer_params), kv_transfer_params['remote_block_ids'],kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8])
+            
+            kv_transfer_params['remote_block_ids'] = kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8]
+            if remote_block_len % 8 == 0:
+                kv_transfer_params['remote_block_ids'] = kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8-1]
+                logger.info('buke hit corner case multiples of 8:', remote_block_len)
             req_data["kv_transfer_params"] = kv_transfer_params
-
+            #print(req_data)
         # Get the next decode client in round-robin fashion
         decode_client_info = get_next_client(request.app, 'decode')
 
@@ -238,7 +244,6 @@ async def _handle_completions(api: str, request: Request):
 
                 if is_first is False:
                     s4 = time.perf_counter()
-                    print(f'libin debug proxy receive decode 1 total:{s4-s1}| prefill:{s3-s1}| in-between:{s6-s3}|decode:{s4-s6}| {s6=} {s4=}')
                     sys.stdout.flush()
                     is_first = True
                 yield chunk
@@ -246,7 +251,6 @@ async def _handle_completions(api: str, request: Request):
         re =  StreamingResponse(generate_stream(),
                                  media_type="application/json")
         s5 =  time.perf_counter()
-        #print(f'libin debug proxy receive decode2 {s5-s1} {s5-s6}')
         
         #sys.stdout.flush()
         return re
