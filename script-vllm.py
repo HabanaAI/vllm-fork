@@ -93,9 +93,8 @@ def main():
     img = load_image_from_url(IMAGE_URL)
     img = resize_for_vit(img, max_edge=448)
     
-    messages = [
-        [{"role": "user", "content": f"<image>\n{QUESTION}"}]
-    ]
+    messages = [{"role": "user", "content": f"<image>\n{QUESTION}"}]
+    
     print('\nmessages:', messages)
     tokenizer = AutoTokenizer.from_pretrained('AIDC-AI/Ovis2-1B', trust_remote_code=True)
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
