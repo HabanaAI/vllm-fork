@@ -27,13 +27,19 @@ total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
 VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / block_size))
 VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len_aligned * bs / block_size + block_step))
  
-model="meta-llama/Llama-4-Maverick-17B-128E-Instruct"
-tokenizer="meta-llama/Llama-4-Maverick-17B-128E-Instruct"
+model="/workdir/hf_models/meta-llama_Llama-4-Maverick-17B-128E-Instruct/"
+tokenizer="/workdir/hf_models/meta-llama_Llama-4-Maverick-17B-128E-Instruct/"
 model_name="Maverick"
  
 mkdir -p benchmark_logs
 
-QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json" \
+# export VLLM_TORCH_PROFILER_DIR="$BASH_DIR/profiler_dir-llama4"
+# hl-prof-config --use-template profile_api --hw-trace off
+# export HABANA_PROFILE=1
+
+
+# QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json" \
+QUANT_CONFIG="./vllm-hpu-extension-quant-splitqkv/meta-llama_llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json" \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
@@ -67,6 +73,7 @@ vllm serve ${model} \
     --gpu_memory_utilization ${gpu_utils} \
     --quantization inc \
     --enable-expert-parallel \
+    --split_qkv \
     --override-generation-config='{"attn_temperature_tuning": true}' \
     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
 pid=$(($!-1))
@@ -105,6 +112,6 @@ python3 ../benchmarks/benchmark_serving.py \
     --save-result 2>&1 | tee benchmark_logs/g3-${model_name}-in${in_len}-out${out_len}-req${request_rate}-num_prompts${num_prompts}-concurrency${max_concurrency_client}.log
 end_time=$(date +%s)
 echo "Time elapsed: $((end_time - start_time))s"
-sleep 10
+# sleep 10
  
-kill ${pid}
+#kill ${pid}
