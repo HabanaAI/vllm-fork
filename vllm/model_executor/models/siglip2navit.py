@@ -97,11 +97,6 @@ class Siglip2VisionEmbeddings(nn.Module):
         """
 
         # Apply patch embeddings to already patchified pixel values
-        
-        print('grid shape in siglip:', grid_thws.shape, grid_thws)
-        print('pixel shape in siglip:', pixel_values.shape, pixel_values)
-        print(pixel_values.flatten()[:10].tolist())
-        
         target_dtype = self.patch_embedding.weight.dtype
         if isinstance(self.patch_embedding, LinearBase):
             patch_embeds = self.patch_embedding(
@@ -113,8 +108,6 @@ class Siglip2VisionEmbeddings(nn.Module):
             patch_embeds = self.patch_embedding(
                 pixel_values.to(dtype=target_dtype))
             patch_embeds = patch_embeds.reshape(-1, self.embed_dim)
-        print('patch_embeds:', patch_embeds.shape, patch_embeds)
-        print(patch_embeds.flatten()[:10].tolist())
 
         if self.preserve_original_pe:
             assert grid_thws is not None
@@ -137,8 +130,6 @@ class Siglip2VisionEmbeddings(nn.Module):
                 pe = pe.permute(0, 1, 3, 2, 4, 5).reshape(volume, -1)
                 pos_embed_new[cnt:cnt + volume] = pe
                 cnt += volume
-            print('pos_embed:', pos_embed_new.shape, pos_embed_new)
-            print(pos_embed_new.flatten()[:10].tolist())
             patch_embeds = patch_embeds + pos_embed_new
 
         return patch_embeds
@@ -538,12 +529,7 @@ class Siglip2Encoder(nn.Module):
                 a plain tuple.
         """
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
-        print('rotary_pos_emb',rotary_pos_emb)
-        print(rotary_pos_emb.flatten()[:10].tolist())
-        
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
-        print('window:',window_index)
-        print('cu_window_seqlens:',cu_window_seqlens,len(cu_window_seqlens))
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=inputs_embeds.device,
@@ -552,31 +538,17 @@ class Siglip2Encoder(nn.Module):
         # cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = inputs_embeds.size()
-        print('inputs_embeds:', inputs_embeds, inputs_embeds.shape)
-        print(inputs_embeds.flatten()[:10].tolist())
         inputs_embeds = inputs_embeds.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
-        print('merge_unit:', self.spatial_merge_unit, self.spatial_merge_unit)
         inputs_embeds = inputs_embeds[window_index, :, :]
         inputs_embeds = inputs_embeds.reshape(seq_len, -1)
-        print('inputs_embeds_after_reshape:', inputs_embeds.shape)
-        
-        print('rotary_pos_emb:', rotary_pos_emb.shape)
         rotary_pos_emb = rotary_pos_emb.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         rotary_pos_emb = rotary_pos_emb[window_index, :, :]
         rotary_pos_emb = rotary_pos_emb.reshape(seq_len, -1)
-        print('rotary_pos_emb_after_reshape:', rotary_pos_emb.shape)
-        
         emb = torch.cat((rotary_pos_emb, rotary_pos_emb), dim=-1)
-        print('emb:',emb.shape)
         position_embeddings = (emb.cos(), emb.sin())
-        print('position_embeddings:',position_embeddings)
-        print(position_embeddings[0].flatten()[:10].tolist())
-        print(position_embeddings[1].flatten()[:10].tolist())
 
-        print('grid_thws', grid_thws)
-        print(grid_thws.shape, grid_thws.dtype, grid_thws.device)
         # cu_seqlens = torch.repeat_interleave(
         #     grid_thws[:, 1] * grid_thws[:, 2], grid_thws[:, 0]
         # ).cumsum(
@@ -622,10 +594,8 @@ class Siglip2Encoder(nn.Module):
         print('cu_seqlens_after_pad:', cu_seqlens)
 
         reverse_indices = torch.argsort(window_index)
-        print('reverse_indices:', reverse_indices)
 
         hidden_states = inputs_embeds
-        print('hidden_states:', hidden_states.shape)
         for index, block in enumerate(self.layers):
             if (not self.fullatt_block_indexes
                     or index in self.fullatt_block_indexes):
@@ -673,23 +643,10 @@ class Siglip2VisionTransformer(nn.Module):
             Tensor containing the spatial dimensions (height, width)
             of the input images.
         """
-        print(pixel_values.shape)
-        print(grid_thws.shape)
-        print(grid_thws)
-        print('\n\n\nfirst pixel values:', pixel_values)
-        
-        
         hidden_states = self.embeddings(pixel_values, grid_thws)
-        print('hidden:',hidden_states.shape, hidden_states)
-        print(hidden_states.flatten()[:10].tolist())
 
         last_hidden_state = self.encoder(hidden_states, grid_thws)
-        print('last_hidden:',last_hidden_state.shape, last_hidden_state)
-        print(last_hidden_state.flatten()[:10].tolist())
-        
         last_hidden_state = self.post_layernorm(last_hidden_state)
-        print('last_hidden_state:',last_hidden_state.shape, last_hidden_state)
-        print(last_hidden_state.flatten()[:10].tolist())
 
         return last_hidden_state
 
