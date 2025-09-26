@@ -2946,7 +2946,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             model_input.attn_metadata.seq_lens_tensor
                         seq_lens = seq_lens_tensor.tolist()  #2D list
                         hidden_states_list = []
-                        KV_SHAPE = (61, 128, 1, 576)
                         HIDDEN_SHAPE = (1, 7168)
                         start_block_idx = 0
                         k_v_head_size = 576
@@ -2954,11 +2953,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         htorch.core.mark_step()
                         for idx, slen in enumerate(seq_lens):
                             if slen == 1:
-                                dummy_hidden = torch.zeros(HIDDEN_SHAPE, device="hpu")
-                                dummy_kv = torch.zeros(KV_SHAPE, device="hpu")
-
-                                hidden_states_list.append(
-                                    dummy_hidden)
+                                if hidden_states_list:
+                                    hidden_states_list.append(
+                                        hidden_states_list[0])
+                                else:
+                                    logger.warning("The first seq len is 1")
+                                    dummy_hidden = torch.zeros(HIDDEN_SHAPE, device="hpu")
+                                    hidden_states_list.append(
+                                        dummy_hidden)
                                 # skip the seq with only one token
                                 continue
                             num_blocks = (slen + self.block_size -

@@ -374,12 +374,12 @@ def sample_random_requests(
                                          size=prefix_len).tolist()
 
     input_lens = np.random.randint(
-        int(input_len * range_ratio),
+        max(1, int(input_len * range_ratio)), # At least 1 input token
         input_len + 1,
         size=num_prompts,
     )
     output_lens = np.random.randint(
-        max(1, int(output_len * range_ratio)), # At least 1 token output len
+        max(1, int(output_len * range_ratio)), # At least 1 output token
         output_len + 1,
         size=num_prompts,
     )
