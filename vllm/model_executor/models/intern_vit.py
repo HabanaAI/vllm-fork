@@ -371,8 +371,10 @@ class InternVisionEncoderLayer(nn.Module):
         hidden_states = hidden_states + self.attn(
             self.norm1(hidden_states)) * self.ls1
 
-        hidden_states = hidden_states + self.mlp(
-            self.norm2(hidden_states)) * self.ls2
+        # InternVL accuracy fix
+        fp32_norm = self.norm2(hidden_states.to(torch.float32))
+        hidden_states = hidden_states + self.mlp(fp32_norm) * self.ls2
+        hidden_states = hidden_states.to(torch.bfloat16)
 
         return hidden_states
 
