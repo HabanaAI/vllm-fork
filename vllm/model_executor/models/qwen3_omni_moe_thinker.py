@@ -1212,7 +1212,7 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
         self.config.architectures = [
             "Qwen3OmniMoeThinkerForConditionalGeneration"
         ]
-
+        self.text_dim = thinker_config.text_config.hidden_size
         self.multimodal_config = multimodal_config
 
         # force "use_flash_attention_2=True" to audio tower to align
@@ -1382,8 +1382,7 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
                     )
                     deepstack_input_embeds = deepstack_input_embeds.view(
                         inputs_embeds.shape[0], inputs_embeds.shape[1],
-                        multiscale_len, visual_dim).permute(2, 0, 1,
-                                                            3).contiguous()
+                        multiscale_len * visual_dim)
 
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids,
@@ -1395,8 +1394,15 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
                     self.config.audio_token_id,
                 ],
             )
-            self._set_deepstack_input_embeds(deepstack_input_embeds)
-
+            # self._set_deepstack_input_embeds(deepstack_input_embeds)
+        if deepstack_input_embeds is None:
+            deepstack_input_embeds = torch.zeros(inputs_embeds.size(0),
+                                                 inputs_embeds.size(1),
+                                                 multiscale_len * visual_dim,
+                                                 device=inputs_embeds.device,
+                                                 dtype=inputs_embeds.dtype)
+        inputs_embeds = torch.cat([inputs_embeds, deepstack_input_embeds],
+                                  dim=2)
         return inputs_embeds
 
     def get_multimodal_embeddings_v0(
@@ -1426,16 +1432,17 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
         input_ids: torch.Tensor,
         multimodal_embeddings: Optional[NestedTensors] = None,
     ) -> torch.Tensor:
-        inputs_embeds = self.language_model.get_input_embeddings(input_ids)
+        inputs_embeds = self.language_model.get_input_embeddings(
+            input_ids)[:, :, :self.text_dim]
 
         if multimodal_embeddings is None or len(multimodal_embeddings) == 0:
-            self._set_deepstack_input_embeds(None)
+            # self._set_deepstack_input_embeds(None)
             return inputs_embeds
 
         use_deepstack = self.visual.deepstack_visual_indexes is not None
         if use_deepstack:
             multiscale_len = len(self.visual.deepstack_visual_indexes)
-            visual_dim = inputs_embeds.shape[-1]
+            visual_dim = self.text_dim
             deepstack_input_embeds = None
             for embeddings, modality in multimodal_embeddings:
                 if modality in ["image", "video"]:
@@ -1466,13 +1473,16 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
                 input_ids, inputs_embeds, embeddings, placeholder_token_id)
 
         if use_deepstack and deepstack_input_embeds is not None:
-            deepstack_input_embeds = deepstack_input_embeds.view(
-                inputs_embeds.shape[0], inputs_embeds.shape[1], multiscale_len,
-                visual_dim).permute(2, 0, 1, 3).contiguous()
-            self._set_deepstack_input_embeds(deepstack_input_embeds)
+            # deepstack_input_embeds = deepstack_input_embeds.view(
+            #     inputs_embeds.shape[0], inputs_embeds.shape[1],
+            # multiscale_len, visual_dim).permute(2, 0, 1, 3).contiguous()
+            # self._set_deepstack_input_embeds(deepstack_input_embeds)
+            inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
+                                      dim=-1)
+
             return inputs_embeds
 
-        self._set_deepstack_input_embeds(None)
+        # self._set_deepstack_input_embeds(None)
         return inputs_embeds
 
     def forward(
@@ -1486,9 +1496,21 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
         if intermediate_tensors is not None:
             inputs_embeds = None
 
+        deepstack_input_embeds = None
         if self.use_deepstack and inputs_embeds is not None and get_pp_group(
-        ).is_first_rank:
-            deepstack_input_embeds = self._get_deepstack_input_embeds()
+        ).is_first_rank and inputs_embeds.size(2) > self.text_dim:
+            multiscale_len = len(self.visual.deepstack_visual_indexes)
+            input_embeds_multiscale = inputs_embeds[:, :, self.text_dim:]
+            inputs_embeds = inputs_embeds[:, :, :self.text_dim]
+            input_embeds_multiscale = input_embeds_multiscale.view(
+                inputs_embeds.shape[0], inputs_embeds.shape[1], multiscale_len,
+                self.text_dim).permute(2, 0, 1, 3).contiguous()
+            deepstack_input_embeds = IntermediateTensors({
+                f"deepstack_input_embeds_{idx}":
+                input_embeds_multiscale[idx]
+                for idx in range(self.deepstack_num_level)
+            })
+            # input_embeds_multiscale = self._get_deepstack_input_embeds()
         else:
             deepstack_input_embeds = None
 
