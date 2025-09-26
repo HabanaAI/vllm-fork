@@ -402,12 +402,10 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
         def get_replacement_ovis(item_idx, modality: str):
             if modality == "image":
                 grid = out_mm_kwargs["grids"][item_idx]
-                print('grid:', grid)
             elif modality == "video":
-                grid = out_mm_kwargs["video_grids"][item_idx].data        # 对应 'video_grids'
+                grid = out_mm_kwargs["video_grids"][item_idx]
             hf_processor = self.info.get_hf_processor()
-            g = grid[0] if hasattr(grid, "dim") and grid.dim() == 2 else grid
-            return hf_processor.construct_visual_placeholders(g)
+            return hf_processor.construct_visual_placeholders(grid)
 
         return [
             PromptReplacement(
