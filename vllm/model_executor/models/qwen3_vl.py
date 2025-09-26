@@ -1141,6 +1141,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         self.config = config
         self.multimodal_config = multimodal_config
+        self.text_dim = config.text_config.hidden_size
 
         if is_hpu:
             qwen3_visionTransformer = Qwen3_VisionTransformerStaticShape
@@ -1452,13 +1453,21 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 input_ids, inputs_embeds, multimodal_embeddings,
                 [self.config.image_token_id, self.config.video_token_id])
 
-        if self.use_deepstack:
-            if deepstack_input_embeds is None:
-                deepstack_input_embeds = torch.zeros_like(
-                    inputs_embeds).unsqueeze(0).repeat(
-                        self.deepstack_num_level, 1, 1, 1).contiguous()
-            self._set_deepstack_input_embeds(deepstack_input_embeds)
-
+        # if self.use_deepstack:
+        #     if deepstack_input_embeds is None:
+        #         deepstack_input_embeds = torch.zeros_like(
+        #             inputs_embeds).unsqueeze(0).repeat(
+        #                 self.deepstack_num_level, 1, 1, 1).contiguous()
+        # self._set_deepstack_input_embeds(deepstack_input_embeds)
+        if deepstack_input_embeds is None:
+            deepstack_input_embeds = torch.zeros(inputs_embeds.size(0),
+                                                 inputs_embeds.size(1),
+                                                 self.deepstack_num_level *
+                                                 self.text_dim,
+                                                 device=inputs_embeds.device,
+                                                 dtype=inputs_embeds.dtype)
+        inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
+                                  dim=-1)
         return inputs_embeds
 
     def get_input_embeddings_v0(
@@ -1467,10 +1476,11 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         image_input: Optional[Qwen2_5_VLImageInputs] = None,
         video_input: Optional[Qwen2_5_VLVideoInputs] = None,
     ) -> torch.Tensor:
-        inputs_embeds = self.get_input_embeddings(input_ids)
+        inputs_embeds = self.get_input_embeddings(
+            input_ids)[:, :, :self.text_dim]
 
         if self.use_deepstack:
-            visual_dim = inputs_embeds.shape[-1]
+            visual_dim = self.text_dim
             deepstack_input_embeds = None
             if image_input is not None or video_input is not None:
                 deepstack_input_embeds = torch.zeros_like(
@@ -1524,11 +1534,13 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             )
 
         if self.use_deepstack and deepstack_input_embeds is not None:
-            deepstack_input_embeds = deepstack_input_embeds.view(
-                inputs_embeds.shape[0], inputs_embeds.shape[1],
-                self.deepstack_num_level, visual_dim).permute(2, 0, 1,
-                                                              3).contiguous()
-            self._set_deepstack_input_embeds(deepstack_input_embeds)
+            # deepstack_input_embeds = deepstack_input_embeds.view(
+            #     inputs_embeds.shape[0], inputs_embeds.shape[1],
+            #     self.deepstack_num_level, visual_dim).permute(2, 0, 1,
+            #                                                   3).contiguous()
+            # self._set_deepstack_input_embeds(deepstack_input_embeds)
+            inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
+                                      dim=-1)
         return inputs_embeds
 
     def forward(
@@ -1582,9 +1594,21 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     video_input=video_input)
                 input_ids = None
 
+        deepstack_input_embeds = None
         if self.use_deepstack and inputs_embeds is not None and get_pp_group(
-        ).is_first_rank:
-            deepstack_input_embeds = self._get_deepstack_input_embeds()
+        ).is_first_rank and inputs_embeds.size(2) > self.text_dim:
+            multiscale_len = len(self.visual.deepstack_visual_indexes)
+            input_embeds_multiscale = inputs_embeds[:, :, self.text_dim:]
+            inputs_embeds = inputs_embeds[:, :, :self.text_dim]
+            input_embeds_multiscale = input_embeds_multiscale.view(
+                inputs_embeds.shape[0], inputs_embeds.shape[1], multiscale_len,
+                self.text_dim).permute(2, 0, 1, 3).contiguous()
+            deepstack_input_embeds = IntermediateTensors({
+                f"deepstack_input_embeds_{idx}":
+                input_embeds_multiscale[idx]
+                for idx in range(self.deepstack_num_level)
+            })
+            # deepstack_input_embeds = self._get_deepstack_input_embeds()
         else:
             deepstack_input_embeds = None
 
