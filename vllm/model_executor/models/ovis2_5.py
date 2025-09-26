@@ -142,14 +142,7 @@ class VisualTokenizer(torch.nn.Module):
 
     def encode(self, pixel_values: torch.Tensor,
                grid_thws: torch.Tensor) -> torch.Tensor:
-        print("[vis] pixel_values.shape =", tuple(pixel_values.shape))
-        print("[vis] grid_thws.shape =", getattr(grid_thws, "shape", None))
-        if isinstance(grid_thws, torch.Tensor):
-            print("[vis] first grid_thw =", grid_thws[0].tolist())
-        
-        print('\n\n\npv in vt encode:',pixel_values,'\n\n\n')
         features = self.vit(pixel_values, grid_thws)
-        print('\n\n\nfeatures:',features,'\n\n\n')
         # refer to qwen2.5-vl patchmerger
         seq_len, _ = features.shape
         features = features.reshape(seq_len // (self.config.hidden_stride**2),
@@ -570,7 +563,6 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
 
         # Preserve the order of modalities if there are multiple of them
         # from the order of kwargs.
-        print('kwargs:', kwargs)
         for input_key in kwargs:
             if input_key in ("pixel_values", "indicator_tokens",
                              "grids") and "images" not in modalities:
