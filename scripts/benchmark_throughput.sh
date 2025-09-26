@@ -9,11 +9,12 @@ Help() {
     # Display Help
     echo "Benchmark vLLM throughput for a huggingface model on Gaudi."
     echo
-    echo "Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:q:i:o:r:j:t:l:b:c:sfza] [-h]"
+    echo "Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:q:i:p:o:b:r:j:n:g:u:e:l:c:sf] [-h]"
     echo "options:"
     echo "-w  Weights of the model, str, could be model id in huggingface or local path."
     echo "    DO NOT change the model name as some of the parameters depend on it."
-    echo "-t  Number of HPUs to use, [1-8], default=1. Used to set TP and EP size."
+    echo "-t  tensor-parallel-size for vLLM, int, default=1."
+    echo "    Also used to set EP size if it's enable by --enable-expert-parallel"
     echo "-m  Module IDs of the HPUs to use, comma separated int in [0-7], default=None"
     echo "    Used to select HPUs and to set NUMA accordingly. It's recommended to set"
     echo "    for cases with 4 or less HPUs."
@@ -25,7 +26,7 @@ Help() {
     echo "-i  Input length, int, default=1024"
     echo "-p  Max number of prefill sequences, int, default=${PREFERED_BATCHED_TOKENS}/input_min"
     echo "-o  Output length, int, default=512"
-    echo "-b  max_num_seqs for vllm, int, default=128"
+    echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_NUM_SEQS}"
     echo "    Used to control the max batch size for decoding phase."
     echo "    It is recommended to set this value according to the 'Maximum concurrency'"
     echo "    reported by a test run."
@@ -40,11 +41,12 @@ Help() {
     echo "-u  gpu-memory-utilization, float, default=0.9"
     echo "    Used to control the GPU memory utilization. Reduce this value if OOM occurs."
     echo "-e  Extra vLLM server parameters, str, default=None"
-    echo "    Extra parameters that will pass to the vLLM engine."
-    echo "-l  Use linear bucketing or not, bool, default=false"
-    echo "    The exponential bucketing is used by default to reduce number of buckets."
-    echo "    Turn on to switch to linear bucketing that introduce less padding, and more"
-    echo "    buckets and thus longer warmup time."
+    echo "    Extra parameters passed to benchmarks/benchmark_throughput.py and vLLM engine."
+    echo "-l  Limit of the padding ratio, float, [0.0, 0.5], default=0.25"
+    echo "    The padding strategy ensures that padding_size/bucket_size <= limit."
+    echo "    Smaller limit values result in more aggressive padding and more buckets."
+    echo "    Set to 0.5 is equivalent to use the exponential bucketing."
+    echo "    Set to 0.0 is equivalent to use the linear bucketing without padding limits."
     echo "-c  Cache HPU recipe to the specified path, str, default=None"
     echo "    The recipe cache could be reused to reduce the warmup time."
     echo "-s  Skip warmup or not, bool, default=false"
@@ -56,7 +58,7 @@ Help() {
 }
 
 # Get the options
-while getopts hw:t:m:d:q:i:p:o:b:r:j:n:g:u:e:lc:sf flag; do
+while getopts hw:t:m:d:q:i:p:o:b:r:j:n:g:u:e:l:c:sf flag; do
     case $flag in
     h) # display Help
         Help
@@ -92,13 +94,24 @@ while getopts hw:t:m:d:q:i:p:o:b:r:j:n:g:u:e:lc:sf flag; do
         gpu_memory_utilization=$OPTARG ;;
     e) # extra vLLM server parameters
         IFS=" " read -r -a extra_params <<< "$OPTARG" ;;
-    l) # use linear bucketing
-        use_linear_bucketing=true ;;
+    l) # limit of the padding ratio
+        max_padding_ratio=$OPTARG
+        # make sure max_padding_ratio is a float and in [0.0, 0.5]
+        if ! [[ "$max_padding_ratio" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "[ERROR]: max_padding_ratio should be a float."
+            exit 1
+        fi
+        if (( $(echo "$max_padding_ratio < 0.0" | bc -l) )) || \
+            (( $(echo "$max_padding_ratio > 0.5" | bc -l) )); then
+            echo "[ERROR]: max_padding_ratio should be in [0.0, 0.5]."
+            exit 1
+        fi
+        ;;
     c) # use_recipe_cache
         cache_path=$OPTARG ;;
     s) # skip_warmup
         skip_warmup=true ;;
-    f) # enable profiling
+    f) # enable high-level profiler
         profile=true ;;
     \?) # Invalid option
         echo "Error: Invalid option"
@@ -128,7 +141,7 @@ num_prompts=${num_prompts:-$(($max_num_seqs * 4))}
 max_seq_len_to_capture=${max_seq_len_to_capture:-$PREFERED_SEQ_LEN_TO_CAPTURE}
 gpu_memory_utilization=${gpu_memory_utilization:-"0.9"}
 extra_params=(${extra_params[@]:-})
-use_linear_bucketing=${use_linear_bucketing:-"false"}
+max_padding_ratio=${max_padding_ratio:-"0.25"}
 cache_path=${cache_path:-""}
 skip_warmup=${skip_warmup:-"false"}
 profile=${profile:-"false"}
