@@ -321,6 +321,7 @@ class Qwen3VLMoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
 
         self.config = config
         self.multimodal_config = multimodal_config
+        self.text_dim = config.text_config.hidden_size
 
         if is_hpu:
             qwen3_visionTransformer = Qwen3_VisionTransformerStaticShape
