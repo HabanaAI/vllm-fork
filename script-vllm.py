@@ -29,7 +29,7 @@ import torch
 
 # -------- Configs --------
 # You can switch to your local path, e.g. "/home/.../Ovis2.5-9B"
-MODEL_PATH = "/home/disk7/HF_MODELS/Ovis2.5-2B"
+MODEL_PATH = "/home/disk6/HF_models/Ovis2.5-2B"
 
 # Prompt & image from the official example you shared
 IMAGE_URL = "https://cdn-uploads.huggingface.co/production/uploads/658a8a837959448ef5500ce5/TIlymOb86R6_Mez3bpmcB.png"
