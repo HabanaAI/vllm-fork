@@ -1373,14 +1373,10 @@ def main(args):
     assert args.num_prompts > 0
     if args.num_prompts == 1:
         # Single inference
-        if modality == "image":
-            mm = {"image": [data]}     # 包成列表
-        elif modality == "video":
-            mm = {"video": [data]}     # 同理（data 是帧序列/元组）
-        else:
-            raise ValueError("modality must be image or video")
-            
-        inputs = {"prompt": prompts[0], "multi_modal_data": mm}
+        inputs = {
+            "prompt": prompts[0],
+            "multi_modal_data": {modality: data},
+        }
     else:
         # Batch inference
         if args.image_repeat_prob is not None:
