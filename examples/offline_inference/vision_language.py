@@ -829,6 +829,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
     elif modality == "video":
         placeholder = "<video>"
 
+    # need to use ovis tokenizer, since ovis2.5 tokenizer is not configured properly
     tokenizer = AutoTokenizer.from_pretrained('AIDC-AI/Ovis2-1B', trust_remote_code=True)
     messages = [
         [{"role": "user", "content": f"{placeholder}\n{question}"}]
@@ -1343,7 +1344,6 @@ def main(args):
     questions = mm_input["questions"]
 
     req_data = model_example_map[model](questions, modality)
-    print('\nreq_data:',req_data)
 
     # Disable other modalities to save memory
     default_limits = {"image": 0, "video": 0, "audio": 0}
@@ -1363,7 +1363,6 @@ def main(args):
         if args.use_different_prompt_per_request
         else [req_data.prompts[0]]
     )
-    print('\nprompts:',prompts)
 
     # We set temperature to 0.2 so that outputs can be different
     # even when all prompts are identical when running batch inference.
@@ -1392,8 +1391,10 @@ def main(args):
         else:
             # Use the same image for all prompts
             inputs = [
-                {"prompt": prompts[i % len(prompts)],
-                "multi_modal_data": {"image": [data]} if modality=="image" else {"video": [data]}}
+                {
+                    "prompt": prompts[i % len(prompts)],
+                    "multi_modal_data": {modality: data},
+                }
                 for i in range(args.num_prompts)
             ]
     print('\ninputs:',inputs)
@@ -1420,4 +1421,3 @@ def main(args):
 if __name__ == "__main__":
     args = parse_args()
     main(args)
-    
