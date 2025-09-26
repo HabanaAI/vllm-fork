@@ -20,13 +20,13 @@ gte-reranker-modernbert-base
 
 ```bash
 # 基本使用（默认max-model-len=512）
-python launch_multi_models_new.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771
+python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771
 
 # 自定义max-model-len
-python launch_multi_models_new.py --models model1 model2 --max-model-len 8192
+python launch_multi_models.py --models model1 model2 --max-model-len 8192
 
 # 使用性能预设（推荐用于生产环境）
-python launch_multi_models_new.py --models model1 model2 --env-preset performance
+python launch_multi_models.py --models model1 model2 --env-preset performance
 ```
 
 
@@ -69,7 +69,7 @@ cpupower idle-set -d 3
 
 ### 方法一：使用增强启动脚本
 
-新的 `launch_multi_models.py` 脚本提供了灵活的配置选项，支持可配置的max-model-len参数和多种环境变量配置方式。
+`launch_multi_models.py` 脚本提供了灵活的配置选项，支持可配置的max-model-len参数和多种环境变量配置方式。
 
 #### 脚本参数说明
 - **可配置max-model-len**: 通过`--max-model-len`参数灵活配置最大模型长度
@@ -171,12 +171,12 @@ python launch_multi_models.py \
 
 #### 查看可用预设
 ```bash
-python launch_multi_models_new.py --list-env-presets
+python launch_multi_models.py --list-env-presets
 ```
 
 #### 停止所有模型
 ```bash
-python launch_multi_models_new.py --stop-all
+python launch_multi_models.py --stop-all
 ```
 
 ### 方法二：手动启动服务
@@ -195,7 +195,8 @@ VLLM_CONTIGUOUS_PA=false VLLM_SKIP_WARMUP=true python3 -m \
 ```
 
 #### 内存分配策略
-内存分配公式：`mem_ratio = 7 // len(models) / 10`
+内存分配公式：`mem_ratio = 7 // len(models) / 10`, 表示使用70%的显存分配给两个模型，剩余的30%预留作临时缓存。
+可以根据模型大小再作调整。
 - 2个模型：35% GPU内存/模型
 
 
