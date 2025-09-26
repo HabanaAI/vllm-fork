@@ -17,6 +17,7 @@ import os
 import io
 import requests
 from PIL import Image
+from transformers import AutoTokenizer
 
 # --- Optional but recommended for Gaudi performance ---
 #os.environ.setdefault("HABANA_VISIBLE_DEVICES", "ALL")          # expose all HPUs
@@ -91,7 +92,12 @@ def main():
     # - "multi_modal_data": {"image": [PIL.Image or file paths]}
     img = load_image_from_url(IMAGE_URL)
     img = resize_for_vit(img, max_edge=448)
-    prompt = f"<image>\n{QUESTION}"
+    
+    messages = [
+        [{"role": "user", "content": f"<image>\n{QUESTION}"}]
+    ]
+    tokenizer = AutoTokenizer.from_pretrained('AIDC-AI/Ovis2-1B', trust_remote_code=True)
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     
     requests_batch = [{
             "prompt": prompt,
