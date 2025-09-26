@@ -401,7 +401,7 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
 
         def get_replacement_ovis(item_idx, modality: str):
             if modality == "image":
-                grid = out_mm_kwargs["grids"][item_idx].data
+                grid = out_mm_kwargs["grids"][item_idx]
                 print('grid:', grid)
             elif modality == "video":
                 grid = out_mm_kwargs["video_grids"][item_idx].data        # 对应 'video_grids'
