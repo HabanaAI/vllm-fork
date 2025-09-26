@@ -1393,8 +1393,7 @@ def main(args):
                 }
                 for i in range(args.num_prompts)
             ]
-    print('\ninputs:',inputs)
-    
+
     # Add LoRA request if applicable
     lora_request = (
         req_data.lora_requests * args.num_prompts if req_data.lora_requests else None
