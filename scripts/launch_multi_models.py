@@ -1,10 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
-# Enhanced launch_multi_models.py with configurable parameters
-# New features:
-# 1. Configurable max-model-len parameter
-# 2. Customizable environment variables via config file or command line
-# 3. Environment variable presets (default/performance)
-# 4. Better error handling and logging
+#Multi-Model vLLM Server Launcher, focusing on embedding and rerank use case
+#ENV config are tuned for those models.
+#Basic Usage:
+#    python launch_multi_models.py --models model1 model2
+#    python launch_multi_models.py --models model1 model2 --max-model-len 4096
+#    python launch_multi_models.py --models model1 model2 --env-preset performance
+#Key Parameters:
+#    --models: List of models to load (required)
+#    --port: Server port (default: 8000)
+#    --max-model-len: Maximum model length (default: 512)
+#    --env-preset: Environment preset - default/performance (default: default)
+#    --env-config: JSON file with environment variables
+#    --env: Individual environment variables (KEY=value)
+#    --force-restart: Force restart server
+#    --stop-all: Stop all running models
+#    --timeout: Startup timeout in seconds (default: 300)
+#    --log-file: Log file path
+#Examples:
+# Basic usage
+#    python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771
+# Custom max model length
+#    python launch_multi_models.py --models model1 model2 --max-model-len 4096
+# Performance preset
+#    python launch_multi_models.py --models model1 model2 --env-preset performance
 
 import argparse
 import os
@@ -56,19 +74,19 @@ def parse_arguments():
         epilog="""
 Examples:
   # Basic usage with default settings
-  python launch_multi_models_new.py --models model1 model2
+  python launch_multi_models.py --models model1 model2
 
   # With custom max model length
-  python launch_multi_models_new.py --models model1 model2 --max-model-len 4096
+  python launch_multi_models.py --models model1 model2 --max-model-len 4096
 
   # With performance tuning preset
-  python launch_multi_models_new.py --models model1 model2 --env-preset performance
+  python launch_multi_models.py --models model1 model2 --env-preset performance
 
   # With custom environment config file
-  python launch_multi_models_new.py --models model1 model2 --env-config custom_env.json
+  python launch_multi_models.py --models model1 model2 --env-config custom_env.json
 
   # With individual environment variables
-  python launch_multi_models_new.py --models model1 model2 --env VLLM_SKIP_WARMUP=false --env PT_HPU_LAZY_MODE=1
+  python launch_multi_models.py --models model1 model2 --env VLLM_SKIP_WARMUP=false --env PT_HPU_LAZY_MODE=1
         """)
 
     parser.add_argument("--models", nargs="+", required=True,
@@ -218,7 +236,7 @@ def kill_existing_pid(pid):
 
 def launch_server(models, port, max_model_len, device, dtype, gpu_memory_utilization,
                   env_vars, log_file, timeout):
-    """Launch a new vLLM server with enhanced configuration."""
+    """Launch a vLLM server with customized configuration."""
 
     # Calculate memory ratio if not provided
     if gpu_memory_utilization is None:
