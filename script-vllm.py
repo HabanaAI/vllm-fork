@@ -96,8 +96,10 @@ def main():
     messages = [
         [{"role": "user", "content": f"<image>\n{QUESTION}"}]
     ]
+    print('\nmessages:', messages)
     tokenizer = AutoTokenizer.from_pretrained('AIDC-AI/Ovis2-1B', trust_remote_code=True)
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    print('\nprompt:', prompt)
     
     requests_batch = [{
             "prompt": prompt,
