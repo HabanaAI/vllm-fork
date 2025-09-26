@@ -116,16 +116,17 @@ class Siglip2VisionEmbeddings(nn.Module):
                 self.position_embedding_size, self.position_embedding_size,
                 -1).unsqueeze(0).permute(0, 3, 1, 2)
             cnt = 0
+            # consider using .item()
             for t, h, w in grid_thws:
-                volume = t.item() * h.item() * w.item()
+                volume = t * h * w
                 pe = F.interpolate(positional_embeddings,
-                                   size=(h.item(), w.item()),
+                                   size=(h, w),
                                    mode='bicubic',
                                    align_corners=False)
-                pe = pe.permute(0, 2, 3, 1).reshape(1, h.item() * w.item(), -1)
-                pe = pe[0].repeat(t.item(), 1)
-                pe = pe.reshape(t.item(), h.item() // self.hidden_stride, self.hidden_stride,
-                                w.item() // self.hidden_stride, self.hidden_stride,
+                pe = pe.permute(0, 2, 3, 1).reshape(1, h * w, -1)
+                pe = pe[0].repeat(t, 1)
+                pe = pe.reshape(t, h // self.hidden_stride, self.hidden_stride,
+                                w // self.hidden_stride, self.hidden_stride,
                                 -1)
                 pe = pe.permute(0, 1, 3, 2, 4, 5).reshape(volume, -1)
                 pos_embed_new[cnt:cnt + volume] = pe
@@ -378,9 +379,12 @@ class Siglip2EncoderLayer(nn.Module):
                 position_embeddings: torch.Tensor) -> tuple[torch.FloatTensor]:
         """
         Args:
-            hidden_states: Input tensor of shape (batch, seq_len, embed_dim).
-            cu_seqlens: Cumulative sequence lengths tensor.
-            position_embeddings: Position embeddings tensor.
+            hidden_states (`torch.FloatTensor`):
+                Input to the layer of shape `(batch, seq_len, embed_dim)`.
+            output_attentions (`bool`, *optional*, defaults to `False`):
+                Whether or not to return the attentions tensors of all 
+                attention layers. See `attentions` under
+                returned tensors for more detail.
         """
         residual = hidden_states
 
@@ -439,28 +443,29 @@ class Siglip2Encoder(nn.Module):
     # copied from qwen2.5_vl
     def rot_pos_emb(self, grid_thw):
         pos_ids = []
+        # consider using .item()
         for t, h, w in grid_thw:
-            hpos_ids = torch.arange(h.item()).unsqueeze(1).expand(-1, w.item())
+            hpos_ids = torch.arange(h).unsqueeze(1).expand(-1, w)
             hpos_ids = hpos_ids.reshape(
-                h.item() // self.hidden_stride,
+                h // self.hidden_stride,
                 self.hidden_stride,
-                w.item() // self.hidden_stride,
+                w // self.hidden_stride,
                 self.hidden_stride,
             )
             hpos_ids = hpos_ids.permute(0, 2, 1, 3)
             hpos_ids = hpos_ids.flatten()
 
-            wpos_ids = torch.arange(w.item()).unsqueeze(0).expand(h.item(), -1)
+            wpos_ids = torch.arange(w).unsqueeze(0).expand(h, -1)
             wpos_ids = wpos_ids.reshape(
-                h.item() // self.hidden_stride,
+                h // self.hidden_stride,
                 self.hidden_stride,
-                w.item() // self.hidden_stride,
+                w // self.hidden_stride,
                 self.hidden_stride,
             )
             wpos_ids = wpos_ids.permute(0, 2, 1, 3)
             wpos_ids = wpos_ids.flatten()
             pos_ids.append(
-                torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t.item(), 1))
+                torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t, 1))
         pos_ids = torch.cat(pos_ids, dim=0)
         max_grid_size = grid_thw[:, 1:].max()
         rotary_pos_emb_full = self.rotary_pos_emb(max_grid_size)
@@ -475,8 +480,8 @@ class Siglip2Encoder(nn.Module):
         vit_merger_window_size = (self.window_size // self.hidden_stride //
                                   self.patch_size)
 
-        for grid_t_, grid_h_, grid_w_ in grid_thw:
-            grid_t, grid_h, grid_w = grid_t_.item(), grid_h_.item(), grid_w_.item()
+        # consider using .item()
+        for grid_t, grid_h, grid_w in grid_thw:
             llm_grid_h, llm_grid_w = (
                 grid_h // self.hidden_stride,  # number of patch after merge
                 grid_w // self.hidden_stride,
@@ -508,7 +513,7 @@ class Siglip2Encoder(nn.Module):
             cu_seqlens_tmp = seqlens.cumsum(
                 0) * self.spatial_merge_unit + cu_window_seqlens[-1]
             cu_window_seqlens.extend(cu_seqlens_tmp.tolist())
-            window_index_id += (grid_t * llm_grid_h * llm_grid_w)
+            window_index_id += (grid_t * llm_grid_h * llm_grid_w).item()
         window_index = torch.cat(window_index, dim=0)
 
         return window_index, cu_window_seqlens
@@ -520,11 +525,19 @@ class Siglip2Encoder(nn.Module):
     ) -> torch.Tensor:
         r"""
         Args:
-            inputs_embeds: Input tensor of shape 
-                (batch_size, sequence_length, hidden_size).
-                Embedded representation of the input tokens.
-            grid_thws: Grid tensor of shape (num_patches, 3) 
-                containing grid dimensions.
+            inputs_embeds (`torch.FloatTensor` of shape
+                `(batch_size, sequence_length, hidden_size)`):
+                Optionally, instead of passing `input_ids` you can choose to
+                directly pass an embedded representation. This is useful if
+                you want more control over how to convert `input_ids` indices
+                into associated vectors than the model's internal embedding
+                lookup matrix.
+            grid_thws (`torch.LongTensor`):
+                grid shape (num_patches, 3)
+            output_hidden_states (`bool`, *optional*):
+                Whether or not to return the hidden states of all layers. See
+                `hidden_states` under returned tensors for more detail.
+            return_dict (`bool`, *optional*):
                 Whether or not to return a [`~utils.ModelOutput`] instead of
                 a plain tuple.
         """
@@ -535,6 +548,7 @@ class Siglip2Encoder(nn.Module):
             device=inputs_embeds.device,
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
+        # probably need to use cpu for this function
         cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = inputs_embeds.size()
@@ -549,49 +563,21 @@ class Siglip2Encoder(nn.Module):
         emb = torch.cat((rotary_pos_emb, rotary_pos_emb), dim=-1)
         position_embeddings = (emb.cos(), emb.sin())
 
-        # cu_seqlens = torch.repeat_interleave(
-        #     grid_thws[:, 1] * grid_thws[:, 2], grid_thws[:, 0]
-        # ).cumsum(
-        #     dim=0,
-        #     # Select dtype based on the following factors:
-        #     #  - FA2 requires that cu_seqlens_q must have dtype int32
-        #     #  - torch.onnx.export requires that cu_seqlens_q must have
-        #     #    same dtype as grid_thw
-        #     # See https://github.com/huggingface/transformers/pull/34852
-        #     # for more information
-        #     dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
-        # )
-
-        gt = grid_thws
-
-        # 1) 拆列，转 int64 + CPU，规避溢出和设备坑
-        T_cpu  = gt[:, 0].to('cpu').to(torch.int64).contiguous()
-        x1 = gt[:, 1].to('cpu').to(torch.int64).contiguous()
-        x2 = gt[:, 2].to('cpu').to(torch.int64).contiguous()
-        HW_cpu = (x1 * x2)
-
-        print("DEBUG dtype:", gt.dtype, "device:", gt.device)
-        print("DEBUG T:", T_cpu)
-        print("DEBUG HW:", HW_cpu)  # 这里应是 tensor([12312])
-
-        # 2) repeat_interleave 在 CPU 做
-        after = torch.repeat_interleave(HW_cpu, T_cpu)
-        print("DEBUG after:", after)  # tensor([12312])
-
-        # 3) cumsum 回到原设备
-        # after 已经在 CPU: tensor([12312])
-        cu_cpu = after.cumsum(dim=0, dtype=torch.int32)  # 在 CPU 累加成 int32
-        cu_seqlens = cu_cpu.to(gt.device)                # 再搬回 hpu:0
-        print("DEBUG cu_seqlens:", cu_seqlens)
-
-        # cu_seqlens = torch.tensor([12312], dtype=torch.int32)
-        
-        print('cu_seqlens:', cu_seqlens)
-        # cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
-
-        cu_seqlens = torch.cat([torch.zeros(1, dtype=cu_seqlens.dtype, device="cpu"), cu_seqlens.cpu()]).to("hpu")
-
-        print('cu_seqlens_after_pad:', cu_seqlens)
+        # probably need to use cpu for this function
+        cu_seqlens = torch.repeat_interleave(
+            grid_thws[:, 1] * grid_thws[:, 2], grid_thws[:, 0]
+        ).cumsum(
+            dim=0,
+            # Select dtype based on the following factors:
+            #  - FA2 requires that cu_seqlens_q must have dtype int32
+            #  - torch.onnx.export requires that cu_seqlens_q must have
+            #    same dtype as grid_thw
+            # See https://github.com/huggingface/transformers/pull/34852
+            # for more information
+            dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
+        )
+        # probably need to use cpu for this function
+        cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
 
         reverse_indices = torch.argsort(window_index)
 
