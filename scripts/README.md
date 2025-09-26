@@ -232,7 +232,7 @@ For Qwen3-235B-A22B, the original bfloat16 weights can not fit into 4 Gaudi2 HPU
 
 ``` bash
 bash calibrate_model.sh \
-     -m /models/Qwen3-235B-A22B \
+     -m /models/Qwen3-235B-A22B-FP8 \
      -d NeelNanda/pile-10k \
      -o quantization \
      -t 8 -r 4 -u

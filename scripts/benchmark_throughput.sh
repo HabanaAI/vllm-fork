@@ -95,7 +95,18 @@ while getopts hw:t:m:d:q:i:p:o:b:r:j:n:g:u:e:l:c:sf flag; do
     e) # extra vLLM server parameters
         IFS=" " read -r -a extra_params <<< "$OPTARG" ;;
     l) # limit of the padding ratio
-        max_padding_ratio=$OPTARG ;;
+        max_padding_ratio=$OPTARG
+        # make sure max_padding_ratio is a float and in [0.0, 0.5]
+        if ! [[ "$max_padding_ratio" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "[ERROR]: max_padding_ratio should be a float."
+            exit 1
+        fi
+        if (( $(echo "$max_padding_ratio < 0.0" | bc -l) )) || \
+            (( $(echo "$max_padding_ratio > 0.5" | bc -l) )); then
+            echo "[ERROR]: max_padding_ratio should be in [0.0, 0.5]."
+            exit 1
+        fi
+        ;;
     c) # use_recipe_cache
         cache_path=$OPTARG ;;
     s) # skip_warmup
