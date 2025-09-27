@@ -43,6 +43,7 @@ class MediaConnector:
         connection: HTTPConnection = global_http_connection,
         *,
         allowed_local_media_path: str = "",
+        allowed_media_domains: Optional[list[str]] = None,
     ) -> None:
         super().__init__()
 
@@ -63,6 +64,9 @@ class MediaConnector:
             allowed_local_media_path_ = None
 
         self.allowed_local_media_path = allowed_local_media_path_
+        if allowed_media_domains is None:
+            allowed_media_domains = []
+        self.allowed_media_domains = allowed_media_domains
 
     @overload
     def _load_data_url(
@@ -118,27 +122,13 @@ class MediaConnector:
 
         return media_io.load_file(filepath)
 
-    @overload
-    def load_from_url(
-        self,
-        url: str,
-        media_io: MediaIO[_M],
-        *,
-        fetch_timeout: Optional[int] = ...,
-        load_type: Literal["PIL"] = "PIL",
-    ) -> _M:
-        ...
-
-    @overload
-    def load_from_url(
-        self,
-        url: str,
-        media_io: MediaIO[_M],
-        *,
-        fetch_timeout: Optional[int] = ...,
-        load_type: Literal["bytes"],
-    ) -> bytes:
-        ...
+    def _assert_url_in_allowed_media_domains(self, url_spec) -> None:
+        if self.allowed_media_domains and url_spec.hostname not in \
+            self.allowed_media_domains:
+            raise ValueError(
+                f"The URL must be from one of the allowed domains: "
+                f"{self.allowed_media_domains}. Input URL domain: "
+                f"{url_spec.hostname}")
 
     def load_from_url(
         self,
@@ -151,7 +141,11 @@ class MediaConnector:
         url_spec = urlparse(url)
 
         if url_spec.scheme.startswith("http"):
-            data = self.connection.get_bytes(url, timeout=fetch_timeout)
+            self._assert_url_in_allowed_media_domains(url_spec)
+
+            connection = self.connection
+            data = connection.get_bytes(url, timeout=fetch_timeout)
+
             return media_io.load_bytes(data)
 
         if url_spec.scheme == "data":
@@ -195,8 +189,11 @@ class MediaConnector:
         url_spec = urlparse(url)
 
         if url_spec.scheme.startswith("http"):
-            data = await self.connection.async_get_bytes(url,
-                                                         timeout=fetch_timeout)
+            self._assert_url_in_allowed_media_domains(url_spec)
+
+            connection = self.connection
+            data = await connection.async_get_bytes(url, timeout=fetch_timeout)
+
             return media_io.load_bytes(data)
 
         if url_spec.scheme == "data":

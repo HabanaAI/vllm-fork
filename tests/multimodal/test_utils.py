@@ -81,9 +81,14 @@ async def test_fetch_image_http(image_url: str):
 @pytest.mark.parametrize("image_url", TEST_IMAGE_URLS)
 @pytest.mark.parametrize("suffix", get_supported_suffixes())
 async def test_fetch_image_base64(url_images: dict[str, Image.Image],
-                                  image_url: str, suffix: str):
-    connector = MediaConnector()
-    url_image = url_images[image_url]
+                                  raw_image_url: str, suffix: str):
+    connector = MediaConnector(
+        # Domain restriction should not apply to data URLs.
+        allowed_media_domains=[
+            "www.bogotobogo.com",
+            "github.com",
+        ])
+    url_image = url_images[raw_image_url]
 
     try:
         mime_type = Image.MIME[Image.registered_extensions()[suffix]]
@@ -509,3 +514,30 @@ def run_dp_sharded_vision_model_vs_direct(local_rank: int, world_size: int,
 
     # Check that the outputs are close (they should be identical)
     assert torch.allclose(direct_output, sharded_output, rtol=1e-5, atol=1e-5)
+    assert modality_idxs == expected_modality_idxs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("video_url", TEST_VIDEO_URLS)
+@pytest.mark.parametrize("num_frames", [-1, 32, 1800])
+async def test_allowed_media_domains(video_url: str, num_frames: int):
+    connector = MediaConnector(
+        media_io_kwargs={"video": {
+            "num_frames": num_frames,
+        }},
+        allowed_media_domains=[
+            "www.bogotobogo.com",
+            "github.com",
+        ])
+
+    video_sync, metadata_sync = connector.fetch_video(video_url)
+    video_async, metadata_async = await connector.fetch_video_async(video_url)
+    assert np.array_equal(video_sync, video_async)
+    assert metadata_sync == metadata_async
+
+    disallowed_url = "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png"
+    with pytest.raises(ValueError):
+        _, _ = connector.fetch_video(disallowed_url)
+
+    with pytest.raises(ValueError):
+        _, _ = await connector.fetch_video_async(disallowed_url)
