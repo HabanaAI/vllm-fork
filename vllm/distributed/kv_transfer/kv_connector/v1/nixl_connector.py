@@ -292,8 +292,7 @@ class NixlConnectorScheduler:
             rounded_num_prompt_tokens = round_down(
                 len(request.prompt_token_ids), self.block_size)
             count = max(rounded_num_prompt_tokens - num_computed_tokens, 0)
-            if rounded_num_prompt_tokens == num_computed_tokens:
-                return 0, False
+
             if count > 0:
                 return count, True
 
@@ -1321,11 +1320,10 @@ class NixlConnectorWorker:
             remote_block_ids = remote_block_ids[:valid_len]
             local_block_ids = local_sub_block_ids[:valid_len]
             logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
-        #print('buke: ', remote_block_ids)
-        #remote_block_ids = remote_block_ids[:(len(remote_block_ids)//self.block_factor)*self.block_factor]
-        #for index,remote_block_id in enumerate(remote_block_ids):
-        #    local_sub_block_ids.append(local_block_ids[index//self.block_factor]*self.block_factor + index%self.block_factor)
-        #logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
+        else:
+            if num_local_blocks < num_remote_blocks:
+                remote_block_ids = remote_block_ids[-num_local_blocks:]
+
         if not self.block_window_per_layer:
             # Default case: assume global attention
             remote_block_descs_ids = self._get_block_descs_ids(
