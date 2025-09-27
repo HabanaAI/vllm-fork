@@ -41,6 +41,7 @@ class MediaConnector:
         connection: HTTPConnection = global_http_connection,
         *,
         allowed_local_media_path: str = "",
+        allowed_media_domains: Optional[list[str]] = None,
     ) -> None:
         super().__init__()
 
@@ -61,6 +62,9 @@ class MediaConnector:
             allowed_local_media_path_ = None
 
         self.allowed_local_media_path = allowed_local_media_path_
+        if allowed_media_domains is None:
+            allowed_media_domains = []
+        self.allowed_media_domains = allowed_media_domains
 
     def _load_data_url(
         self,
@@ -94,6 +98,14 @@ class MediaConnector:
 
         return media_io.load_file(filepath)
 
+    def _assert_url_in_allowed_media_domains(self, url_spec) -> None:
+        if self.allowed_media_domains and url_spec.hostname not in \
+            self.allowed_media_domains:
+            raise ValueError(
+                f"The URL must be from one of the allowed domains: "
+                f"{self.allowed_media_domains}. Input URL domain: "
+                f"{url_spec.hostname}")
+
     def load_from_url(
         self,
         url: str,
@@ -104,6 +116,8 @@ class MediaConnector:
         url_spec = urlparse(url)
 
         if url_spec.scheme.startswith("http"):
+            self._assert_url_in_allowed_media_domains(url_spec)
+
             connection = self.connection
             data = connection.get_bytes(url, timeout=fetch_timeout)
 
@@ -128,6 +142,8 @@ class MediaConnector:
         url_spec = urlparse(url)
 
         if url_spec.scheme.startswith("http"):
+            self._assert_url_in_allowed_media_domains(url_spec)
+
             connection = self.connection
             data = await connection.async_get_bytes(url, timeout=fetch_timeout)
 
