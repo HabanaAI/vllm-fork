@@ -576,11 +576,12 @@ class SamplingTensors:
                     # Get the last element from each list
                     last_elements = [out[-1] for out in output_tokens]
                     lengths = [len(out)-1 for out in output_tokens]
-                    index = torch.tensor(lengths).to(output_tokens_cache.device)
+                    indices = torch.tensor(lengths, device=device)
+                    rows = torch.arange(output_tokens_cache.shape[0], device=device)
                     # Convert to a PyTorch tensor with shape [4, 1]
                     last_elements_t = torch.tensor(last_elements).unsqueeze(1).to(output_tokens_cache.device)
-                    #print(f"libin debug cache hit {index.shape=}, {index=} {last_elements_t.shape=} {last_elements_t=} ")
-                    output_t = output_tokens_cache.index_copy_(1, index, last_elements_t )
+                    #print(f"libin debug cache hit {last_elements_t.shape=} {last_elements_t=} ")
+                    output_t = output_tokens_cache.index_put_((rows, indices), last_elements_t)
                     print(f"libin debug output_token_time {time.perf_counter()-t1}")
                 else:
                     prompt_t = make_tensor_with_pad_align(
