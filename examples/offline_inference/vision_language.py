@@ -831,7 +831,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
 
     # need to use ovis tokenizer, since ovis2.5 tokenizer is not configured properly
     tokenizer = AutoTokenizer.from_pretrained(
-        "AIDC-AI/Ovis2-1B", trust_remote_code=True
+        "AIDC-AI/Ovis2.5-2B", trust_remote_code=True
     )
     messages = [
         [{"role": "user", "content": f"{placeholder}\n{question}"}]
