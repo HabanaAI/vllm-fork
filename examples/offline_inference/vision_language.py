@@ -841,6 +841,8 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         messages, tokenize=False, add_generation_prompt=True
     )
 
+    print("\n\n", prompts, "\n\n")
+
     return ModelRequestData(
         engine_args=engine_args,
         prompts=prompts,
@@ -1373,7 +1375,10 @@ def main(args):
     )
 
     print("\n\n", prompts, "\n\n")
-    print("\n\n", args.num_prompts, "\n\n")
+    prompts = [
+        "<|im_start|>user\n<image>\nWhat is the content of this image?\
+        <|im_end|>\n<|im_start|>assistant\n"
+    ]
 
     assert args.num_prompts > 0
     if args.num_prompts == 1:
