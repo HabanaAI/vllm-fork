@@ -814,7 +814,7 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
 
 # Ovis2_5
 def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
-    model_name = "/home/disk6/HF_models/Ovis2.5-2B"
+    model_name = "AIDC-AI/Ovis2.5-2B"
 
     engine_args = EngineArgs(
         model=model_name,
@@ -831,7 +831,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
 
     # need to use ovis tokenizer, since ovis2.5 tokenizer is not configured properly
     tokenizer = AutoTokenizer.from_pretrained(
-        "AIDC-AI/Ovis2.5-2B", trust_remote_code=True
+        "AIDC-AI/Ovis2-1B", trust_remote_code=True
     )
     messages = [
         [{"role": "user", "content": f"{placeholder}\n{question}"}]
@@ -840,8 +840,6 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
     prompts = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-
-    print("\n\n", prompts, "\n\n")
 
     return ModelRequestData(
         engine_args=engine_args,
@@ -1374,12 +1372,6 @@ def main(args):
         temperature=0.2, max_tokens=64, stop_token_ids=req_data.stop_token_ids
     )
 
-    print("\n\n", prompts, "\n\n")
-    prompts = [
-        "<|im_start|>user\n<image>\nWhat is the content of this image?\
-        <|im_end|>\n<|im_start|>assistant\n"
-    ]
-
     assert args.num_prompts > 0
     if args.num_prompts == 1:
         # Single inference
@@ -1403,8 +1395,6 @@ def main(args):
                 }
                 for i in range(args.num_prompts)
             ]
-
-    print("\n\n", inputs, "\n\n")
 
     # Add LoRA request if applicable
     lora_request = (
