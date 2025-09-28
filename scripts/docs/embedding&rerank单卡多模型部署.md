@@ -20,7 +20,9 @@ gte-reranker-modernbert-base
 
 ```bash
 # 基本使用（默认max-model-len=512）
-python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771
+python launch_multi_models.py --models /data/models/gte-modernbert-base \
+                                      /data/models/gte-reranker-modernbert-base \
+                                      --port 8771
 
 # 自定义max-model-len
 python launch_multi_models.py --models model1 model2 --max-model-len 8192
@@ -82,13 +84,17 @@ cpupower idle-set -d 3
 #### 基本启动命令
 ```bash
 # 自定义max-model-len
-python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771 --max-model-len 4096
+python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base \
+                              --port 8771 \
+                              --max-model-len 4096
 
 # 选用预设配置启动
-pythonlaunch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771 --env-preset performance
+pythonlaunch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base \
+                             --port 8771 --env-preset performance
 
 # 使用JSON配置文件启动，并强制重启
-python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771 --env-config /data/tianfeng/embedding_rerank_bge_large/vllm-fork/scripts/env_config_example.json --force-restart
+python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base \
+                              --port 8771 --env-config /data/env_config_example.json --force-restart
 ```
 
 #### 环境变量配置
@@ -295,8 +301,7 @@ VLLM_SKIP_WARMUP=false           # 不禁用预热（启用预热以优化性能
 针对gte和bge 中小于1B的模型，请将PT_HPU_LAZY_MODE 设置为0，其他参数类型的模型，请使用默认PT_HPU_LAZY_MODE 为1，即可
 ```
 python
-python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771 --env-preset performance --env "PT_HPU_LAZY_MODE=0"
+python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base \
+                              --port 8771 --env-preset performance --env "PT_HPU_LAZY_MODE=0"
 
 ```
-
-
