@@ -1372,6 +1372,9 @@ def main(args):
         temperature=0.2, max_tokens=64, stop_token_ids=req_data.stop_token_ids
     )
 
+    print("\n\n", prompts, "\n\n")
+    print("\n\n", args.num_prompts, "\n\n")
+
     assert args.num_prompts > 0
     if args.num_prompts == 1:
         # Single inference
