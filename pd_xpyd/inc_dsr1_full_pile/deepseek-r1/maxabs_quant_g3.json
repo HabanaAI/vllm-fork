@@ -1,0 +1,1 @@
+{"mode": "QUANTIZE","observer": "maxabs","scale_method": "maxabs_hw", "scale_format": "scalar", "allowlist": {"types": [],"names": []},"blocklist": {"types": [],"names": ["lm_head", "mlp\\.gate\\b"]},"dump_stats_path": "/host/mnt/disk002/kf/vllm-fork_pd/pd_xpyd/inc_dsr1_full_pile/deepseek-r1/g3/inc_output"}

@@ -88,6 +88,7 @@ set_bucketing(){
     export VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN:-$decode_block_min}
     export VLLM_DECODE_BLOCK_BUCKET_STEP=${VLLM_DECODE_BLOCK_BUCKET_STEP:-$decode_block_step}
     export VLLM_DECODE_BLOCK_BUCKET_MAX=${VLLM_DECODE_BLOCK_BUCKET_MAX:-$decode_block_max}
+#<<<<<<< HEAD
 }
 
 # clean existing INC scale
@@ -118,4 +119,7 @@ clean_inc_scale(){
             rm $scale_path
         fi
     fi
+#=======
+
+#>>>>>>> kf-fork/deepseek_r1_ww33_kf
 }

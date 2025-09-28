@@ -1,0 +1,7 @@
+{
+  "inflight": 1,
+  "block_size": 64,
+  "steps": 3,
+  "profile_ranks": [0],
+  "profile_targets": ["D"]
+}

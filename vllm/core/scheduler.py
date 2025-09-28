@@ -578,6 +578,7 @@ class Scheduler:
                 # This is a shutdown signal
                 logger.info("The fetching thread is shutting down.")
                 return
+#<<<<<<< HEAD
 
             self.scheduler_profiler.start('internal', 'fetching_kv')
             hash_prefix = hash_list(seq_group.prompt_token_ids)
@@ -586,6 +587,21 @@ class Scheduler:
             if kv_cache is not None:
                 fetching_success = True
                 put_to_shared_dict(prefix, kv_cache, hidden_states)
+#=======
+#            if not self.fetching_kv.empty():
+#                self.scheduler_profiler.start('internal', 'fetching_kv')
+#                seq_group = self.fetching_kv.get()
+#                hash_prefix = hash_list(seq_group.prompt_token_ids)
+#                print(f"start fetching kv hash: {hash_prefix}")
+#                prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
+#                    hash_prefix)
+#                put_to_shared_dict(prefix, kv_cache, hidden_states)
+#                if seq_group is not None:
+#                    self.waiting.append(self.fetching_kv.get())
+#                self.fetching_kv.task_done()
+#                self.scheduler_profiler.end()
+#                print(f"fetching kv hash: {hash_prefix} done")
+#>>>>>>> kf-fork/deepseek_r1_ww33_kf
             else:
                 fetching_success = False
             self.fetching_done.put((seq_group, fetching_success))

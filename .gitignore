@@ -202,7 +202,14 @@ benchmarks/*.json
 # Linting
 actionlint
 shellcheck*/
+<<<<<<< HEAD
 
 pd_xpyd/Inc_fp8_tp1ep16/inc_measure_output_hooks_maxabs_MAXABS_HW*
 pd_xpyd/Inc_fp8_tp8ep8/inc_measure_output_hooks_maxabs_MAXABS_HW*
 
+=======
+vllm-infqps-*.json
+Inc_fp8_*
+*.hltv
+#HabanaFusedOpLazy_*.pbtxt
+>>>>>>> kf-fork/deepseek_r1_ww33_kf

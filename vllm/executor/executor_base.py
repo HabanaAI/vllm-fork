@@ -191,10 +191,14 @@ class ExecutorBase(ABC):
         return sets[0]
 
     def start_profile(self) -> None:
-        self.collective_rpc("start_profile")
+        # self.collective_rpc("start_profile")
+        self.run_only_on_driver("start_profile")
+        print(f"start_profile return!")
 
     def stop_profile(self) -> None:
-        self.collective_rpc("stop_profile")
+        # self.collective_rpc("stop_profile")
+        self.run_only_on_driver("stop_profile")
+        print(f"stop_profile return!")
 
     def sleep(self, level: int = 1):
         if self.is_sleeping:

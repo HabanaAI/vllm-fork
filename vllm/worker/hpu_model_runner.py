@@ -118,11 +118,42 @@ def subtuple(obj: object,
     return _TYPE_CACHE[typename](**values)
 
 
+def align_dp_groups_hpu(value, op):
+    from vllm.distributed.parallel_state import get_dp_group
+    from vllm.platforms import current_platform
+    device = current_platform.device_type
+    group = get_dp_group().device_group
+    #group = get_dp_group().cpu_group
+    #value_t = torch.tensor(value, device="cpu", dtype=torch.int32)
+    value_t = torch.tensor(value, device=device, dtype=torch.int32)
+    torch.distributed.all_reduce(value_t, op=op, group=group)
+    return value_t.item()
+
 def align_dp_groups(value, op):
+    from vllm.distributed.parallel_state import get_dp_group
+    from vllm.platforms import current_platform
+    device = current_platform.device_type
     group = get_dp_group().cpu_group
     value_t = torch.tensor(value, device="cpu", dtype=torch.int32)
     torch.distributed.all_reduce(value_t, op=op, group=group)
     return value_t.item()
+
+
+def align_dp_groups_async(value, op):
+    from vllm.distributed.parallel_state import get_dp_group
+    from vllm.platforms import current_platform
+    device = current_platform.device_type
+    group = get_dp_group().device_group
+    value_t = torch.tensor(value, device=device, dtype=torch.int32)
+    s = torch.hpu.Stream()
+    with torch.hpu.stream(s):
+        work = torch.distributed.all_reduce(value_t, op=op, group=group, async_op=True)
+    return work, value_t
+
+
+def align_dp_groups_finish(work, value_t) -> int:
+    work.wait()
+    return int(value_t.item())
 
 
 def align_tp_groups(value, op):
@@ -130,6 +161,7 @@ def align_tp_groups(value, op):
     world_size = get_tp_group().world_size
     if world_size <= 1:
         return value
+    
     value_t = torch.tensor(value, device='cpu')
     torch.distributed.all_reduce(value_t, op=op, group=group)
     return value_t.item()
@@ -798,9 +830,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info("will use async pd: %s", self.use_async_kv_transfer_in_pd)
         self.skip_prefill_sampling = envs.VLLM_SKIP_PREFILL_SAMPLING
         logger.info("will skip prefill sampling: %s", self.skip_prefill_sampling)
+#<<<<<<< HEAD
 
         # PD
         self.kv_conf = self.vllm_config.kv_transfer_config
+#=======
+#>>>>>>> kf-fork/deepseek_r1_ww33_kf
 
     def _set_gc_threshold(self) -> None:
         """
@@ -975,11 +1010,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.kv_conf is None or not is_prompt or not self.kv_conf.is_kv_consumer
         ):
             if self.is_driver_worker:
+                #_dp_work, _dp_val = align_dp_groups(
                 batch_size_padded = align_dp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
             if align_worker:
                 batch_size_padded = align_tp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
+            #if self.is_driver_worker:
+            #    batch_size_padded = align_dp_groups_finish(_dp_work, _dp_val)
         batch_size_padding = batch_size_padded - real_batch_size
 
         seq_group_metadata_list = seq_group_metadata_list.copy()
@@ -1475,11 +1513,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_bucket_size)
             if self.dp_awared_padding:
                 if self.is_driver_worker:
+                    #_dp_work, _dp_val = align_dp_groups(
                     block_bucket_size = align_dp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
                 if align_worker:
                     block_bucket_size = align_tp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
+                #if self.is_driver_worker:
+                #    block_bucket_size = align_dp_groups_finish(_dp_work, _dp_val)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):

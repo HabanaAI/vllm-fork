@@ -661,7 +661,8 @@ class FusedMoE(torch.nn.Module):
         param_data = param.data
 
         # Input scales can be loaded directly and should be equal.
-        param_data[expert_id] = loaded_weight
+        param_data[expert_id] = loaded_weight.cpu()
+        torch.hpu.synchronize()
 
     def _load_g_idx(self, shard_id: str, expert_data: torch.Tensor,
                     shard_dim: int, loaded_weight: torch.Tensor, tp_rank: int):
@@ -908,7 +909,13 @@ class FusedMoE(torch.nn.Module):
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
+#<<<<<<< HEAD
             if self.activation_scheme != "static" or self.dp_opt < 4:
+#=======
+            if (self.activation_scheme != "static" and
+                os.environ.get('REDUCE_GRAPH_BREAK', '0').lower() in ('false', '0') and
+                os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0')):
+#>>>>>>> kf-fork/deepseek_r1_ww33_kf
                 hidden_states_across_dp = get_forward_context(
                 ).dp_metadata.hidden_states_across_dp
                 hidden_states = self.multicast_fn(hidden_states,

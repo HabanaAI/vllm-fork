@@ -14,5 +14,5 @@
             "mlp\\.gate\\b"
         ]
     },
-    "dump_stats_path": "./pd_xpyd/Inc_fp8_tp1ep16/inc_measure_output"
+    "dump_stats_path": "../pd_xpyd/Inc_fp8_tp1ep16/inc_measure_output"
 }

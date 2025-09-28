@@ -20,6 +20,7 @@ if [ -n "$XPYD_LOG" ]; then
     echo "Starting etcd, logging to $ETCD_LOG..."
     "${ETCD_CMD[@]}" > "$ETCD_LOG" 2>&1 &
 
+#<<<<<<< HEAD
     # Run mooncake_master with logging
     MOON_LOG="$XPYD_LOG/mooncake_master_${timestamp}.log"
     echo "Starting mooncake_master, logging to $MOON_LOG..."
@@ -29,5 +30,16 @@ else
     echo "XPYD_LOG not set, running without logging..."
     "${ETCD_CMD[@]}" > /dev/null 2>&1 &
     "${MOON_CMD[@]}" > /dev/null 2>&1 &
+#=======
+#etcd --listen-client-urls http://0.0.0.0:2379 \
+#     --advertise-client-urls http://10.112.242.154:2379 \
+#     >etcd.log 2>&1 &
+#     #--advertise-client-urls http://10.112.242.154:2379 \
+#
+#if [ "$BENCHMARK_MODE" == "1" ]; then
+#  mooncake_master -max_threads 64 -port 50001 >mooncake_master.log 2>&1 &
+#else
+#  mooncake_master -enable_gc true -max_threads 64 -port 50001 >mooncake_master.log 2>&1 &
+#>>>>>>> kf-fork/deepseek_r1_ww33_kf
 fi
 
