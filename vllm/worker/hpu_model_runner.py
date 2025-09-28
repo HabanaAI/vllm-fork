@@ -832,6 +832,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.skip_prefill_sampling = envs.VLLM_SKIP_PREFILL_SAMPLING
         logger.info("will skip prefill sampling: %s", self.skip_prefill_sampling)
 
+        self.fetch_kv_use_async_d2h = int(os.environ.get("VLLM_FETCH_KV_USE_ASYNC_D2H", "0"))
+        print(f"fetch_kv_use_async_d2h: {self.fetch_kv_use_async_d2h}")
+
     def _set_gc_threshold(self) -> None:
         """
         Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -3064,12 +3067,22 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         )
 
                     def fetch_kv_to_host(model, model_input, kv_caches,
-                                         hidden_states):
-                        input_tokens_tensor_cpu = model_input.input_tokens.to(
-                            "cpu"
-                        )  # shape: [batch_size, seq_len_padding_to_128]
-                        torch.hpu.synchronize(
-                        )  # sync here may hurt performance.
+                                         hidden_states, async_d2h=0):
+                        if async_d2h == 1 or async_d2h == 2:
+                            input_tokens_tensor_cpu = model_input.input_tokens.to(
+                                "cpu", non_blocking=True
+                            )  # shape: [batch_size, seq_len_padding_to_128]
+                        elif async_d2h == 3:
+                            # HACK
+                            input_tokens_tensor_cpu = torch.empty_like(model_input.input_tokens, device='cpu')
+                            torch.hpu.synchronize(
+                            )  # sync here may hurt performance.
+                        else:
+                            input_tokens_tensor_cpu = model_input.input_tokens.to(
+                                "cpu"
+                            )  # shape: [batch_size, seq_len_padding_to_128]
+                            torch.hpu.synchronize(
+                            )  # sync here may hurt performance.
                         seq_lens = model_input.attn_metadata.seq_lens
                         start_layer = model.model.start_layer
                         end_layer = model.model.end_layer
@@ -3102,22 +3115,53 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     key_cache.index_select(
                                         0, current_slot_mapping).unsqueeze(0))
                             keys = torch.cat(keys, dim=0)
-                            kv_cache_to_sent = keys.cpu()
-                            current_hidden_states = hidden_states[
-                                idx].unsqueeze(0).cpu()
-                            # ==== graph should end here ======
-                            htorch.core.mark_step()
-                            torch.hpu.synchronize()
+                            if async_d2h == 1 or async_d2h == 2:
+                                kv_cache_to_sent = keys.to('cpu', non_blocking=True)
+                                current_hidden_states = hidden_states[
+                                    idx].unsqueeze(0).to('cpu', non_blocking=True)
+                            elif async_d2h == 3:
+                                # HACK
+                                kv_cache_to_sent = torch.empty_like(keys,device='cpu')
+                                current_hidden_states = torch.empty_like(hidden_states[idx].unsqueeze(0), device='cpu')
+                            else:
+                                kv_cache_to_sent = keys.cpu()
+                                current_hidden_states = hidden_states[
+                                    idx].unsqueeze(0).cpu()
+                                # ==== graph should end here ======
+                                htorch.core.mark_step()
+                                torch.hpu.synchronize()
+                            
+                            
                             kv_caches_send_list.append(kv_cache_to_sent)
                             hidden_states_list.append(current_hidden_states)
                             input_tokens_list.append(current_tokens_cpu)
-
+                        if async_d2h == 2:
+                            # create async event for d2h
+                            event =htorch.hpu.Event()
+                            event.record()
+                        elif async_d2h ==1:
+                            # sync for d2h
+                            torch.hpu.synchronize()
+                            event = None
+                        else:
+                            event = None
                         return (input_tokens_list, kv_caches_send_list,
-                                hidden_states_list)
+                                hidden_states_list,event)
 
                     def send_kv(input_tokens_list, kv_caches_send_list,
-                                hidden_states_list):
+                                hidden_states_list,event):
                         cur_time = time.time()
+                        if self.fetch_kv_use_async_d2h == 2:
+                            assert event is not None
+                            event.synchronize()
+                            now = time.time()
+                            logger.info("event sync time: %s", now - cur_time)
+                        #for tsr in input_tokens_list:
+                        #    _ = tsr.sum().item()
+                        #for tsr in kv_caches_send_list:
+                        #    _ = tsr.sum().item()
+                        #for tsr in hidden_states_list:
+                        #    _ = tsr.sum().item()
                         get_kv_transfer_group(
                         ).send_kv_caches_and_hidden_states_cpu(
                             input_tokens_list, kv_caches_send_list,
@@ -3128,17 +3172,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     def async_send_kv_caches(hidden_states):
                         (input_tokens_list,
                          kv_caches_send_list,
-                         hidden_states_list) = \
+                         hidden_states_list,
+                         event) = \
                             fetch_kv_to_host(self.get_model(),
                                              model_input,
                                              kv_caches,
                                              hidden_states,
-                                             )
+                                             self.fetch_kv_use_async_d2h)
                         self.pd_executor_pool.submit(
                             send_kv,
                             input_tokens_list,
                             kv_caches_send_list,
                             hidden_states_list,
+                            event
                         )
 
                     if self.use_async_kv_transfer_in_pd:
