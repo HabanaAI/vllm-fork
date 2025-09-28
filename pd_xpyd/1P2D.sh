@@ -1,4 +1,5 @@
-workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-kf/pd_xpyd
+#workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-kf/pd_xpyd
+workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-deepseek_r1/pd_xpyd
 
 # Parse options for P benchmark mode (default: off). Usage: ./1P2D.sh [-b]
 P_ARGS=""

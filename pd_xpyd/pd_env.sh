@@ -75,7 +75,7 @@ BENCHMARK_MODE=0
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG END ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 if [ "$BENCHMARK_MODE" -eq 1 ]; then
-    export VLLM_USE_ASYNC_TRANSFER_IN_PD=0
+    export VLLM_USE_ASYNC_TRANSFER_IN_PD=1
 fi
 
 if [ "$DEBUG_LOG" == "1" ]; then
@@ -117,7 +117,7 @@ if [ "$INC_FP8" -eq 1 ]; then
   export VLLM_HPU_MARK_SCALES_AS_CONST=false
 fi
 
-INC_FP8=1
+INC_FP8=0
 
 if [ "$INC_FP8" -eq 1 ]; then
   #model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/

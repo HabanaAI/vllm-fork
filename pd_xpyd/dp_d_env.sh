@@ -42,9 +42,9 @@ export VLLM_DELAYED_SAMPLING="true"
 
 model_len=40960
 max_num_batched_tokens=40960
-max_num_seqs=16
+max_num_seqs=6
 input_min=3000
-input_max=4000
+input_max=3500
 output_max=1000
 
 # ***************************************  bucketing ******************************************* #
@@ -118,7 +118,10 @@ export VLLM_EP_SIZE=16
 #  export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json
 #fi
 #=======
-export PT_HPU_MOE_THRESHOLD=64
+export VLLM_SUPPORT_MOE_CHUNK="true"
+export PT_HPU_MOE_CHUNK="64, 128"
+export PT_HPU_MOE_TOKEN_BOUNDARY="2048, 4096" # to be fine tuned further
+#export PT_HPU_MOE_THRESHOLD=64
 
 if [ "$INC_FP8" -eq 1 ]; then
   export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json

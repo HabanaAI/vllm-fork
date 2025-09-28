@@ -33,7 +33,7 @@ if [ "$KILL_MODE" = true ]; then
     echo "-------------------------------------------------------------------"
     echo "Killing proxy server processes..."
     echo "-------------------------------------------------------------------"
-    pkill -KILL -f disagg_proxy_demo
+    pkill -KILL -f disagg_proxy
     pkill -KILL -f xpyd_start_proxy.sh
     echo "Proxy server processes killed."
     exit 0
@@ -44,7 +44,7 @@ if [ "$RESTART_MODE" = true ]; then
     echo "-------------------------------------------------------------------"
     echo "Restarting proxy server - killing existing processes..."
     echo "-------------------------------------------------------------------"
-    pkill -KILL -f disagg_proxy_demo
+    pkill -KILL -f disagg_proxy
     pkill -KILL -f xpyd_start_proxy.sh
     echo "Existing proxy server processes killed."
 fi

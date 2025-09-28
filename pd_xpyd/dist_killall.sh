@@ -1,4 +1,5 @@
-workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-kf/pd_xpyd
+#workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-kf/pd_xpyd
+workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-deepseek_r1/pd_xpyd
 echo "Kill on 1P"
 bash ./killall.sh
 sleep 1

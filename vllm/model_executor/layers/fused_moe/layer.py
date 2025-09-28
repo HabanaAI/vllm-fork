@@ -910,7 +910,7 @@ class FusedMoE(torch.nn.Module):
             ).dp_metadata.cu_tokens_across_dp_cpu
 
 #<<<<<<< HEAD
-            if self.activation_scheme != "static" or self.dp_opt < 4:
+            #if self.activation_scheme != "static" or self.dp_opt < 4:
 #=======
             if (self.activation_scheme != "static" and
                 os.environ.get('REDUCE_GRAPH_BREAK', '0').lower() in ('false', '0') and

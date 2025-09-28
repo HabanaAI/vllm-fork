@@ -13,6 +13,8 @@ source "$BASH_DIR"/pd_env.sh
 
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 
+echo $1,$2,$3,$4,$5,$6
+
 if [ -z "$1" ]; then
     echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
     echo "run with default mode P=1, D=2, TP size=1, false, 127"
@@ -100,10 +102,9 @@ else
     REPEAT_D_TIMES=$5
 fi
 
-BENCHMARK_MODE=0
 
 if [ "$6" == "benchmark" ]; then
-    BENCHMARK_MODE=1
+    PROXY_MODE=2
 #>>>>>>> kf-fork/deepseek_r1_ww33_kf
     echo " Benchmark mode enabled"
 fi
@@ -145,13 +146,8 @@ for ((i=0; i<P_INSTANCE_NUMBER; i++)); do
     PREFILL_ARGS="$PREFILL_ARGS ${IP}:${PORT}"
 done
 
-#<<<<<<< HEAD
 if [ "$PROXY_MODE" == 2 ]; then
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_benchmark.py \
-#=======
-#if [ "$BENCHMARK_MODE" == "1" ]; then
-#    CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark.py \
-#>>>>>>> kf-fork/deepseek_r1_ww33_kf
+    CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_benchmark.py \
         --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
@@ -161,18 +157,13 @@ if [ "$PROXY_MODE" == 2 ]; then
         --benchmark_mode"
 
 elif [ "$PROXY_MODE" == 0 ]; then
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_advanced.py \
+    CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_advanced.py \
         --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
         --port 8868"
 else
-#<<<<<<< HEAD
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_basic.py \
-#=======
-
-#    CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_demo.py \
-#>>>>>>> kf-fork/deepseek_r1_ww33_kf
+    CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_basic.py \
         --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
