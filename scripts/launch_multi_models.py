@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-#Multi-Model vLLM Server Launcher, focusing on embedding and rerank use case
-#ENV config are tuned for those models.
-#Basic Usage:
+# Multi-Model vLLM Server Launcher, focusing on embedding and rerank use case
+# ENV config are tuned for those models.
+# Basic Usage:
 #    python launch_multi_models.py --models model1 model2
 #    python launch_multi_models.py --models model1 model2 --max-model-len 4096
-#    python launch_multi_models.py --models model1 model2 --env-preset performance
-#Key Parameters:
+#    python launch_multi_models.py --models model1 model2 --env-preset \
+#    performance
+# Key Parameters:
 #    --models: List of models to load (required)
 #    --port: Server port (default: 8000)
 #    --max-model-len: Maximum model length (default: 512)
@@ -16,13 +17,15 @@
 #    --stop-all: Stop all running models
 #    --timeout: Startup timeout in seconds (default: 300)
 #    --log-file: Log file path
-#Examples:
+# Examples:
 # Basic usage
-#    python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base --port 8771
+#    python launch_multi_models.py --models /data/models/gte-modernbert-base \
+#    /data/models/gte-reranker-modernbert-base --port 8771
 # Custom max model length
 #    python launch_multi_models.py --models model1 model2 --max-model-len 4096
 # Performance preset
-#    python launch_multi_models.py --models model1 model2 --env-preset performance
+#    python launch_multi_models.py --models model1 model2 --env-preset \
+#    performance
 
 import argparse
 import os
@@ -31,7 +34,6 @@ import subprocess
 import time
 import json
 import sys
-from typing import Dict, Any, Optional
 
 import requests
 
@@ -80,13 +82,16 @@ Examples:
   python launch_multi_models.py --models model1 model2 --max-model-len 4096
 
   # With performance tuning preset
-  python launch_multi_models.py --models model1 model2 --env-preset performance
+  python launch_multi_models.py --models model1 model2 --env-preset \
+  performance
 
   # With custom environment config file
-  python launch_multi_models.py --models model1 model2 --env-config custom_env.json
+  python launch_multi_models.py --models model1 model2 --env-config \
+  custom_env.json
 
   # With individual environment variables
-  python launch_multi_models.py --models model1 model2 --env VLLM_SKIP_WARMUP=false --env PT_HPU_LAZY_MODE=1
+  python launch_multi_models.py --models model1 model2 --env \
+  VLLM_SKIP_WARMUP=false --env PT_HPU_LAZY_MODE=1
         """)
 
     parser.add_argument("--models", nargs="+", required=True,
@@ -103,7 +108,8 @@ Examples:
                         choices=["bfloat16", "float32"],
                         help="Data type (default: bfloat16)")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.3,
-                        help="GPU memory utilization (0.0-1.0), auto-calculated if not specified")
+                        help="GPU memory utilization (0.0-1.0), auto-calculated"
+                             "if not specified")
     parser.add_argument("--timeout", type=int, default=300,
                         help="Server startup timeout in seconds (default: 300)")
     parser.add_argument("--log-file", type=str, default=LOG_FILE,
@@ -112,14 +118,17 @@ Examples:
     # Environment variable options
     env_group = parser.add_mutually_exclusive_group()
     env_group.add_argument("--env-preset", type=str,
-                          choices=["default", "performance"],
-                          default="default",
-                          help="Environment variable preset (default: default)")
+                           choices=["default", "performance"],
+                           default="default",
+                           help="Environment variable preset"
+                                "(default: default)")
     env_group.add_argument("--env-config", type=str,
-                          help="Path to JSON file containing environment variables")
+                           help="Path to JSON file containing environment "
+                                "variables")
 
     parser.add_argument("--env", action="append", default=[],
-                        help="Set individual environment variable (can be used multiple times)")
+                        help="Set individual environment variable (can be used "
+                             "multiple times)")
 
     parser.add_argument("--list-env-presets", action="store_true",
                         help="List available environment variable presets")
@@ -137,16 +146,17 @@ def list_env_presets():
     print("\n2. performance (optimized for throughput):")
     for key, value in PERFORMANCE_ENV_VARS.items():
         print(f"   {key}={value}")
-    print("\nNote: performance preset includes bucket configuration for optimal throughput")
+    print("\nNote: performance preset includes bucket configuration for "
+          "optimal throughput")
 
 
-def load_env_config(config_path: str) -> Dict[str, str]:
+def load_env_config(config_path: str) -> dict[str, str]:
     """Load environment variables from JSON config file."""
     try:
         with open(config_path, 'r') as f:
             config = json.load(f)
             if not isinstance(config, dict):
-                raise Value
+                raise ValueError("Config must be a dictionary")
             return {str(k): str(v) for k, v in config.items()}
     except FileNotFoundError:
         print(f"Error: Environment config file '{config_path}' not found")
@@ -159,19 +169,20 @@ def load_env_config(config_path: str) -> Dict[str, str]:
         sys.exit(1)
 
 
-def parse_env_vars(env_list: list) -> Dict[str, str]:
+def parse_env_vars(env_list: list) -> dict[str, str]:
     """Parse individual environment variable settings."""
     env_vars = {}
     for env_str in env_list:
         if '=' not in env_str:
-            print(f"Error: Invalid environment variable format '{env_str}'. Use KEY=value format")
+            print(f"Error: Invalid environment variable format '{env_str}'. "
+                  "Use KEY=value format")
             sys.exit(1)
         key, value = env_str.split('=', 1)
         env_vars[key.strip()] = value.strip()
     return env_vars
 
 
-def get_environment_variables(args) -> Dict[str, str]:
+def get_environment_variables(args) -> dict[str, str]:
     """Get environment variables based on arguments."""
     if args.list_env_presets:
         list_env_presets()
@@ -216,7 +227,8 @@ def get_running_models(port):
             print("running_models", models)
             return models
         else:
-            print(f"Failed to query running models. Status code: {response.status_code}")
+            print(f"Failed to query running models. "
+                  f"Status code: {response.status_code}")
             return []
     except requests.exceptions.RequestException as e:
         print(f"Error connecting to server: {e}")
@@ -234,7 +246,8 @@ def kill_existing_pid(pid):
         print(f"Error killing PID {pid}: {e}")
 
 
-def launch_server(models, port, max_model_len, device, dtype, gpu_memory_utilization,
+def launch_server(models, port, max_model_len, device, dtype,
+                  gpu_memory_utilization,
                   env_vars, log_file, timeout):
     """Launch a vLLM server with customized configuration."""
 
@@ -242,7 +255,7 @@ def launch_server(models, port, max_model_len, device, dtype, gpu_memory_utiliza
     if gpu_memory_utilization is None:
         gpu_memory_utilization = 7 // len(models) / 10
 
-    print(f"Launching server with configuration:")
+    print("Launching server with configuration:")
     print(f"  Models: {models}")
     print(f"  Max model length: {max_model_len}")
     print(f"  Device: {device}")
@@ -277,7 +290,8 @@ def launch_server(models, port, max_model_len, device, dtype, gpu_memory_utiliza
                 pid_file.write(str(process.pid))
 
         # Wait for the server to log "Started server process"
-        print(f"Waiting for server to start. Monitoring {log_file} for output...")
+        print(f"Waiting for server to start. Monitoring {log_file} "
+              f"for output...")
         server_started = False
         start_time = time.time()
 
@@ -293,10 +307,12 @@ def launch_server(models, port, max_model_len, device, dtype, gpu_memory_utiliza
 
         if server_started:
             elapsed_time = time.time() - start_time
-            print(f"\nServer started successfully! Took {elapsed_time:.2f} seconds.")
+            print(f"\nServer started successfully! "
+                  f"Took {elapsed_time:.2f} seconds.")
             return True
         else:
-            print(f"\nServer did not start within the timeout period ({timeout}s).")
+            print(f"\nServer did not start within the timeout period "
+                  f"({timeout}s).")
             return False
 
     except Exception as e:
@@ -336,10 +352,12 @@ def main():
     if existing_pid and not args.force_restart:
         running_models = get_running_models(args.port)
         if set(running_models) == set(args.models):
-            print("Server is already running with the requested models. No action required.")
+            print("Server is already running with the requested models. "
+                  "No action required.")
             return
         else:
-            print("Running models do not match the requested models. Restarting server.")
+            print("Running models do not match the requested models. "
+                  "Restarting server.")
             kill_existing_pid(existing_pid)
 
     if existing_pid and args.force_restart:
