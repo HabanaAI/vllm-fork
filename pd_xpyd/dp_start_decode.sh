@@ -34,6 +34,7 @@ export VLLM_DP_SIZE=$DP_SIZE
 export VLLM_DP_MASTER_IP=$DP_HOST_IP
 export VLLM_EP_SIZE=$EP_SIZE
 
+
 if [ "$DP_SIZE" -eq 1 ]; then
   unset VLLM_DP_SIZE
   unset VLLM_DP_MASTER_IP
@@ -54,8 +55,8 @@ export VLLM_TORCH_PROFILER_DIR=./profiles
 export VLLM_PROFILER_ENABLED=true
 export VLLM_PROFILE_CONFIG_PATH=profile_config.json
 export HABANA_PROFILE_WRITE_HLTV=1
-#export HABANA_PROFILE=profile_api_with_nics
-export HABANA_PROFILE=profile_api
+export HABANA_PROFILE=profile_api_with_nics
+#export HABANA_PROFILE=profile_api
 
 
 # Control whether to apply numactl bindings (1=enable, 0=disable)

@@ -47,7 +47,7 @@ export PT_HPU_METRICS_GC_DETAILS=1
 
 #hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on --gaudi2 --merged "hltv,csv"
 #hl-prof-config --use-template profile_api_with_nics  --fuser on --trace-analyzer on
-hl-prof-config -b 16384 --trace-analyzer off --gaudi3
+hl-prof-config --use-template profile_api_with_nics -b 32768 --trace-analyzer on --fuser on --gaudi3 
 
 
 #export HABANA_PROFILE=1
@@ -121,7 +121,13 @@ INC_FP8=0
 
 if [ "$INC_FP8" -eq 1 ]; then
   #model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
-  model_path=/host/mnt/disk001/HF_Models/DeepSeek-R1
+  if [ "$(hostname)" == "3FG3" ]; then
+    model_path=/host/mnt/disk6/hf_models/DeepSeek-R1-G2-inc/
+  elif [ "$(hostname)" == "3FG15" ] || [ "$(hostname)" == "3FG16" ]; then
+    model_path=/host/mnt/disk2/hf_models/DeepSeek-R1-G2-inc
+  else
+    model_path=/host/mnt/disk001/HF_Models/DeepSeek-R1
+  fi
 else
   model_path=/host/mnt/disk002/HF_Models/DeepSeek-R1-Gaudi3/
 fi

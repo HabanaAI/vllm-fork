@@ -5,7 +5,7 @@ unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 ## Adjust or extend as needed.
 cases=(
   #"3500 64"
-  "3500 96"
+  #"3500 96"
   #"3500 112"
   #"3500 128"
   #"3500 144"
@@ -15,7 +15,7 @@ cases=(
   #"3500 208"
   #"3500 224"
   #"3500 240"
-  #"3500 256"
+  "3500 256"
   #"3500 272"
   #"3500 288"
   #"3500 512"
@@ -53,13 +53,13 @@ for case in "${cases[@]}"; do
   echo "####################   2nd ROUND   #####################"
   echo "########################################################"
   python benchmark_serving.py --backend vllm --dataset-name sonnet --dataset-path sonnet.txt --sonnet-input-len "$input_len" --sonnet-output-len 1000 --sonnet-prefix-len 100 --host 10.112.242.154 --port 8868 --max-concurrency "$concurrency" --request-rate inf --ignore-eos --model $model_path --num-prompt 1
-  #pushd /host/mnt/ctrl/disk1/kf/vllm-fork-kf/pd_xpyd/
-  #bash ./PXY.sh -b -d -r -t $((concurrency - 1))
-  #popd
-  #echo "########################################################"
-  #echo "####################   3rd ROUND   #####################"
-  #echo "########################################################"
-  #python benchmark_serving.py --backend vllm --dataset-name sonnet --dataset-path sonnet.txt --sonnet-input-len "$input_len" --sonnet-output-len 1000 --sonnet-prefix-len 100 --host 10.112.242.154 --port 8868 --max-concurrency "$concurrency" --request-rate inf --ignore-eos --model $model_path --num-prompt 1
+  pushd /host/mnt/ctrl/disk1/kf/vllm-fork-kf/pd_xpyd/
+  bash ./PXY.sh -b -d -r -t $((concurrency - 1))
+  popd
+  echo "########################################################"
+  echo "####################   3rd ROUND   #####################"
+  echo "########################################################"
+  python benchmark_serving.py --backend vllm --dataset-name sonnet --dataset-path sonnet.txt --sonnet-input-len "$input_len" --sonnet-output-len 1000 --sonnet-prefix-len 100 --host 10.112.242.154 --port 8868 --max-concurrency "$concurrency" --request-rate inf --ignore-eos --model $model_path --num-prompt 1
 done
 
 

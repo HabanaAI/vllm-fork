@@ -840,6 +840,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.fetch_kv_use_async_d2h = int(os.environ.get("VLLM_FETCH_KV_USE_ASYNC_D2H", "0"))
         print(f"fetch_kv_use_async_d2h: {self.fetch_kv_use_async_d2h}")
 
+        self.fetch_kv_use_async_d2h = int(os.environ.get("VLLM_FETCH_KV_USE_ASYNC_D2H", "0"))
+        print(f"fetch_kv_use_async_d2h: {self.fetch_kv_use_async_d2h}")
+
     def _set_gc_threshold(self) -> None:
         """
         Read https://docs.python.org/3/library/gc.html#gc.set_threshold

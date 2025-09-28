@@ -1,11 +1,16 @@
 #workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-kf/pd_xpyd
 workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-deepseek_r1/pd_xpyd
+
+source env.sh
+
 echo "Kill on 1P"
 bash ./killall.sh
 sleep 1
-echo "[SSH] kill on D1 10.112.242.153"
-ssh root@10.112.242.153 "cd $workdir; bash ./killall.sh"
+echo ${ROLE_IP[D0]},${ROLE_IP[D1]}
+ssh root@${ROLE_IP[D0]} "cd $workdir; bash ./killall.sh"
+
+
 sleep 1
-echo "[SSH] Kill on D2 10.112.242.24"
-ssh root@10.112.242.24 "cd $workdir; bash ./killall.sh"
+echo "[SSH] Kill on D2 ${ROLE_IP[D1]}"
+ssh root@${ROLE_IP[D1]} "cd $workdir; bash ./killall.sh"
 

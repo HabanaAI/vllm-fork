@@ -78,8 +78,8 @@ export VLLM_SKIP_WARMUP=True
 export VLLM_DP_SIZE=1
 export VLLM_USE_V1=0
 export VLLM_EP_SIZE=8
-#export VLLM_TTFT_TRACE=true
-#export VLLM_TTFT_TRACE_STACK=true
+export VLLM_TTFT_TRACE=false
+export VLLM_TTFT_TRACE_STACK=false
 
 export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_p,false,16384,false
 

@@ -8,7 +8,7 @@ export VLLM_GRAPH_RESERVED_MEM=0.3
 
 # Enable packed allgather optimization
 export ENABLE_PACKED_ALLGATHER=1
-export ENABLE_PRE_SHARED_EXPERT=1
+export SHARED_EXPERT_DISPOSITION=2
 export VLLM_USE_NUMACTL=1
 export VLLM_SPLIT_CPU_BIND=0
 export VLLM_DEBUG_TOPO=1
@@ -56,7 +56,6 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 set_bucketing
 
 
-
 export VLLM_DECODE_BS_BUCKET_STEP=1
 export VLLM_DECODE_BLOCK_BUCKET_STEP=2
 
@@ -99,7 +98,8 @@ export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8
 # decode specific settings
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0
-export VLLM_DP_MASTER_IP=10.239.129.81
+
+
 export VLLM_DP_MASTER_PORT=25940
 export VLLM_EP_SIZE=16
 

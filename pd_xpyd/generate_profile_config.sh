@@ -8,10 +8,11 @@ RANKS=""
 TARGET=""
 CONFIG_DIR=""
 WARMUP_STEPS=""
+PROMPT_RUN="false"
 
 # Function to display usage
 usage() {
-    echo "Usage: $0 -i inflight_requests -b block_size -s steps -r ranks -t target -p config_directory_path [-w warmup_steps]" >&2
+    echo "Usage: $0 -i inflight_requests -b block_size -s steps -r ranks -t target -p config_directory_path [-w warmup_steps] [-m prompt_run_flag]" >&2
     echo "" >&2
     echo "Arguments:" >&2
     echo "  -i: Number of inflight requests (required)" >&2
@@ -21,6 +22,7 @@ usage() {
     echo "  -t: Target - must be one of: P, D, BOTH (required)" >&2
     echo "  -p: Directory path where profile_config.json will be created (required)" >&2
     echo "  -w: Warmup steps - defer profiling start by this many steps (optional, default: 0)" >&2
+    echo "  -m: Enable prompt-run deferral (true/false, optional, default: false)" >&2
     echo "" >&2
     echo "Examples:" >&2
     echo "  $0 -i 10 -b 1024 -s 100 -r '0,1,2' -t 'P' -p ./configs" >&2
@@ -30,7 +32,7 @@ usage() {
 }
 
 # Parse command line arguments
-while getopts "i:b:s:r:t:p:w:h" opt; do
+while getopts "i:b:s:r:t:p:w:m:h" opt; do
     case $opt in
         i) INFLIGHT_REQUESTS="$OPTARG" ;;
         b) BLOCK_SIZE="$OPTARG" ;;
@@ -39,6 +41,7 @@ while getopts "i:b:s:r:t:p:w:h" opt; do
         t) TARGET="$OPTARG" ;;
         p) CONFIG_DIR="$OPTARG" ;;
         w) WARMUP_STEPS="$OPTARG" ;;
+        m) PROMPT_RUN="$OPTARG" ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -54,6 +57,11 @@ fi
 # Set default warmup steps if not provided
 if [[ -z "$WARMUP_STEPS" ]]; then
     WARMUP_STEPS=0
+fi
+
+# Normalize prompt run flag (default false)
+if [[ -z "$PROMPT_RUN" ]]; then
+    PROMPT_RUN="false"
 fi
 
 # Validate numeric inputs
@@ -74,6 +82,12 @@ fi
 
 if ! [[ "$WARMUP_STEPS" =~ ^[0-9]+$ ]]; then
     echo "Error: Warmup steps (-w) must be a non-negative integer." >&2
+    exit 1
+fi
+
+# Validate prompt run flag
+if [[ "$PROMPT_RUN" != "true" && "$PROMPT_RUN" != "false" ]]; then
+    echo "Error: Prompt run flag (-m) must be either 'true' or 'false'." >&2
     exit 1
 fi
 
@@ -114,7 +128,8 @@ cat > "$CONFIG_PATH" << EOF
     "steps": $STEPS,
     "profile_ranks": $RANKS_JSON,
     "profile_targets": "$TARGET",
-    "warmup": $WARMUP_STEPS
+    "warmup": $WARMUP_STEPS,
+    "prompt_run": $PROMPT_RUN
 }
 EOF
 
@@ -130,6 +145,7 @@ if [[ $? -eq 0 && -f "$CONFIG_PATH" ]]; then
     echo "   • Ranks: $RANKS"
     echo "   • Target: $TARGET"
     echo "   • Warmup steps: $WARMUP_STEPS"
+    echo "   • Prompt run: $PROMPT_RUN"
     echo ""
     echo "📄 Generated JSON content:"
     cat "$CONFIG_PATH" | sed 's/^/   /'
