@@ -6,7 +6,7 @@ source "$BASH_DIR"/pd_env.sh
 
 # Enable packed allgather optimization
 export ENABLE_PACKED_ALLGATHER=1
-export ENABLE_PRE_SHARED_EXPERT=1
+export SHARED_EXPERT_DISPOSITION=2
 export VLLM_USE_NUMACTL=1
 export VLLM_SPLIT_CPU_BIND=0
 export VLLM_DEBUG_TOPO=1
@@ -36,8 +36,15 @@ model_len=40960
 max_num_batched_tokens=40960
 max_num_seqs=16
 input_min=3000
-input_max=4000
+input_max=3500
 output_max=1000
+
+#model_len=40960
+#max_num_batched_tokens=40960
+#max_num_seqs=16
+#input_min=3000
+#input_max=3500
+#output_max=1000
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
@@ -45,7 +52,6 @@ unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET
 unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
 
 set_bucketing
-
 
 
 export VLLM_DECODE_BS_BUCKET_STEP=1
@@ -71,14 +77,15 @@ env | grep VLLM_PROMPT_SEQ
 env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 
-export VLLM_SKIP_WARMUP=True
+#export VLLM_SKIP_WARMUP=True
 #unset VLLM_SKIP_WARMUP
 #export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_d,false,16384
 export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_d,false,16384,false
 
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0
-export VLLM_DP_MASTER_IP=10.239.129.81
+
+
 export VLLM_DP_MASTER_PORT=25940
 export VLLM_EP_SIZE=16
 

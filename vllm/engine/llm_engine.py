@@ -171,6 +171,7 @@ class LLMEngine:
     DO_VALIDATE_OUTPUT: ClassVar[bool] = False
     """A flag to toggle whether to validate the type of request output."""
 
+
     @classmethod
     @contextmanager
     def enable_output_validation(cls):
@@ -257,6 +258,8 @@ class LLMEngine:
         # Warmup state tracking
         self._profile_warmup_steps_left: int = 0
         self._profile_warmup_conditions_met: bool = False
+        self._profile_waiting_for_prompt_run: bool = False
+
 
         # Lazy import helper to avoid circular imports
         def _get_hpu_profiler():
@@ -1053,15 +1056,6 @@ class LLMEngine:
         """
 
         now = time.time()
-        #if os.environ.get("VLLM_TTFT_TRACE_STACK", "").lower() == "true":
-        #    try:
-        #        import traceback
-        #        wall_ms = int(time.time() * 1000)
-        #        stack = ''.join(traceback.format_stack(limit=30))
-        #        logger.info("TTFT_STACK_ENTER wall_ms=%d queue_len=%d\n%s",
-        #                    wall_ms, len(ctx.output_queue), stack)
-        #    except Exception:
-        #        pass
 
         if len(ctx.output_queue) == 0:
             return None
@@ -1565,22 +1559,6 @@ class LLMEngine:
             outputs = self.model_executor.execute_model(
                 execute_model_req=execute_model_req)
 
-            # Stop condition: after N steps since start
-            #if self._profile_started and self._profile_steps_left > 0:
-            #    self._profile_steps_left -= 1
-            #    if self._profile_steps_left == 0:
-            #        profiler_obj = self._get_hpu_profiler()
-            #        if profiler_obj is not None:
-            #            try:
-            #                profiler_obj.stop()
-            #                os.remove(self._profile_ipc_path)
-            #            except Exception:
-            #                pass
-            #        self._profile_started = False
-            #        # Reset config so that only a new IPC file can trigger next start
-            #        self._profile_cfg = None
-            #        self._profile_cfg_mtime_ns = 0
-
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
             if self.scheduler_config.is_multi_step:
@@ -1847,12 +1825,14 @@ class LLMEngine:
                     role_single = current_profile_cfg.get("profile_targets")
                     if isinstance(role_single, str):
                         allowed_roles = {role_single.upper()}
+                prompt_run_flag = bool(current_profile_cfg.get("prompt_run", False))
             except Exception:
                 target_inflight = target_block_size = -1
                 profile_steps = 0
                 warmup_steps = 0
                 allowed_ranks = None
                 allowed_roles = None
+                prompt_run_flag = False
 
             # Determine this process rank (prefer torch.distributed, fallback to env)
             try:
@@ -1907,7 +1887,22 @@ class LLMEngine:
             #  - rank allowed, role allowed, profile_steps > 0
             #  - inflight equals target
             #  - D-path requires block-size >= target (lower bound); P-path does not
-            d_ok = (current_batch_blocks > 0 and target_block_size >= 0 and current_batch_blocks >= target_block_size)
+            # For decode batches, the profiler starts only when prompt_run is true.
+            # For decode we can also capture the block size for logging/triggering.
+            if is_decode_batch:
+                block_condition_ok = (current_batch_blocks > 0 and target_block_size >= 0
+                                      and current_batch_blocks >= target_block_size)
+            else:
+                block_condition_ok = True
+            if prompt_run_flag and is_decode_batch:
+                instance._profile_waiting_for_prompt_run = block_condition_ok
+                d_ok = False
+            elif prompt_run_flag and not is_decode_batch:
+                d_ok = block_condition_ok and instance._profile_waiting_for_prompt_run
+                instance._profile_waiting_for_prompt_run = False
+            else:
+                instance._profile_waiting_for_prompt_run = False
+                d_ok = block_condition_ok
             p_ok = True  # no block-size gating for P
             start_allowed = False
             if is_disagg:

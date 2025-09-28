@@ -1112,6 +1112,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     s = i * self.moe_slice_length
                     e = batched_tokens if i == (n_slice -
                                     1) else (i + 1) * self.moe_slice_length
+
                     current_hidden_states = torch.ops.hpu.mixture_of_experts(
                         hidden_states=x_fp8[s:e, ...],
                         expert_routing_table=topk_ids[s:e, ...],

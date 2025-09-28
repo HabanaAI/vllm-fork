@@ -112,9 +112,8 @@ class DeepseekV2MoE(nn.Module):
         self.n_shared_experts = config.n_shared_experts
         self.routed_scaling_factor = config.routed_scaling_factor
 
-        self.pre_shared_experts = False
-        if os.environ.get('ENABLE_PRE_SHARED_EXPERT', '1').lower() in ('true', '1'):
-            self.pre_shared_experts = True
+        self.shared_expert_disposition = int(os.environ.get('SHARED_EXPERT_DISPOSITION', '0').lower())
+
 
         if config.hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {config.hidden_act}. "
@@ -165,7 +164,7 @@ class DeepseekV2MoE(nn.Module):
         hidden_states = hidden_states.view(-1, hidden_dim)
         num_tokens = hidden_states.shape[0]
         
-        if self.n_shared_experts is not None and self.pre_shared_experts:
+        if self.n_shared_experts is not None and self.shared_expert_disposition == 2:
             final_hidden_states = self.shared_experts(hidden_states)
             
         # router_logits: (num_tokens, n_experts)
@@ -184,15 +183,24 @@ class DeepseekV2MoE(nn.Module):
         #else:
         #    final_hidden_states = moe_hidden_states
         if self.n_shared_experts is not None:
-            if not self.pre_shared_experts:
-                final_hidden_states = self.shared_experts(hidden_states)
-            final_hidden_states.add_(moe_hidden_states)
+            if self.shared_expert_disposition != 1:
+                if self.shared_expert_disposition == 0:
+                    final_hidden_states = self.shared_experts(hidden_states)
+                final_hidden_states.add_(moe_hidden_states)
         else:
             final_hidden_states = moe_hidden_states
 
         if self.tp_size > 1:
             final_hidden_states = tensor_model_parallel_all_reduce(
                 final_hidden_states)
+        
+        if self.n_shared_experts is not None and self.shared_expert_disposition == 1:
+            assert self.tp_size == 1
+            import habana_frameworks.torch as ht
+            shared_expert_stream = ht.hpu.Stream()
+            with ht.hpu.stream(shared_expert_stream):
+                final_hidden_states = self.shared_experts(hidden_states)
+            final_hidden_states.add_(moe_hidden_states)
 
         if is_hpu:
             return final_hidden_states.view(

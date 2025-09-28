@@ -70,6 +70,17 @@ fi
 mkdir -p pd_test_log
 
 log_file="pd_test_log/proxy.log"
+
+MAX_SIZE=$((50*1024*1024))
+if [ -f "$log_file" ]; then
+  cur_size=$(stat -c%s "$log_file" 2>/dev/null || echo 0)
+  if [ "$cur_size" -gt "$MAX_SIZE" ]; then
+    ts=$(TZ="Asia/Shanghai" date +"%Y%m%d_%H%M%S")
+    mv "$log_file" "${log_file}.${ts}"
+    : > "$log_file"
+  fi
+fi
+
 echo "-------------------------------------------------------------------"
 echo "Being brought to background"
 echo "Log will be redirect to $log_file"

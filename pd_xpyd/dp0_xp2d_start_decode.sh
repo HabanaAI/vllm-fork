@@ -12,6 +12,13 @@ else
     TP_SIZE=$1
 fi
 
+# Optional hostname as second argument; default to existing host if not provided
+if [ -z "$2" ]; then
+    HOSTNAME="G3D-sys01"
+else
+    HOSTNAME="$2"
+fi
+
 export HCCL_OVER_OFI=1
 export HCCL_GAUDI_DIRECT=1
 export HCCL_SOCKET_IFNAME=enp24s0f0np0
@@ -24,4 +31,8 @@ log_file="$log_dir/decode0_${timestamp}.log"
 
 
 #source "$BASH_DIR"/dp_start_decode.sh G3D-sys03 16 $TP_SIZE 0 "10.112.242.154"
-source "$BASH_DIR"/dp_start_decode.sh G3D-sys01 16 $TP_SIZE 0 "10.112.242.153"
+#source "$BASH_DIR"/dp_start_decode.sh "$HOSTNAME" 16 $TP_SIZE 0 "10.112.242.153"
+
+DP_MASTER_IP=${USR_DP_MASTER_IP:-10.239.129.21}
+source "$BASH_DIR"/dp_start_decode.sh "$HOSTNAME" 16 $TP_SIZE 0 "$DP_MASTER_IP"
+
