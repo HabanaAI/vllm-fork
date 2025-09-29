@@ -1888,12 +1888,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if image_index_tensor is not None:
             multi_modal_kwargs['image_index'] = image_index_tensor
 
-        use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE", "false").lower() in ("1", "true", "yes")
+        use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE",
+                                  "false").lower() in ("1", "true", "yes")
         if use_mediapipe:
             # With mediapipe path some tensors will already be on HPU, we only move to HPU if needed
             for key in multi_modal_kwargs.keys():
-                if hasattr(multi_modal_kwargs[key], "device") and multi_modal_kwargs[key].device != self.device:
-                    multi_modal_kwargs[key] = self.move_to_device(multi_modal_kwargs[key])
+                if hasattr(multi_modal_kwargs[key], "device"
+                           ) and multi_modal_kwargs[key].device != self.device:
+                    multi_modal_kwargs[key] = self.move_to_device(
+                        multi_modal_kwargs[key])
         else:
             multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
                                                             device=self.device)
