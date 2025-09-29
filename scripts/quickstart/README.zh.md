@@ -206,7 +206,7 @@ huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scr
 对于 DeepSeek-V3.1，请使用以下命令校准模型。命令完成后，DeepSeek-V3.1 测量文件将在文件夹 "scripts/nc_workspace_measure_kvcache" 中生成。
 ```bash
 cd vllm-fork
-bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
+bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2 --nprompts 5000
 ```
 
 #### 2. 配置环境变量（可选）
@@ -441,7 +441,7 @@ cp -r ./scripts/measure_kvcache/ds-r1-0528-g2-tp16 ./scripts/nc_workspace_measur
 对于 DeepSeek-V3.1，请使用以下命令校准模型。命令完成后，DeepSeek-V3.1 测量文件将在文件夹 "vllm-fork/scripts/nc_workspace_measure_kvcache" 中生成。生成测量文件后，您可以将它们复制到其他工作节点的文件夹 vllm-fork/scripts/nc_workspace_measure_kvcache" 中。
 ```bash
 cd vllm-fork
-bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
+bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2 --wd 16 --nprompts 5000
 ```
 
 
