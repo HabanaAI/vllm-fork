@@ -571,7 +571,6 @@ class SamplingTensors:
                     prompt_tokens_cache.device == device):
                     # Reuse cached prompt_tokens already on HPU
                     prompt_t = prompt_tokens_cache
-                    t1 = time.perf_counter()
                     # Get the last element from each list
                     last_elements = [out[-1] for out in output_tokens]
                     lengths = [len(out)-1 for out in output_tokens]
@@ -661,7 +660,6 @@ class SamplingTensors:
         )
         # Because the memory is pinned, we can do non-blocking
         # transfer to device.
-        t1=time.perf_counter()
         output_t=output_t.to(device=device, non_blocking=True) if output_t.device != device else output_t
         return cls(
             temperatures=temperatures_t.to(device=device, non_blocking=True),
