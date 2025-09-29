@@ -567,7 +567,6 @@ class SamplingTensors:
 
         if do_penalties:
             if is_hpu:
-                #print(f"libin debug {prompt_tokens_cache=}")
                 if (prompt_tokens_cache is not None and
                     prompt_tokens_cache.device == device):
                     # Reuse cached prompt_tokens already on HPU
@@ -580,9 +579,7 @@ class SamplingTensors:
                     rows = torch.arange(output_tokens_cache.shape[0], device=device)
                     # Convert to a PyTorch tensor with shape [4, 1]
                     last_elements_t = torch.tensor(last_elements).unsqueeze(1).to(output_tokens_cache.device)
-                    #print(f"libin debug cache hit {last_elements_t.shape=} {last_elements_t=} ")
                     output_t = output_tokens_cache.index_put_((rows, indices), last_elements_t)
-                    print(f"libin debug output_token_time {time.perf_counter()-t1}")
                 else:
                     prompt_t = make_tensor_with_pad_align(
                         prompt_tokens,
@@ -600,8 +597,6 @@ class SamplingTensors:
                         pin_memory=pin_memory,
                         max_len_align=1024,
                     )
-                #print(f"libin debug output_tokens {output_tokens=} {len(output_tokens)=}")
-                #[print(f"libin debug o {o=}") for o in output_tokens]
             else:
                 prompt_t = make_tensor_with_pad(
                     prompt_tokens,
@@ -668,7 +663,6 @@ class SamplingTensors:
         # transfer to device.
         t1=time.perf_counter()
         output_t=output_t.to(device=device, non_blocking=True) if output_t.device != device else output_t
-        print(f"libin debug output_t time:{time.perf_counter()-t1} {output_t.shape=}")
         return cls(
             temperatures=temperatures_t.to(device=device, non_blocking=True),
             top_ps=top_ps_t.to(device=device, non_blocking=True),
