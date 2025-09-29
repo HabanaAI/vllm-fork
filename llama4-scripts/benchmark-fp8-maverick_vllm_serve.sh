@@ -21,6 +21,7 @@ block_step=256
 log_name="[inc-staticquant-scalar-fp8matmul-split]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
  
 prompt_bs_max=1
+max_num_batched_tokens=$((input_len * prompt_bs_max))
 # Increase prompt max seq len bucket just in case there are more tokens than provided due to tokenizer
 prompt_seq_max=$((in_len + $block_size))
 total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
@@ -54,11 +55,12 @@ vllm serve ${model} \
     --port 18080 \
     --tensor-parallel-size ${tp_parrallel} \
     --max-num-seqs ${bs} \
+    --max-num-prefill-seqs ${prompt_bs_max} \
     --disable-log-requests \
     --dtype bfloat16 \
     --num_scheduler_steps ${multi_step} \
     --max-model-len ${total_len} \
-    --max-num-batched-tokens 131072 \
+    --max-num-batched-tokens ${max_num_batched_tokens} \
     --use-padding-aware-scheduling \
     --block-size ${block_size} \
     --weights-load-device cpu \
@@ -91,16 +93,14 @@ python3 ../benchmarks/benchmark_serving.py \
     --backend vllm \
     --model ${model} \
     --tokenizer ${tokenizer} \
-    --dataset-name sonnet \
-    --dataset-path ../benchmarks/sonnet.txt \
     --request-rate ${request_rate} \
     --percentile-metrics ttft,tpot,itl,e2el \
     --ignore-eos \
     --num-prompts ${num_prompts} \
     --port 18080 \
-    --sonnet-input-len ${in_len} \
-    --sonnet-output-len ${out_len} \
-    --sonnet-prefix-len 100 \
+    --dataset-name random \
+    --random-input-len ${in_len} \
+    --random-output-len ${out_len} \
     --max-concurrency ${max_concurrency_client} \
     --save-result 2>&1 | tee benchmark_logs/g3-${model_name}-in${in_len}-out${out_len}-req${request_rate}-num_prompts${num_prompts}-concurrency${max_concurrency_client}.log
 end_time=$(date +%s)
