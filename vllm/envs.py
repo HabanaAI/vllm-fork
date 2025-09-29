@@ -126,6 +126,7 @@ if TYPE_CHECKING:
     VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE: int = 163840
     VLLM_TOOL_PARSE_REGEX_TIMEOUT_SECONDS: int = 1
     VLLM_SLEEP_WHEN_IDLE: bool = False
+    VLLM_HPU_FORCE_MARK_STEP: bool = True
 
 
 def get_default_cache_root():
@@ -739,6 +740,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # between each step.
     "VLLM_HPU_USE_DELAYED_SAMPLING":
     lambda: os.environ.get("VLLM_DELAYED_SAMPLING", "false").lower() in
+    ("1", "true"),
+    
+    # Do mark_step for HPU to split hpu graph or prevent fused kernel
+    "VLLM_HPU_FORCE_MARK_STEP":
+    lambda: os.environ.get("VLLM_HPU_FORCE_MARK_STEP", "true").lower() in
     ("1", "true"),
 
     # Converts model weights to FP8UZ format.
