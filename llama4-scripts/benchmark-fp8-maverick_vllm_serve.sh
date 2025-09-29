@@ -21,7 +21,7 @@ block_step=256
 log_name="[inc-staticquant-scalar-fp8matmul-split]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
  
 prompt_bs_max=1
-max_num_batched_tokens=$((input_len * prompt_bs_max))
+max_num_batched_tokens=$((total_len * prompt_bs_max))
 # Increase prompt max seq len bucket just in case there are more tokens than provided due to tokenizer
 prompt_seq_max=$((in_len + $block_size))
 total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
