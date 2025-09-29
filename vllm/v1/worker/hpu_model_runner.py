@@ -9,7 +9,7 @@ import os
 import time
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Callable, Optional, TypeAlias, Union, Literal
-
+import vllm.envs as envs
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import numpy as np
@@ -556,6 +556,7 @@ class HPUModelRunner:
         # on env vars... this should be fixed in the future
         self.enable_bucketing = get_config().use_bucketing
         self.use_contiguous_pa = get_config().use_contiguous_pa
+        self.do_mark_step = envs.VLLM_HPU_FORCE_MARK_STEP
         self.skip_warmup = get_config().skip_warmup
 
         model_config = self.model_config
@@ -1666,7 +1667,8 @@ class HPUModelRunner:
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
                         self.kv_caches)
-                htorch.core.mark_step()
+                if self.do_mark_step:
+                    htorch.core.mark_step()
                 #logger.info(f'libin debug done prompt {os.getenv('RANK')} {token_ids.shape=} ')
                 with self.profiler.record_event('internal', "sampler"):
                     sampling_metadata = self._prepare_sampling(
@@ -1890,11 +1892,12 @@ class HPUModelRunner:
         hidden_layer_markstep_interval = int(
             os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
         model_config = getattr(self.model, "config", None)
-        modify_model_layers(
-            self.model,
-            get_target_layer_suffix_list(
-                model_config.model_type if model_config is not None else None),
-            hidden_layer_markstep_interval)
+        if self.do_mark_step:
+            modify_model_layers(
+                self.model,
+                get_target_layer_suffix_list(
+                    model_config.model_type if model_config is not None else None),
+                hidden_layer_markstep_interval)
         torch.hpu.synchronize()
 
         with HabanaMemoryProfiler() as m:  # noqa: SIM117
