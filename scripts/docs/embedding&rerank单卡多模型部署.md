@@ -31,7 +31,6 @@ python launch_multi_models.py --models model1 model2 --max-model-len 8192
 python launch_multi_models.py --models model1 model2 --env-preset performance
 ```
 
-
 ## 目录
 
 1. [系统OS配置](#系统os配置)
@@ -59,10 +58,10 @@ cpupower idle-set -d 2
 cpupower idle-set -d 3
 
 ```
+
 ### 安装vLLM-fork
 
 请按照vLLM-fork标准方式安装vLLM 1.22.0 版本。
-
 
 ## 服务启动
 
@@ -80,8 +79,8 @@ cpupower idle-set -d 3
   - JSON配置文件
   - 命令行单独设置
 
-
 #### 基本启动命令
+
 ```bash
 # 自定义max-model-len
 python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base \
@@ -100,6 +99,7 @@ python launch_multi_models.py --models /data/models/gte-modernbert-base /data/mo
 #### 环境变量配置
 
 ##### 使用预设配置
+
 ```bash
 # 默认预设（保守设置）
 python launch_multi_models.py --models model1 model2 --env-preset default
@@ -109,6 +109,7 @@ python launch_multi_models.py --models model1 model2 --env-preset performance
 ```
 
 **性能预设包含的环境变量：**
+
 ```
 VLLM_CONTIGUOUS_PA=false
 VLLM_SKIP_WARMUP=false
@@ -128,12 +129,14 @@ PT_HPU_LAZY_MODE=1
 ```
 
 ##### 使用配置文件
+
 ```bash
 # 从JSON文件加载环境变量配置
 python launch_multi_models.py --models model1 model2 --env-config env_config.json
 ```
 
 配置文件格式（env_config.json）：
+
 ```json
 {
   "VLLM_CONTIGUOUS_PA": "false",
@@ -155,6 +158,7 @@ python launch_multi_models.py --models model1 model2 --env-config env_config.jso
 ```
 
 ##### 单独设置环境变量
+
 ```bash
 # 通过命令行设置特定环境变量，该配置主要用于测试
 python launch_multi_models.py --models model1 model2 \
@@ -164,6 +168,7 @@ python launch_multi_models.py --models model1 model2 \
 ```
 
 #### 高级配置示例
+
 ```bash
 python launch_multi_models.py \
     --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base \
@@ -174,13 +179,14 @@ python launch_multi_models.py \
     --log-file custom_server.log
 ```
 
-
 #### 查看可用预设
+
 ```bash
 python launch_multi_models.py --list-env-presets
 ```
 
 #### 停止所有模型
+
 ```bash
 python launch_multi_models.py --stop-all
 ```
@@ -188,6 +194,7 @@ python launch_multi_models.py --stop-all
 ### 方法二：手动启动服务
 
 #### 基础启动命令
+
 ```bash
 VLLM_CONTIGUOUS_PA=false VLLM_SKIP_WARMUP=true python3 -m \
     vllm.entrypoints.openai.mm_api_server \
@@ -205,16 +212,16 @@ VLLM_CONTIGUOUS_PA=false VLLM_SKIP_WARMUP=true python3 -m \
 可以根据模型大小再作调整。
 - 2个模型：35% GPU内存/模型
 
-
 ### 方法三：API动态管理
 
 #### 查看当前模型列表
+
 ```bash
 curl http://localhost:8771/v1/models
 ```
 
-
 #### 验证模型可用性
+
 ```bash
 # 测试Embedding模型
 curl http://localhost:8771/v1/embeddings \
@@ -238,6 +245,7 @@ curl localhost:8771/rerank \
 ### 基础API客户端配置
 
 #### 嵌入模型配置
+
 ```python
 # 嵌入API端点
 embed_url = f"{base_url}/v1/embeddings"
@@ -251,6 +259,7 @@ embed_data = {
 ```
 
 #### 重排序模型配置
+
 ```python
 # 重排序API端点
 rerank_url = f"{base_url}/rerank"
@@ -263,7 +272,6 @@ rerank_data = {
     "truncate_prompt_tokens": -1
 }
 ```
-
 
 ## 调优参数
 
@@ -296,9 +304,11 @@ PT_HPU_LAZY_MODE=1               # 启用HPU延迟模式
 VLLM_CONTIGUOUS_PA=false         # 禁用连续PA
 VLLM_SKIP_WARMUP=false           # 不禁用预热（启用预热以优化性能）
 ```
+
 #### 不同模型特别调优
 
 针对gte和bge 中小于1B的模型，请将PT_HPU_LAZY_MODE 设置为0，其他参数类型的模型，请使用默认PT_HPU_LAZY_MODE 为1，即可
+
 ```
 python
 python launch_multi_models.py --models /data/models/gte-modernbert-base /data/models/gte-reranker-modernbert-base \
