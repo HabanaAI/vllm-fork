@@ -581,13 +581,18 @@ class Scheduler:
 
             self.scheduler_profiler.start('internal', 'fetching_kv')
             hash_prefix = hash_list(seq_group.prompt_token_ids)
-            prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
-                hash_prefix)
-            if kv_cache is not None:
+            if len(seq_group.prompt_token_ids) == 1:
+                # This is a padding seq. Won't be able to fetch KV. skip it.
+                logger.info("seq len is 1, skip fetching kv...")
                 fetching_success = True
-                put_to_shared_dict(prefix, kv_cache, hidden_states)
             else:
-                fetching_success = False
+                prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
+                    hash_prefix)
+                if kv_cache is not None:
+                    fetching_success = True
+                    put_to_shared_dict(prefix, kv_cache, hidden_states)
+                else:
+                    fetching_success = False
             self.fetching_done.put((seq_group, fetching_success))
             self.fetching_queue.task_done()
             self.scheduler_profiler.end()
