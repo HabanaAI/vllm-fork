@@ -723,7 +723,9 @@ class HpuModelAdapter(torch.nn.Module):
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
             if self.model_is_mrope:
-                if self.model.config.model_type == 'qwen2_5_omni_thinker':
+                if self.model.config.model_type in [
+                        'qwen2_5_omni_thinker', 'qwen3_omni_moe_thinker'
+                ]:
                     multimodal_embeddings = \
                       self.model.get_multimodal_embeddings_v0(**kwargs)
                     inputs_embeds = self.model.get_input_embeddings_v0(
@@ -2801,9 +2803,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             image_h = img_args // 8
             image_grid_thw = torch.tensor(
                 [[1, image_h, int(img_args / image_h)]])
+            embed_dim = 1176
+            if any([
+                    model_type in self.get_model().config.model_type
+                    for model_type in ['qwen3_vl', "qwen3_omni"]
+            ]):
+                embed_dim = 1536
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
-                1176)  # TODO: figure out the variable name
+                embed_dim)  # TODO: figure out the variable name
 
             assert pixel_values.shape[0] % 64 == 0, (
                 f"pixel_values must be sliced in 64 chunks, "

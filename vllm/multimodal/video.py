@@ -146,9 +146,12 @@ class OpenCVVideoBackend(VideoLoader):
         # Use transformers transformers.video_utils.VideoMetadata format
         metadata = {
             "total_num_frames": total_frames_num,
-            "fps": original_fps,
-            "duration": duration,
-            "video_backend": "opencv"
+            "fps": num_frames / duration,
+            "video_backend": "opencv",
+            "frames_indices": list(range(num_frames)),
+            # extra field used to control hf processor's video
+            # sampling behavior
+            "do_sample_frames": num_frames == total_frames_num,
         }
 
         return frames, metadata
