@@ -2,7 +2,8 @@
 -r requirements-common.txt
 
 # Dependencies for HPU code
-ray
+click==8.2.1
+ray==2.47.1
 triton==3.1.0
 pandas
 tabulate

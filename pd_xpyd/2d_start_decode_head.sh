@@ -10,6 +10,10 @@ unset VLLM_USE_V1
 unset VLLM_DP_MASTER_IP
 unset VLLM_DP_MASTER_PORT
 
+ray stop --force
+
+sleep 3s
+
 ray start --head --port=8826
 
 while true; do

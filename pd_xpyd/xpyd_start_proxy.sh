@@ -110,12 +110,13 @@ else
         --port 8868"
 fi
 
-timestamp=$(date +"%Y%m%d_%H%M%S")
-log_dir="xpyd_logs"
-mkdir -p "$log_dir"
-log_file="$log_dir/ProxyServer_${timestamp}.log"
+# Check if XPYD_LOG is defined and non-empty
+if [ -n "$XPYD_LOG" ]; then
+    timestamp=$(date +"%Y%m%d_%H%M%S")
+    log_file="$XPYD_LOG/ProxyServer_${timestamp}.log"
 
-CMD="$CMD 2>&1 | tee $log_file"
+    CMD="$CMD 2>&1 | tee $log_file"
+fi
 
 echo "Running: $CMD"
 eval $CMD
