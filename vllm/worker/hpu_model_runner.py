@@ -354,20 +354,10 @@ class HpuModelAdapter(torch.nn.Module):
         self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
                                          "false").strip().lower() in ("1",
                                                                       "true")
-        self.sliding_window_right = 0
         if self.use_window_sdpa:
-            self.slice_size = int(
-                os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
-
-            os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
-            os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
-            os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
-            self.sliding_window_right = int(
-                os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
-            assert self.sliding_window_right % self.slice_size == 0, \
-                f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) '\
-                f'not supported due to not a multiplier of '\
-                f'PT_HPU_QKV_SLICE_SEQ_LEN_THLD({self.slice_size})!'
+            self.slice_size = int(os.getenv("PT_HPU_SDPA_BC_FACTOR", "1024"))
+            self.sliding_window_thld = int(
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '8192'))
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -383,7 +373,7 @@ class HpuModelAdapter(torch.nn.Module):
             if self.is_mm_optimized:
                 if hasattr(self.model, 'vision_tower'):
                     self.model.vision_tower = htorch.hpu.wrap_in_hpu_graph(
-                        self.model.vision_tower, disable_tensor_cache=True)
+                        self.model.vision_tower, disable_tensor_cache=False)
                 if hasattr(self.model, 'multi_modal_projector'):
                     self.model.multi_modal_projector = \
                             htorch.hpu.wrap_in_hpu_graph( \
@@ -574,10 +564,10 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
-    def _update_use_window_sdpa(self, attn_metadata, seq_len):
+    def _update_use_window_sdpa(self, attn_metadata, seq_len, is_img):
         use_window_sdpa = False
-        if self.use_window_sdpa and self.prefill_use_fusedsdpa:
-            # TODO: We can add min token_len for the window_sdpa to be used.
+        if self.use_window_sdpa and seq_len >= self.sliding_window_thld and \
+           self.prefill_use_fusedsdpa:
             if self.slice_size != 0 and (seq_len % self.slice_size == 0):
                 use_window_sdpa = True
             else:
@@ -589,8 +579,6 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
-        attn_metadata = attn_metadata._replace(
-            sliding_window_right=self.sliding_window_right)
         return attn_metadata
 
     def _update_metadata(self,
@@ -631,13 +619,19 @@ class HpuModelAdapter(torch.nn.Module):
                                                     device, dtype, True)
         return attn_metadata
 
-    def compute_input_embeddings_for_mm_optimized(self, **kwargs):
+    def compute_input_embeddings_for_mm_optimized(self, warmup_mode, **kwargs):
         input_ids = kwargs['input_ids']
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
 
-        if vision_embeddings is not None:
+        # TODO: In warmup, we need to warmup the model with dummy image data for
+        # multimodal model for prompt, here instead of generating a dummy image,
+        # we are just generating attn_mask for the images and pass with
+        # attn_metadata, so we can reuse HPU graph without running
+        # the whole vision tower.
+        if vision_embeddings is not None or (
+                warmup_mode and kwargs['attn_metadata'].is_prompt):
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
             kwargs = self.model.prepare_attn_masks(
@@ -646,14 +640,16 @@ class HpuModelAdapter(torch.nn.Module):
             )
             kwargs['input_ids'] = input_ids
             kwargs['positions'] = positions
-            #input_ids = None
 
         kwargs.update({'inputs_embeds': inputs_embeds})
-        # done compute the visual tokens
+        # done compute the visual tokens and others
         kwargs.pop('pixel_values', None)
+        kwargs.pop("num_crops", None)
+        kwargs.pop("graphed_multimodal_buckets", None)
         return kwargs
 
-    def compute_input_embeddings_for_mrope_mm_optimized(self, **kwargs):
+    def compute_input_embeddings_for_mrope_mm_optimized(
+            self, warmup_mode, **kwargs):
 
         if 'inputs_embeds' in kwargs:
             return kwargs
@@ -692,7 +688,8 @@ class HpuModelAdapter(torch.nn.Module):
                 kwargs.pop('image_grid_thw', None)
                 return kwargs
             else:
-                return self.compute_input_embeddings_for_mm_optimized(**kwargs)
+                return self.compute_input_embeddings_for_mm_optimized(
+                    warmup_mode, **kwargs)
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -704,9 +701,9 @@ class HpuModelAdapter(torch.nn.Module):
             virtual_engine = kwargs.pop('virtual_engine')
 
         input_ids = kwargs['input_ids']
-        global_attn_masks = kwargs.get("global_attn_masks") \
+        global_attn_masks = kwargs.pop("global_attn_masks") \
                 if kwargs.get("global_attn_masks") else None
-        local_attn_masks = kwargs.get("local_attn_masks") \
+        local_attn_masks = kwargs.pop("local_attn_masks") \
                 if kwargs.get("local_attn_masks") else None
 
         kwargs['attn_metadata'] = self._update_metadata(
@@ -1298,6 +1295,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_len = len(seq_group_metadata_list[0].seq_data[first_key].
                           prompt_token_ids)
             query_len = seq_len - ctx * self.block_size
+            if real_batch_size > 1 and self.use_merged_prefill:
+                real_batch_size = 1
             batch_size_padded = self.bucketing_manager.find_prompt_bucket(
                 real_batch_size, query_len, ctx)[0]
         else:
@@ -1406,12 +1405,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, img_args=None):
-        if not img_args:
-            return not self.enforce_eager
-        #TODO: We might need to check both language bucket and multimodal bucket
-        # and return True only it's avialble, or return separately.
-        return (img_args) in self.graphed_multimodal_buckets
+    def _use_graphs(self):
+        return not self.enforce_eager
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -1502,11 +1497,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                        non_blocking=True)
 
     def add_vision_buckets_to_mrope_mm_optimized(self):
-        if self.mm_registry is not None:
-            model = self.get_model()
-            self.is_mm_optimized = is_mm_optimized(model)
-            if self.model_is_mrope or self.is_mm_optimized:
-                model.vision_buckets = VisionBuckets(self.is_mm_optimized)
+        model = self.get_model()
+        self.is_mm_optimized = is_mm_optimized(model)
+        if self.model_is_mrope or self.is_mm_optimized:
+            model.vision_buckets = VisionBuckets(self.is_mm_optimized)
 
     def _prepare_prompt(
         self,
@@ -1696,10 +1690,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         for _ in range(batch_size_padding))
 
         real_num_seqs = len(query_lens)
+        bs = len(seq_group_metadata_list)
+        if bs > 1 and self.use_merged_prefill:
+            bs = 1
         max_prompt_len = max(
-            self.bucketing_manager.find_prompt_bucket(
-                len(seq_group_metadata_list), target_query_len, ctx)[1],
-            self.block_size)
+            self.bucketing_manager.find_prompt_bucket(bs, target_query_len,
+                                                      ctx)[1], self.block_size)
 
         if self.dp_awared_padding and\
             self.vllm_config.kv_transfer_config is None:
@@ -2676,7 +2672,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
-                                                    lora_request):
+                                                    lora_request, seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
@@ -2721,7 +2717,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             }
 
         image_token_id = self.get_model().config.image_token_id
-        prompt_token_ids = [image_token_id] * num_image_tokens
+        prompt_token_ids_image = [image_token_id] * num_image_tokens
+        prompt_token_ids = [0] * (
+            seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
             'image':
@@ -2765,6 +2763,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     img_args=img_args,
                     sampling_params=sampling_params,
                     lora_request=lora_request,
+                    seq_len=seq_len,
                 )
             else:
                 input_len = seq_len
@@ -2808,13 +2807,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
             [kv_caches] * self.parallel_config.pipeline_parallel_size)
-        max_seq_len = self.bucketing_manager.get_max_prompt_shape()
         max_batch_size = min(self.max_num_seqs,
-                             self.max_num_batched_tokens // max_seq_len)
-        # Using batch_size 1 is profile multimodal models
-        max_batch_size = max_batch_size if self.mm_registry is None else 1
+                             self.max_num_batched_tokens // self.max_model_len)
 
         if self.model_is_mrope or self.is_mm_optimized:
+            # Using batch_size 1 is profile multimodal models
+            max_batch_size = 1
             model = self.get_model()
             self.multimodal_buckets = model.vision_buckets.multimodal_buckets
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
@@ -2822,7 +2820,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.warmup_scenario(
             batch_size=max_batch_size,
-            seq_len=max_seq_len,
+            seq_len=self.max_model_len,
             ctx=0,
             is_prompt=True,
             kv_caches=kv_caches,
@@ -2877,7 +2875,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         align_worker=False,
                         is_dummy_run=False) -> None:
         phase = 'prompt' if is_prompt else 'decode'
-        use_graphs = is_dummy_run or self._use_graphs(img_args)
+        use_graphs = is_dummy_run or self._use_graphs()
 
         scenario_name = ("warmup_"
                          f"{phase}_"
@@ -2966,7 +2964,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    intermediate_tensors=intermediate_tensors,
                                    warmup_mode=True,
                                    ctx_blocks=ctx,
-                                   is_dummy_run=is_dummy_run)
+                                   is_dummy_run=is_dummy_run,
+                                   is_pt_profiler_run=is_pt_profiler_run)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
@@ -3188,15 +3187,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
-            self.warmup_scenario(int(bs),
-                                 int(seq_len),
-                                 ctx,
-                                 is_prompt,
-                                 kv_caches,
-                                 is_pt_profiler_run=True)
+            if self.is_mm_run():
+                img_args = (int(seq_len) //
+                            self.model.model.config.mm_tokens_per_image
+                            if self.is_mm_optimized else int(seq_len))
+            self.warmup_scenario(
+                int(bs),
+                int(seq_len),
+                ctx,
+                is_prompt,
+                kv_caches,
+                is_pt_profiler_run=True,
+                img_args=img_args if self.is_mm_run() else None)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
-            multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
+            multiplier = 5 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1
             cache_size_limit = 1 + multiplier * (prompt_buckets +
                                                  decode_buckets)
@@ -3580,6 +3585,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         seqs=None,
         ctx_blocks: int = 1,
         is_dummy_run: bool = False,
+        is_pt_profiler_run: bool = False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         self.has_patched_prev_output = False
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
@@ -3666,8 +3672,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            img_args = self._get_img_args_from_model_input(model_input)
-            use_graphs = self._use_graphs(img_args=img_args)
+            use_graphs = self._use_graphs()
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None
@@ -3815,14 +3820,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 #Need to set the window_slide mask at this point to decide
                 if is_prompt:
                     attn_metadata = self.model._update_use_window_sdpa(
-                        execute_model_kwargs['attn_metadata'], seq_len)
+                        execute_model_kwargs['attn_metadata'], seq_len,
+                        bool(model_input.multi_modal_kwargs and \
+                       'pixel_values' in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
-                            if warmup_mode:
+                            if warmup_mode and not is_pt_profiler_run:
                                 bypass_model_exec = True
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
@@ -3831,6 +3838,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             # hpu graphs, hence turning it to a list
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
+                                warmup_mode,
                                 **execute_model_kwargs
                             )
                         if warmup_mode and bypass_model_exec:
