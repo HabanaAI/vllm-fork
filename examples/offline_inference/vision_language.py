@@ -459,6 +459,7 @@ def run_internvl(questions: list[str], modality: str) -> ModelRequestData:
         stop_token_ids=stop_token_ids,
     )
 
+
 # Keye-VL-1.5
 def run_keye_vl1_5(questions: list[str], modality: str) -> ModelRequestData:
     model_name = "Kwai-Keye/Keye-VL-1.5-8B"
@@ -489,6 +490,7 @@ def run_keye_vl1_5(questions: list[str], modality: str) -> ModelRequestData:
         prompts=prompts,
     )
 
+
 # Keye-VL
 def run_keye_vl(questions: list[str], modality: str) -> ModelRequestData:
     model_name = "Kwai-Keye/Keye-VL-8B-Preview"
@@ -514,6 +516,7 @@ def run_keye_vl(questions: list[str], modality: str) -> ModelRequestData:
         engine_args=engine_args,
         prompts=prompts,
     )
+
 
 # Kimi-VL
 def run_kimi_vl(questions: list[str], modality: str) -> ModelRequestData:

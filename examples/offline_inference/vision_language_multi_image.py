@@ -321,7 +321,8 @@ def load_llama4(question: str, image_urls: list[str]) -> ModelRequestData:
         prompt=prompt,
         image_data=[fetch_image(url) for url in image_urls],
     )
-    
+
+
 def load_keye_vl(question: str, image_urls: list[str]) -> ModelRequestData:
     model_name = "Kwai-Keye/Keye-VL-8B-Preview"
     engine_args = EngineArgs(
@@ -351,7 +352,8 @@ def load_keye_vl(question: str, image_urls: list[str]) -> ModelRequestData:
         prompt=prompt,
         image_data=image_data,
     )
-    
+
+
 def load_keye_vl1_5(question: str, image_urls: list[str]) -> ModelRequestData:
     model_name = "Kwai-Keye/Keye-VL-1_5-8B"
 
