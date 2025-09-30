@@ -412,7 +412,7 @@ class HpuModelAdapter(torch.nn.Module):
         # This is to ensure that we keeps
         # the static and dynamic parts distinct.
         if htorch.utils.internal.is_lazy():
-            if self.model_is_mrope and hasattr(self.model, 'visual'):
+            if 0:#self.model_is_mrope and hasattr(self.model, 'visual'):
                 logger.info("[Multimodal] Wrapping Visual Model")
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
