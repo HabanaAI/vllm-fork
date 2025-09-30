@@ -4,11 +4,9 @@
 from typing import Callable, Optional
 
 import torch
-
 from vllm import _custom_ops as ops
 from vllm import envs
 from vllm.platforms import current_platform
-
 
 def get_token_bin_counts_and_mask(
     tokens: torch.Tensor,
@@ -23,7 +21,6 @@ def get_token_bin_counts_and_mask(
     bin_counts.scatter_add_(1, tokens, torch.ones_like(tokens))
     bin_counts = bin_counts[:, :vocab_size]
     mask = bin_counts > 0
-
     return bin_counts, mask
 
 
@@ -50,7 +47,6 @@ def apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
                                                    vocab_size, num_seqs)
     output_bin_counts, output_mask = get_token_bin_counts_and_mask(
         output_tokens_tensor, vocab_size, num_seqs)
-
     # Apply repetition penalties as a custom op
     from vllm._custom_ops import apply_repetition_penalties
     apply_repetition_penalties(logits, prompt_mask, output_mask,
