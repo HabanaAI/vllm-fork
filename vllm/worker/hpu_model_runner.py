@@ -3670,6 +3670,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             'Delayed sampling is not compatible with speculative decoding!'
         assert model_input.input_tokens is not None
         output = None
+        
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
             num_cached = len(self.cached_step_outputs)
@@ -3698,20 +3699,32 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
-                # not first or last multi-step
                 return []
-            # last multi-step
             output = self._decode_sampler_outputs(
                 model_input) if self.is_driver_worker else []
             torch.hpu.synchronize()
+            
         if model_input.is_first_multi_step:
-            # first multi-step
+            # print(f"[DEBUG] Step start - use_delayed_sampling={use_delayed_sampling}, is_driver={self.is_driver_worker}")
+
+            # PHASE 1: Quick patching before HPU work (minimal CPU)
+            # if (use_delayed_sampling and self.is_driver_worker
+            #         and self.has_logits_processors(model_input.sampling_metadata)):
+            if use_delayed_sampling and self.is_driver_worker:
+                # print(f"[DEBUG] Calling _patch_prev_output, cached_inputs={len(self.cached_step_inputs)}")
+                import time
+                patch_start = time.time()
+                self._patch_prev_output()
+                patch_time = time.time() - patch_start
+                # print(f"[DEBUG] _patch_prev_output completed in {patch_time:.3f}s, has_pending_callback={hasattr(self, '_pending_async_callback')}")
+                self._patch_prev_output()  # Fast patching only
+            
             if self.lora_config:
                 assert model_input.lora_requests is not None
                 assert model_input.lora_mapping is not None
                 self.set_active_loras(model_input.lora_requests,
-                                      model_input.lora_mapping)
-            # Rank!=0 workers has is_prompt==None
+                                    model_input.lora_mapping)
+            
             if use_delayed_sampling and not model_input.is_prompt and \
                     model_input.input_tokens.size(1) == 1:
                 if self.is_driver_worker:
@@ -3720,12 +3733,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     }
                     broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
                     input_tokens = model_input.input_tokens
-
                 else:
                     model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
                     input_tokens = model_kwargs_broadcast_data["input_tokens"]
             else:
                 input_tokens = model_input.input_tokens
+                
             input_positions = model_input.input_positions
             attn_metadata = model_input.attn_metadata
             sampling_metadata = model_input.sampling_metadata
@@ -3746,7 +3759,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 seq_len = 1
             use_graphs = self._use_graphs()
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
-                               warmup_mode)
+                            warmup_mode)
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
             if self.lora_config:
@@ -3754,6 +3767,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 lora_mask, lora_logits_mask = self.create_lora_mask(
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
+                    
             if model_input.multi_modal_kwargs is not None \
                 and 'embed_is_patch' in model_input.multi_modal_kwargs:
 
@@ -3771,7 +3785,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             result.append(embed_is_patch)
                             return result
                     elif isinstance(embed_is_patch, (list, tuple)):
-                        # Apply only once per item, avoid repeated recursion
                         result = []
                         for item in embed_is_patch:
                             fixed = fix_embed_is_patch(item)
@@ -3797,13 +3810,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 "virtual_engine": model_input.virtual_engine,
                 **(model_input.multi_modal_kwargs or {}),
             }
+            
             if previous_hidden_states is not None:
-                # HPU will pad up to block_size,
-                # pad previous_hidden_states as well
                 previous_hidden_states = previous_hidden_states.unsqueeze(
                     1).expand(-1, input_tokens.shape[-1], -1)
-                batch_size_padding = batch_size - previous_hidden_states.shape[
-                    0]
+                batch_size_padding = batch_size - previous_hidden_states.shape[0]
                 if batch_size_padding > 0:
                     dummy_previous_hidden_states = torch.zeros(
                         batch_size_padding,
@@ -3815,11 +3826,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         dim=0)
                 execute_model_kwargs.update(
                     {"previous_hidden_states": previous_hidden_states})
+                    
             if htorch.utils.internal.is_lazy():
                 execute_model_kwargs.update(
                     {"bypass_hpu_graphs": not use_graphs})
 
-            htorch.core.mark_step()
+            # print(f"[DEBUG] About to mark_step, has_pending_callback={hasattr(self, '_pending_async_callback')}")
+            # htorch.core.mark_step()  # Submit HPU work FIRST
+            # print(f"[DEBUG] mark_step completed")
+            
             if self.is_driver_worker:
                 model_event_name = ("model_"
                                     f"{phase}_"
@@ -3829,16 +3844,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
+                
             if num_steps > 1 or use_delayed_sampling:
-                # in case of multi-step scheduling
-                # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.sampler.include_gpu_probs_tensor = True
+                
             cache_orig_output_tokens_len: List[Dict] = []
 
             def try_revert_dummy_output_tokens():
                 if len(cache_orig_output_tokens_len) > 0:
-                    # Reuse the original output token ids length
                     for i in range(len(cache_orig_output_tokens_len)):
                         seq_group_metadata = seq_group_metadata_list[i]
                         for j, data in seq_group_metadata.seq_data.items():
@@ -3854,20 +3868,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             'early_exit']:
                         return [output] if num_steps == 1 else []
                     execute_model_kwargs.update({
-                        "input_ids":
-                        broadcast_data["input_ids"],
-                        "positions":
-                        broadcast_data["positions"],
+                        "input_ids": broadcast_data["input_ids"],
+                        "positions": broadcast_data["positions"],
                         "attn_metadata":
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
-                # Receive KV cache in distributed KV cache transfer setting
-                # In disagg prefill setting, it will also recv hidden states
-                # and bypass model forwarding. In KV cache database setting,
-                # it will change the model input so that we can skip prefilling
-                # on tokens that successfully received KV caches
-                # NOTE: The receive operation is blocking
+                    
                 bypass_model_exec = False
                 if self.need_recv_kv(model_input, kv_caches, warmup_mode):
                     attn_metadata = self.model.forward_update_meta_only(
@@ -3876,24 +3883,22 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         selected_token_indices)
                     hidden_states, bypass_model_exec, model_input = \
                     get_kv_transfer_group().recv_kv_caches_and_hidden_states_hpu(
-                        # model is used to know which layer the current worker
-                        # is working on, so that we can receive KV for
-                        # only those layers.
                         self.get_model(),
                         model_input,
                         attn_metadata,
                         kv_caches=kv_caches
                     )
+                    
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
-                #Need to set the window_slide mask at this point to decide
+                
                 if is_prompt:
                     attn_metadata = self.model._update_use_window_sdpa(
                         execute_model_kwargs['attn_metadata'], seq_len,
                         bool(model_input.multi_modal_kwargs and \
-                       ('pixel_values')in model_input.multi_modal_kwargs))
+                    ('pixel_values')in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
                     if 'image_index' in model_input.multi_modal_kwargs:
@@ -3902,9 +3907,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 'image_index']
                         model_input.multi_modal_kwargs.pop('image_index', None)
 
+                # PHASE 3: HPU forward pass (CPU processing from Phase 2 overlaps here)
                 if not bypass_model_exec:
                     if self.model_is_mrope or (self.is_mm_optimized
-                                               and is_prompt):
+                                            and is_prompt):
                         if ('pixel_values') in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             if warmup_mode and not is_pt_profiler_run:
@@ -3912,8 +3918,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets)
-                            # set is unhasable and causes friction with
-                            # hpu graphs, hence turning it to a list
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 warmup_mode,
@@ -3929,6 +3933,18 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
                             selected_token_indices)
+                        # PHASE 2: NOW trigger async processing (after HPU starts)
+                        if hasattr(self, '_pending_async_callback'):
+                            # print(f"[DEBUG] Invoking pending callback...")
+                            import time
+                            callback_start = time.time()
+                            callback = self._pending_async_callback
+                            delattr(self, '_pending_async_callback')
+                            callback()  # CPU processing overlaps with HPU work
+                            callback_time = time.time() - callback_start
+                            # print(f"[DEBUG] Callback completed in {callback_time:.3f}s")
+                        # else:
+                            # print(f"[DEBUG] No pending callback to invoke")
                         if warmup_mode and not is_dummy_run:
                             torch.hpu.synchronize()
                             import torch.distributed as dist
@@ -3937,14 +3953,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 else:
                     logger.debug("Bypassing model execution")
 
-                # Sending KV cache in distributed KV cache transfer setting
-                # TODO: update send operation to blocking one.
                 if self.need_send_kv(model_input, kv_caches, warmup_mode):
                     get_kv_transfer_group(
                     ).send_kv_caches_and_hidden_states_hpu(
-                        # model_executable is used to know which layer the
-                        # current worker is working on, so that we can send KV
-                        # for only those layers.
                         self.get_model(),
                         model_input,
                         kv_caches,
@@ -3963,53 +3974,31 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not get_pp_group().is_last_rank:
                     return hidden_states
 
-                # In case there are any logits processors pending
-                # we need to sync with host earlier
-                if use_delayed_sampling \
-                   and self.is_driver_worker:
-                    self._patch_prev_output()
-
-                if (use_delayed_sampling and self.is_driver_worker
-                        and self.has_logits_processors(sampling_metadata)):
-                    # when use_delayed_sampling if the computation
-                    # of logits depends on the sampled results
-                    # we obtain the actual sampled results in advance
-                    self._patch_prev_output()
-                # Compute the logits.
+                # Compute logits
                 with self.profiler.record_event('internal',
                                                 ('compute_logits_'
-                                                 f'{phase}_bs'
-                                                 f'{batch_size}_'
-                                                 f'seq{seq_len}_ctx'
-                                                 f'{ctx_blocks}'),
+                                                f'{phase}_bs'
+                                                f'{batch_size}_'
+                                                f'seq{seq_len}_ctx'
+                                                f'{ctx_blocks}'),
                                                 args=profiler_args):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
-                                                       sampling_metadata)
+                                                    sampling_metadata)
                 if self.do_mark_step:
                     htorch.core.mark_step()
-                # Only perform sampling in the driver worker.
+                    
                 if not self.is_driver_worker:
                     continue
 
-                # # In execute_model, after sampling
-                # if model_input.async_callback is not None and not warmup_mode:
-                #     # Just queue the raw output for engine processing
-                #     # Don't try to create RequestOutput here
-                #     return [output] if self.is_driver_worker else []  # output is SamplerOutput
-
-                # # Continue with delayed sampling as fallback
-                # if use_delayed_sampling:
-                #     fake_output = self._delayed_sampler_outputs(model_input)
-                #     return [fake_output] if self.is_driver_worker else []
-
+                # PHASE 4: Sample on HPU
                 with self.profiler.record_event('internal',
                                                 ('sample_'
-                                                 f'{phase}_'
-                                                 f'bs{batch_size}_'
-                                                 f'seq{seq_len}_'
-                                                 f'ctx{ctx_blocks}'),
+                                                f'{phase}_'
+                                                f'bs{batch_size}_'
+                                                f'seq{seq_len}_'
+                                                f'ctx{ctx_blocks}'),
                                                 args=profiler_args):
                     output = self.sampler(
                         logits=logits,
@@ -4019,12 +4008,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(
                             CachedStepOutput(output))
-                    # if model_input.async_callback is not None and not warmup_mode:
-                    #     # For async, return the output immediately
-                    #     # The engine will handle it asynchronously
-                    #     if self.do_mark_step:
-                    #         htorch.core.mark_step()
-                    #     return [output] if self.is_driver_worker else []
+                            
+                    # PHASE 5: Handle delayed sampling
                     if use_delayed_sampling and self.is_driver_worker:
                         token_ids = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
@@ -4036,17 +4021,31 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_inputs.append(model_input)
                         fake_output = self._delayed_sampler_outputs(model_input)
                         
-                        # Store callback externally since model_input is frozen
+                        # Store callback for next iteration's async processing
                         if model_input.async_callback is not None and not warmup_mode:
-                            # Use a simple counter as key instead of request_id
                             callback_key = len(self.cached_step_inputs) - 1
                             if not hasattr(self, 'delayed_callbacks'):
                                 self.delayed_callbacks = {}
                             self.delayed_callbacks[callback_key] = model_input.async_callback
-                            # Can't modify frozen dataclass, so just track separately
+                            # print(f"[DEBUG] Stored callback at key={callback_key}, total_callbacks={len(self.delayed_callbacks)}")
                         
                         if self.do_mark_step:
                             htorch.core.mark_step()
+                        
+                        # CRITICAL: Do NOT process the output we just created
+                        # It will be processed in the NEXT iteration via _pending_async_callback
+                        # However, we need to ensure any leftover outputs from request completion
+                        # are processed before the engine checks the queue
+
+                        # Only process if this is the final iteration of a completing request
+                        # Check if there are any pending callbacks from previous iterations
+                        if (hasattr(self, '_pending_async_callback') and 
+                            self._pending_async_callback is not None):
+                            # This shouldn't happen in normal flow, but handle it gracefully
+                            final_callback = self._pending_async_callback
+                            delattr(self, '_pending_async_callback')
+                            final_callback()
+                        # print(f"[DEBUG] Returning fake_output")
                         return [fake_output]
 
                     # Standard async path (when delayed sampling is OFF)
@@ -4054,25 +4053,22 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         if self.do_mark_step:
                             htorch.core.mark_step()
                         return [output] if self.is_driver_worker else []
+                        
                 if self.do_mark_step:
                     htorch.core.mark_step()
+                    
                 if hasattr(self.model.sampler, '_sampling_tensors') and \
                     self.model.sampler._sampling_tensors is not None and \
                     self.model.sampler._do_penalties:
                     sampling_tensors = self.model.sampler._sampling_tensors
                     if sampling_tensors.prompt_tokens.numel() > 0:
-                        # Cache the prompt_tokens tensor that's already on HPU
                         self.model.sampler._prompt_tokens_hpu_cache = sampling_tensors.prompt_tokens
-                if use_delayed_sampling \
-                   and model_input.async_callback is not None:
-                    model_input.async_callback()
+                        
                 if i < num_steps - 1:
                     if i == 0:
                         if model_input.async_callback is not None:
-                            ctx = model_input.async_callback.keywords[  # type: ignore
-                                "ctx"]
-                            seq_group_metadata_list = \
-                                ctx.seq_group_metadata_list
+                            ctx = model_input.async_callback.keywords["ctx"]
+                            seq_group_metadata_list = ctx.seq_group_metadata_list
                         elif seqs is not None:
                             seq_group_metadata_list = seqs
                         else:
@@ -4080,14 +4076,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 "seq_group_metadata_list is uninitialized")
                         for seq_idx, seq_group_metadata in enumerate(
                                 seq_group_metadata_list):
-                            # Skip empty steps
                             seq_group_metadata.state.current_step += (
                                 num_steps - 2)
-                            # Cache the original output token ids
                             cache_orig_output_tokens_len.append({})
                             for j, data in seq_group_metadata.seq_data.items():
                                 cache_orig_output_tokens_len[seq_idx][j] = \
                                     len(data.output_token_ids)
+                                    
                     seq_group_metadata_list, _, _ = self._add_dummy_seq(
                         seq_group_metadata_list, is_prompt=False)
                     for seq_group_metadata in seq_group_metadata_list:
@@ -4095,13 +4090,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             max_output_len = sampling_metadata.seq_groups[
                                 0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
-                                # add a place holder for prepare_decode
-                                # arbitrary value, this could be any token
                                 dummy_token = (540, )
                                 data.output_token_ids += (dummy_token)
                             else:
                                 broadcast_tensor_dict({'early_exit': True},
-                                                      src=0)
+                                                    src=0)
                                 if num_steps == 1:
                                     return [output]
                                 else:
@@ -4109,26 +4102,23 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     return []
 
                     result = self._prepare_decode(seq_group_metadata_list,
-                                                  output=output)
+                                                output=output)
                     if self.lora_config:
                         lora_mapping = LoRAMapping(
                             **dict(index_mapping=result.lora_index_mapping,
-                                   prompt_mapping=result.lora_prompt_mapping,
-                                   is_prefill=False))
+                                prompt_mapping=result.lora_prompt_mapping,
+                                is_prefill=False))
                         self.set_active_loras(result.lora_requests,
-                                              lora_mapping)
+                                            lora_mapping)
                         lora_mask, lora_logits_mask = self.create_lora_mask(
                             result.input_tokens, result.lora_ids, False)
 
                     execute_model_kwargs.update({
-                        "input_ids":
-                        result.input_tokens,
-                        "positions":
-                        result.input_positions,
+                        "input_ids": result.input_tokens,
+                        "positions": result.input_positions,
                         "attn_metadata":
                         self.trim_attn_metadata(result.attn_metadata),
-                        "lora_mask":
-                        lora_mask,
+                        "lora_mask": lora_mask,
                     })
                     model_kwargs_broadcast_data = {
                         "input_ids": result.input_tokens,
@@ -4141,7 +4131,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     try_revert_dummy_output_tokens()
 
             if self.is_driver_worker and self.profiler.enabled:
-                # Stop recording 'execute_model' event
                 self.profiler.end()
                 event_end = self.profiler.get_timestamp_us()
                 counters = self.profiler_counter_helper.get_counter_dict(
@@ -4153,6 +4142,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     prompt_batch_idx=0,
                     is_prompt=is_prompt)
                 self.profiler.record_counter(self.event_start, counters)
+                
             if num_steps == 1:
                 if self.spec_decode_enabled and isinstance(
                         output, SamplerOutput):
@@ -4163,7 +4153,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     output.logprobs = output.logprobs[:real_batch_size]
                 if self.return_hidden_states and isinstance(
                         output, SamplerOutput):
-                    # we only need to pass hidden states of most recent token
                     assert model_input.sampling_metadata is not None
                     hidden_states = hidden_states[:real_batch_size]
                     if model_input.is_prompt:
@@ -4242,35 +4231,45 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         self.shutdown_inc()
 
     def _patch_prev_output(self):
+        """Fast patching only - no CPU-intensive processing.
+        Processing happens asynchronously after this returns."""
+        
+        # print(f"[DEBUG PATCH] Entry: has_patched={self.has_patched_prev_output}, cached_inputs={len(self.cached_step_inputs) if hasattr(self, 'cached_step_inputs') else 0}")
         if self.has_patched_prev_output:
+            # print(f"[DEBUG PATCH] Already patched, returning")
             return
         
         if len(self.cached_step_inputs) == 0:
+            # print(f"[DEBUG PATCH] No cached inputs, returning")
             return
         
+        import time
+        patch_start = time.time()
         model_input = self.cached_step_inputs.pop(0)
         model_output = self.cached_step_outputs.pop(0)
         
-        # Get callback - either from delayed storage or model_input directly
+        # Get callback from delayed storage
         delayed_callback = None
         if hasattr(self, 'delayed_callbacks') and 0 in self.delayed_callbacks:
             delayed_callback = self.delayed_callbacks.pop(0)
-            # Shift remaining keys down
+            # Shift remaining keys
             self.delayed_callbacks = {k-1: v for k, v in self.delayed_callbacks.items()}
             ctx = delayed_callback.keywords["ctx"]
+            # print(f"[DEBUG PATCH] Found delayed callback, queue_len={len(ctx.output_queue)}")
         else:
             ctx = model_input.async_callback.keywords["ctx"]
+            # print(f"[DEBUG PATCH] Using direct callback, queue_len={len(ctx.output_queue)}")
         
         if len(ctx.output_queue) == 0:
+            # print(f"[DEBUG PATCH] Queue empty, returning")
             return
         
         assert len(ctx.output_queue) == 1, \
             f'Expected 1 output, found {len(ctx.output_queue)}'
         
         output_data = ctx.output_queue[0]
-        assert len(output_data.outputs) == 1
         
-        # Extract delayed tokens
+        # FAST PATCHING: Just update the token IDs in the queued output
         seq_groups = model_output.sampling_metadata.seq_groups
         
         if model_output.is_prompt and any(
@@ -4283,17 +4282,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         else:
             delayed_tokens = model_output.token_ids.cpu().squeeze(-1).tolist()
         
-        # Patch the output data
+        # Patch tokens (fast operation)
         for fake_out, real_out in zip(output_data.outputs[0], delayed_tokens):
             fake_out.samples[0].output_token = real_out
         
         for sg, real_out in zip(output_data.seq_group_metadata_list, delayed_tokens):
-            assert len(sg.seq_data) == 1
             seq_data = list(sg.seq_data.values())[0]
             seq_data.output_token_ids_array[-1] = real_out
             seq_data._cached_all_token_ids[-1] = real_out
         
-        # Handle logprobs if needed
+        # Patch logprobs if needed (still relatively fast)
         logprobs_required = any(seq_group.sampling_params.logprobs is not None
                             for seq_group in seq_groups)
         prompt_logprobs_required = any(
@@ -4301,12 +4299,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             for seq_group in seq_groups)
         
         if logprobs_required or prompt_logprobs_required:
-            # Recompute with actual tokens
             computed_tokens = []
             if model_output.is_prompt:
                 for seq_group in seq_groups:
                     seq_ids = seq_group.seq_ids
-                    assert len(seq_ids) == 1
                     seq_data = seq_group.seq_data[seq_ids[0]]
                     computed_tokens.append(seq_data.get_num_computed_tokens())
                     seq_data._num_computed_tokens = 0
@@ -4317,20 +4313,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 model_output.logprobs, model_output.sampling_metadata,
                 sampling_results)
             
-            # Restore computed tokens
             if model_output.is_prompt:
                 for seq_group in seq_groups:
                     seq_ids = seq_group.seq_ids
                     seq_data = seq_group.seq_data[seq_ids[0]]
                     seq_data.update_num_computed_tokens(computed_tokens.pop(0))
             
-            # Patch logprobs
             if logprobs_required and delayed_logprobs is not None:
                 for sg, real_logprobs in zip(
                         output_data.scheduler_outputs.scheduled_seq_groups,
                         delayed_logprobs):
-                    assert len(sg.seq_group.seqs) == 1
-                    assert len(real_logprobs) == 1
                     sg.seq_group.first_seq.output_logprobs[-1] = real_logprobs[0]
             
             if prompt_logprobs_required and delayed_prompt_logprobs is not None:
@@ -4339,8 +4331,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if real_logprobs is not None:
                         sg.seq_group.prompt_logprobs = [None] + real_logprobs
         
-        # Invoke delayed callback if it exists
+        # CRITICAL: Store callback for async invocation, don't call it now
         if delayed_callback is not None:
-            delayed_callback()
+            self._pending_async_callback = delayed_callback
+            # print(f"[DEBUG PATCH] Stored pending callback for later invocation")
         
+        patch_time = time.time() - patch_start
+        # print(f"[DEBUG PATCH] Patching completed in {patch_time:.3f}s")
         self.has_patched_prev_output = True
