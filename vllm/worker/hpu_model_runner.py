@@ -2931,10 +2931,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if self.get_model().config.model_type == 'KeyeVL1_5' \
             or self.get_model().config.model_type == 'KeyeVL' :
-            pixel_values = torch.randn(10584,3,14,14)
-            image_grid_thw = torch.tensor(
-                [[1, 84, 126]])
-            merge_length = self.get_model().config.vision_config.spatial_merge_size**2
+            pixel_values = torch.randn(10584, 3, 14, 14)
+            image_grid_thw = torch.tensor([[1, 84, 126]])
+            merge_length = self.get_model(
+            ).config.vision_config.spatial_merge_size**2
             num_image_tokens = int(image_grid_thw.prod()) // merge_length
             multi_modal_data = {
                 "pixel_values": pixel_values,

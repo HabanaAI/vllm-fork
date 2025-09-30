@@ -60,8 +60,10 @@ logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 
 if is_hpu:
+    import habana_frameworks.torch as htorch
     import habana_frameworks.torch.core as htcore
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
+
 
 class AttentionLongSequence:
 
@@ -87,8 +89,8 @@ class AttentionLongSequence:
             #             s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
             #                                       False, None, softmax_mode)
             attn_output[:, :,
-            s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
-                                        False, None)
+                        s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
+                                                  False, None)
             # TODO: markstep after a couple of iterations
             # need to experiment the optimal number.
             # if i % 75 == 0:
@@ -115,6 +117,7 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     else:
         res = torch.einsum('bi,bj->ij', range_indices, range_indices)
     return res.bool()
+
 
 def smart_resize(
     height: int,
@@ -367,6 +370,7 @@ class KeyeVisionEmbeddings(nn.Module):
             raise ValueError("Unsupported pixel_values dimension:"
                              f" {pixel_values.dim()}. Expected 4 or 5.")
 
+
 def rotate_half(x: torch.Tensor, interleaved: bool = False) -> torch.Tensor:
     if not interleaved:
         x1, x2 = x.chunk(2, dim=-1)
@@ -376,7 +380,8 @@ def rotate_half(x: torch.Tensor, interleaved: bool = False) -> torch.Tensor:
         return rearrange(torch.stack((-x2, x1), dim=-1),
                          "... d two -> ... (d two)",
                          two=2)
-        
+
+
 def apply_rotary_emb_torch(x: torch.Tensor,
                            cos: torch.Tensor,
                            sin: torch.Tensor,
@@ -400,7 +405,8 @@ def apply_rotary_emb_torch(x: torch.Tensor,
         ],
         dim=-1,
     )
-    
+
+
 def apply_rotary_pos_emb_flashatt(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -466,7 +472,9 @@ class KeyeSiglipAttention(nn.Module):
 
         # Detect attention implementation.
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
-        if self.attn_backend not in {_Backend.FLASH_ATTN, _Backend.XFORMERS, _Backend.TORCH_SDPA}:
+        if self.attn_backend not in {
+                _Backend.FLASH_ATTN, _Backend.XFORMERS, _Backend.TORCH_SDPA
+        }:
             raise RuntimeError(
                 f"Keye-VL does not support {self.attn_backend} backend now.")
 
@@ -484,8 +492,6 @@ class KeyeSiglipAttention(nn.Module):
             dim=-1,
         )
 
-        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
-        seqlens = (cu_seqlens[1:] - cu_seqlens[:-1]).tolist()
         batch_size = q.shape[0]
 
         if rope_emb is None:
@@ -519,29 +525,27 @@ class KeyeSiglipAttention(nn.Module):
             )
 
         if is_hpu:
-            outputs = []
-            for i in range(1, len(cu_seqlens)):
-                start_idx = cu_seqlens[i - 1]
-                end_idx = cu_seqlens[i]
-                q_i = q[:, start_idx:end_idx]
-                k_i = k[:, start_idx:end_idx]
-                v_i = v[:, start_idx:end_idx]
-                q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
-                                 for x in [q_i, k_i, v_i])
 
-                htcore.mark_step()
-                if q_i.shape[2] <= 65536:  # need to investigate this crosspoint
-                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0, False,
-                                               None)
-                else:
-                    output_i = AttentionLongSequence.forward(
-                        q_i, k_i, v_i, None, int(q_i.shape[2]/4), None)
-                htcore.mark_step()
-                output_i = rearrange(output_i, "b h s d -> b s h d ")
-                outputs.append(output_i)
-            context_layer = torch.cat(outputs, dim=1)
+            q_i = q
+            k_i = k
+            v_i = v
+            q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
+                             for x in [q_i, k_i, v_i])
+
+            htcore.mark_step()
+            if q_i.shape[2] <= 65536:  # need to investigate this crosspoint
+                output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0, False,
+                                           None)
+            else:
+                output_i = AttentionLongSequence.forward(
+                    q_i, k_i, v_i, None, int(q_i.shape[2] / 4), None)
+            htcore.mark_step()
+            output_i = rearrange(output_i, "b h s d -> b s h d ")
+            context_layer = output_i
+
         elif self.attn_backend == _Backend.FLASH_ATTN:
             from flash_attn import flash_attn_varlen_func
+            max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
 
             q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
 
@@ -563,6 +567,7 @@ class KeyeSiglipAttention(nn.Module):
             from xformers import ops as xops
             from xformers.ops.fmha.attn_bias import BlockDiagonalMask
 
+            seqlens = (cu_seqlens[1:] - cu_seqlens[:-1]).tolist()
             attn_bias = BlockDiagonalMask.from_seqlens(q_seqlen=seqlens,
                                                        kv_seqlen=None,
                                                        device=q.device)
@@ -844,7 +849,11 @@ class KeyeSiglipVisionModel(nn.Module):
     ):
         super().__init__()
 
-        self.vision_model = KeyeSiglipVisionTransformer(
+        if is_hpu:
+            keye_visionTransformer = KeyeSiglipVisionTransformerStaticShape
+        else:
+            keye_visionTransformer = KeyeSiglipVisionTransformer
+        self.vision_model = keye_visionTransformer(
             config,
             quant_config=quant_config,
             prefix=f"{prefix}.vision_model",
@@ -865,6 +874,7 @@ class KeyeSiglipVisionModel(nn.Module):
     def forward(
         self,
         pixel_values,
+        vision_buckets,
         sample_indices: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -881,20 +891,39 @@ class KeyeSiglipVisionModel(nn.Module):
         window_size: Optional[bool] = -1,
     ) -> BaseModelOutputWithPooling:
 
-        return self.vision_model(
-            pixel_values=pixel_values,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            interpolate_pos_encoding=interpolate_pos_encoding,
-            position_ids=position_ids,
-            vision_return_embed_list=vision_return_embed_list,
-            image_grid_thw=image_grid_thw,
-            sample_indices=sample_indices,
-            cu_seqlens=cu_seqlens,
-            return_pooler_output=return_pooler_output,
-            use_rope=use_rope,
-            window_size=window_size,
-        )
+        if is_hpu:
+            assert isinstance(self.vision_model,
+                              KeyeSiglipVisionTransformerStaticShape)
+            return self.vision_model.get_image_embeds(
+                pixel_values=pixel_values,
+                vision_buckets=vision_buckets,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                interpolate_pos_encoding=interpolate_pos_encoding,
+                position_ids=position_ids,
+                vision_return_embed_list=vision_return_embed_list,
+                image_grid_thw=image_grid_thw,
+                sample_indices=sample_indices,
+                cu_seqlens=cu_seqlens,
+                return_pooler_output=return_pooler_output,
+                use_rope=use_rope,
+                window_size=window_size,
+            )
+        else:
+            return self.vision_model(
+                pixel_values=pixel_values,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                interpolate_pos_encoding=interpolate_pos_encoding,
+                position_ids=position_ids,
+                vision_return_embed_list=vision_return_embed_list,
+                image_grid_thw=image_grid_thw,
+                sample_indices=sample_indices,
+                cu_seqlens=cu_seqlens,
+                return_pooler_output=return_pooler_output,
+                use_rope=use_rope,
+                window_size=window_size,
+            )
 
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
@@ -1462,6 +1491,7 @@ class BaseKeyeModule(nn.Module):
 
             image_embeds = self.visual(
                 pixel_values=pixel_values,
+                vision_buckets=self.vision_buckets,
                 image_grid_thw=image_grid_hws,
                 position_ids=siglip_position_ids,
                 vision_return_embed_list=False,
@@ -1471,6 +1501,7 @@ class BaseKeyeModule(nn.Module):
                 use_rope=True,
                 window_size=-1,
             )
+
             image_embeds = tuple(self.mlp_AR(image_embeds, image_grid_thw))
             return image_embeds
 
@@ -1511,6 +1542,7 @@ class BaseKeyeModule(nn.Module):
 
             video_embeds = self.visual(
                 pixel_values=pixel_values_videos,
+                vision_buckets=self.vision_buckets,
                 image_grid_thw=video_grid_hws,
                 position_ids=siglip_position_ids,
                 vision_return_embed_list=True,
@@ -1797,3 +1829,195 @@ class KeyeForConditionalGeneration(BaseKeyeModule, SupportsMultiModal,
         return tuple(
             self._process_video_embeds(video_type, video_grid_thw,
                                        pixel_values_videos))
+
+
+class KeyeSiglipVisionTransformerStaticShape(KeyeSiglipVisionTransformer):
+    """
+    Here we overwrite some of the methods of KeyeSiglipVisionTransformer
+    to make the model more friendly to static shapes. Specifically,
+    we split the forward  method into:
+      - pre_attn (dynamic)
+      - forward (static shape) 
+      - post_attn (dynamic)
+    and we should call get_image_embeds instead of forward, allowing
+    the forward method ro run with HPU_Graphs, whereas the 
+    pre_attn and post_attn methods are allow to be dynamic.
+    """
+
+    def pad_multimodal_data(self,
+                            pixel_values,
+                            image_grid_thw,
+                            vision_buckets,
+                            constant_value=0):
+        assert pixel_values.shape[0] % 4 == 0, 'needs 64 aligned resolution'
+
+        desired_number_of_pixels = vision_buckets.get_multimodal_bucket(
+            pixel_values.shape[0])
+        padding_len = desired_number_of_pixels - pixel_values.shape[0]
+
+        if padding_len <= 0:
+            return pixel_values
+
+        logger_msg = "Padding current number pixel " \
+            + str(pixel_values.shape[0]) \
+            + " to " \
+            + str(desired_number_of_pixels)
+        logger.debug(logger_msg)
+        print(logger_msg)
+
+        pixel_values = torch.cat([
+            pixel_values,
+            torch.ones((padding_len, pixel_values.shape[1]), \
+                device=pixel_values.device, \
+                    dtype=pixel_values.dtype) * constant_value
+        ])
+
+        return pixel_values
+
+    def pre_attn_encoder(self, inputs_embeds, image_grid_thw, use_rope):
+        device = inputs_embeds.device
+        if use_rope is True:
+            flatten_image_grid_thw = self.encoder.flatten_list(image_grid_thw)
+
+            split_hids = list()
+            split_wids = list()
+            for t, h, w in flatten_image_grid_thw:
+                image_pids = torch.arange(t * h * w, device=device) % (h * w)
+                sample_hids = image_pids // w
+                sample_wids = image_pids % w
+                split_hids.append(sample_hids)
+                split_wids.append(sample_wids)
+            width_position_ids = torch.concat(split_wids, dim=0)
+            height_position_ids = torch.concat(split_hids, dim=0)
+
+            pids = torch.stack(
+                [height_position_ids, width_position_ids],
+                dim=-1,
+            )
+            max_grid_size = pids.max() + 1
+            rope_emb_max_grid = self.encoder.rotary_pos_emb(max_grid_size)
+            rope_emb = rope_emb_max_grid[pids].flatten(1)
+            rope_emb = rope_emb.repeat(1, 2)
+            rope_emb = (rope_emb.cos(), rope_emb.sin())
+        else:
+            rope_emb = None
+
+        return rope_emb
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        rope_emb: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
+        cu_seqlens: Optional[list[torch.Tensor]] = None,
+    ) -> torch.Tensor:
+
+        assert attention_mask is None
+        for encoder_layer in self.encoder.layers:
+            htcore.mark_step()
+            hidden_states = encoder_layer(
+                hidden_states,
+                attention_mask,
+                output_attentions=output_attentions,
+                cu_seqlens=cu_seqlens,
+                rope_emb=rope_emb,
+            )
+
+        return hidden_states
+
+    def post_attn(self, hidden_states: torch.Tensor):
+        hidden_states = self.post_layernorm(hidden_states)
+
+        return hidden_states
+
+    def get_image_embeds(
+        self,
+        pixel_values,
+        vision_buckets,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        interpolate_pos_encoding: Optional[bool] = False,
+        attention_mask: Optional[torch.Tensor] = None,
+        sample_indices: Optional[torch.Tensor] = None,
+        image_indices: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        height_position_ids: Optional[torch.Tensor] = None,
+        width_position_ids: Optional[torch.Tensor] = None,
+        cu_seqlens: Optional[list[torch.Tensor]] = None,
+        padding_mask: Optional[torch.Tensor] = None,
+        vision_return_embed_list: Optional[bool] = False,
+        image_grid_thw: Optional[list[Union[
+            tuple[int, int, int],
+            list[tuple[int, int, int]],
+        ]]] = None,
+        return_pooler_output: Optional[bool] = True,
+        use_rope: Optional[bool] = False,
+        window_size: Optional[bool] = -1,
+    ) -> torch.Tensor:
+
+        offset = 0
+
+        sample_hidden_state = list()
+
+        for image_grid in image_grid_thw:
+            t, h, w = image_grid
+            curr_img_size = t * h * w
+            img_shape = [image_grid]
+
+            pixel_values_curr_img = pixel_values[offset:offset +
+                                                 curr_img_size, :]
+
+            pixel_values_curr_img = self.embeddings(
+                pixel_values_curr_img,
+                interpolate_pos_encoding=interpolate_pos_encoding,
+                position_ids=position_ids,
+                image_grid_thw=img_shape,
+            )
+
+            rope_emb = self.pre_attn_encoder(pixel_values_curr_img, img_shape,
+                                             use_rope)
+
+            offset += curr_img_size
+            pixel_values_curr_img = pixel_values_curr_img.squeeze(0)
+
+            pixel_values_curr_img_padded = \
+                self.pad_multimodal_data(pixel_values_curr_img, \
+                    img_shape, vision_buckets,0)
+
+            pixel_values_curr_img_padded = \
+                pixel_values_curr_img_padded.unsqueeze(0)
+
+            rope_emb_padded_0 = self.pad_multimodal_data(
+                rope_emb[0], img_shape, vision_buckets, -100)
+            rope_emb_padded_1 = self.pad_multimodal_data(
+                rope_emb[1], img_shape, vision_buckets, -100)
+
+            rope_emb_padded = (rope_emb_padded_0, rope_emb_padded_1)
+
+            extra_forward_kwargs = {}
+            if htorch.utils.internal.is_lazy():
+                padded_len = pixel_values_curr_img_padded.shape[0]
+                use_graph = vision_buckets.use_graph(padded_len)
+                extra_forward_kwargs.update(
+                    {"bypass_hpu_graphs": not use_graph})
+
+            htcore.mark_step()
+
+            hidden_states = self.forward(
+                pixel_values_curr_img_padded,
+                rope_emb_padded,
+                attention_mask=None,
+                output_attentions=output_attentions,
+                cu_seqlens=cu_seqlens,
+            )
+            htcore.mark_step()
+
+            # # remove padding
+            hidden_states = hidden_states[:, :curr_img_size, :]
+
+            image_embeds = self.post_attn(hidden_states)
+
+            sample_hidden_state.append(image_embeds.squeeze(0))
+
+        return sample_hidden_state

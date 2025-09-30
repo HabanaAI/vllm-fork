@@ -20,8 +20,8 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.multimodal import MULTIMODAL_REGISTRY, NestedTensors
 from vllm.multimodal.inputs import (ImageItem, ModalityData,
-                                    MultiModalFieldConfig,
-                                    MultiModalKwargs, VideoItem)
+                                    MultiModalFieldConfig, MultiModalKwargs,
+                                    VideoItem)
 from vllm.multimodal.parse import (DictEmbeddingItems, ModalityDataItems,
                                    MultiModalDataItems, MultiModalDataParser)
 from vllm.multimodal.processing import (PromptReplacement, PromptUpdate,

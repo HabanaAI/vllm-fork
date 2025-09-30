@@ -1589,6 +1589,7 @@ class MRotaryEmbedding(RotaryEmbedding):
                                 len(input_tokens)).item()
         return llm_positions, mrope_position_delta
 
+    @classmethod
     def _keye_get_input_positions_tensor(
         cls,
         input_tokens: list[int],
@@ -1705,7 +1706,7 @@ class MRotaryEmbedding(RotaryEmbedding):
         llm_positions = llm_positions[:, context_len:seq_len]
 
         return llm_positions, mrope_position_delta
-                
+
     @classmethod
     def _vl_get_input_positions_tensor(
         cls,
