@@ -2058,6 +2058,7 @@ class Scheduler:
             return (0 if num_new_tokens > remaining_token_budget else
                     num_new_tokens)
 
+        block_size = cache_config.block_size
         if cache_config.enable_prefix_caching:
             # Adjust the remaining token budget to be divisible by the block
             # size when prefix caching is enabled.
@@ -2065,7 +2066,6 @@ class Scheduler:
             # When prefix caching is enabled, we always allocate
             # the number of new tokens that is dividable by the block
             # size to avoid partial block matching.
-            block_size = cache_config.block_size
             remainder = budget.token_budget % block_size
             if remainder != 0:
                 raise ValueError("When enabling chunked prefill and "
@@ -2074,10 +2074,17 @@ class Scheduler:
                                  "block size, but got chunk_size "
                                  f"({budget.token_budget}) % block_size "
                                  f"({block_size}) = {remainder}")
-            # Round down to block size.
-            remaining_token_budget = (remaining_token_budget // block_size *
-                                      block_size)
 
+        # For chunked prefill, we always allocate the number of new tokens
+        # that is dividable by the block size unless it is the last chunk
+        remaining_token_budget = (remaining_token_budget // block_size *
+                                  block_size)
+        if scheduler_config.prefill_chunk_size:
+            # If prefill_chunk_size is specified, chunk with the specific size
+            # The prefill_chunk_size must be dividable by the block size
+            assert scheduler_config.prefill_chunk_size % block_size == 0
+            remaining_token_budget = min(
+                remaining_token_budget, scheduler_config.prefill_chunk_size)
         num_new_tokens = min(num_new_tokens, remaining_token_budget)
 
         return num_new_tokens
