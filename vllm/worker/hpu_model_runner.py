@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 ###############################################################################
@@ -3985,6 +3984,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if sampling_tensors.prompt_tokens.numel() > 0:
                         # Cache the prompt_tokens tensor that's already on HPU
                         self.model.sampler._prompt_tokens_hpu_cache = sampling_tensors.prompt_tokens
+                    if sampling_tensors.output_tokens.numel() > 0:
+                        self.model.sampler._output_tokens_hpu_cache = sampling_tensors.output_tokens
 
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:
