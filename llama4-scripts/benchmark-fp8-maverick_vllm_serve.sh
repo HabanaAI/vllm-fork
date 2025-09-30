@@ -95,6 +95,7 @@ python3 ../benchmarks/benchmark_serving.py \
     --tokenizer ${tokenizer} \
     --request-rate ${request_rate} \
     --percentile-metrics ttft,tpot,itl,e2el \
+    --metric-percentiles 50,90,99 \
     --ignore-eos \
     --num-prompts ${num_prompts} \
     --port 18080 \
