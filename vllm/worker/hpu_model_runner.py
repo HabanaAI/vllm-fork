@@ -673,7 +673,7 @@ class HpuModelAdapter(torch.nn.Module):
             return kwargs
         if not self.model_is_mrope and not self.is_mm_optimized:
             return None
-        # For Qwen2.5-VL/Gemma3 VL multimodal embedding,
+        # For multimodal model embedding,
         # this embedding part should be executed
         # with PT_COMPILE_ONLY_MODE off at all times
         # due to it's dynamicity.
@@ -1519,7 +1519,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.is_mm_optimized = is_mm_optimized(self.model)
         if self.model_is_mrope or self.is_mm_optimized:
             if hasattr(self.model.model.config, 'mm_tokens_per_image'):
-                self.mm_tokens_per_image = self.model.model.config.mm_tokens_per_image
+                self.mm_tokens_per_image = \
+                    self.model.model.config.mm_tokens_per_image
                 self.image_token_id = self.model.model.config.image_token_id
             elif 'InternVLChatModel' in str(type(self.model.model)):
                 self.image_token_id = 151667
@@ -2696,8 +2697,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
                                                     lora_request, seq_len):
-        assert self.model_is_mrope or self.is_mm_optimized, \
-            ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
             img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
