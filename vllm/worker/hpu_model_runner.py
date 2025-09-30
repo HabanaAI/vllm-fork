@@ -1074,6 +1074,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     and not self.lora_config)
         self.use_delayed_sampling = get_config(
         ).use_delayed_sampling and can_use_delayed_sampling
+        self.mm_tokens_per_image = 1
+        self.image_token_id = 0
+        self.delayed_callbacks: Dict[str, Callable] = {}
 
     def _set_gc_threshold(self) -> None:
         """
@@ -3998,10 +4001,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     continue
 
-                if use_delayed_sampling:
-                    fake_output = self._delayed_sampler_outputs(model_input)
-                elif model_input.async_callback is not None:
-                    model_input.async_callback()
+                # # In execute_model, after sampling
+                # if model_input.async_callback is not None and not warmup_mode:
+                #     # Just queue the raw output for engine processing
+                #     # Don't try to create RequestOutput here
+                #     return [output] if self.is_driver_worker else []  # output is SamplerOutput
+
+                # # Continue with delayed sampling as fallback
+                # if use_delayed_sampling:
+                #     fake_output = self._delayed_sampler_outputs(model_input)
+                #     return [fake_output] if self.is_driver_worker else []
 
                 with self.profiler.record_event('internal',
                                                 ('sample_'
@@ -4018,6 +4027,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(
                             CachedStepOutput(output))
+                    # if model_input.async_callback is not None and not warmup_mode:
+                    #     # For async, return the output immediately
+                    #     # The engine will handle it asynchronously
+                    #     if self.do_mark_step:
+                    #         htorch.core.mark_step()
+                    #     return [output] if self.is_driver_worker else []
                     if use_delayed_sampling and self.is_driver_worker:
                         token_ids = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
@@ -4027,6 +4042,26 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 output.deferred_sample_results_args,
                                 sampling_metadata, is_prompt))
                         self.cached_step_inputs.append(model_input)
+                        fake_output = self._delayed_sampler_outputs(model_input)
+                        
+                        # Store callback externally since model_input is frozen
+                        if model_input.async_callback is not None and not warmup_mode:
+                            # Use a simple counter as key instead of request_id
+                            callback_key = len(self.cached_step_inputs) - 1
+                            if not hasattr(self, 'delayed_callbacks'):
+                                self.delayed_callbacks = {}
+                            self.delayed_callbacks[callback_key] = model_input.async_callback
+                            # Can't modify frozen dataclass, so just track separately
+                        
+                        if self.do_mark_step:
+                            htorch.core.mark_step()
+                        return [fake_output]
+
+                    # Standard async path (when delayed sampling is OFF)
+                    if model_input.async_callback is not None and not warmup_mode:
+                        if self.do_mark_step:
+                            htorch.core.mark_step()
+                        return [output] if self.is_driver_worker else []
                 if self.do_mark_step:
                     htorch.core.mark_step()
                 if use_delayed_sampling \
@@ -4209,92 +4244,103 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def _patch_prev_output(self):
         if self.has_patched_prev_output:
             return
-        assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
-            f'''Inputs and outputs are out of sync!
-            {len(self.cached_step_inputs)} vs {len(self.cached_step_outputs)}'''
+        
         if len(self.cached_step_inputs) == 0:
             return
+        
         model_input = self.cached_step_inputs.pop(0)
         model_output = self.cached_step_outputs.pop(0)
-        delayed_tokens = model_output.token_ids.cpu().squeeze(-1).tolist()
-
-        ctx = model_input.async_callback.keywords["ctx"]  # type: ignore
-        # If there's no output to patch with, which is usually the case when
-        # we're starting a new request after all requests are completed.
+        
+        # Get callback - either from delayed storage or model_input directly
+        delayed_callback = None
+        if hasattr(self, 'delayed_callbacks') and 0 in self.delayed_callbacks:
+            delayed_callback = self.delayed_callbacks.pop(0)
+            # Shift remaining keys down
+            self.delayed_callbacks = {k-1: v for k, v in self.delayed_callbacks.items()}
+            ctx = delayed_callback.keywords["ctx"]
+        else:
+            ctx = model_input.async_callback.keywords["ctx"]
+        
         if len(ctx.output_queue) == 0:
             return
-        assert len(
-            ctx.output_queue) == 1, 'There should be exactly 1 output waiting!'
+        
+        assert len(ctx.output_queue) == 1, \
+            f'Expected 1 output, found {len(ctx.output_queue)}'
+        
         output_data = ctx.output_queue[0]
         assert len(output_data.outputs) == 1
+        
+        # Extract delayed tokens
+        seq_groups = model_output.sampling_metadata.seq_groups
+        
+        if model_output.is_prompt and any(
+            seq_group.sampling_params.prompt_logprobs is not None
+            for seq_group in seq_groups):
+            sample_idx_tensor = torch.tensor(
+                [sdx for sg in seq_groups for sdx in sg.sample_indices])
+            sampled_tokens = model_output.token_ids[sample_idx_tensor, :]
+            delayed_tokens = sampled_tokens.cpu().squeeze(-1).tolist()
+        else:
+            delayed_tokens = model_output.token_ids.cpu().squeeze(-1).tolist()
+        
+        # Patch the output data
         for fake_out, real_out in zip(output_data.outputs[0], delayed_tokens):
             fake_out.samples[0].output_token = real_out
-        for sg, real_out in zip(output_data.seq_group_metadata_list,
-                                delayed_tokens):
+        
+        for sg, real_out in zip(output_data.seq_group_metadata_list, delayed_tokens):
             assert len(sg.seq_data) == 1
             seq_data = list(sg.seq_data.values())[0]
-            # This is a hack. Assigning output_token_ids triggers
-            # a cache recomputation and we only need to update the last token
             seq_data.output_token_ids_array[-1] = real_out
             seq_data._cached_all_token_ids[-1] = real_out
-        delayed_logprobs = None
-        delayed_prompt_logprobs = None
-        assert model_output.sampling_metadata is not None, \
-            'Sampling metadata is required to patch the output!'
-        logprobs_required = any(
-            seq_group.sampling_params.logprobs is not None
-            for seq_group in model_output.sampling_metadata.seq_groups)
+        
+        # Handle logprobs if needed
+        logprobs_required = any(seq_group.sampling_params.logprobs is not None
+                            for seq_group in seq_groups)
         prompt_logprobs_required = any(
             seq_group.sampling_params.prompt_logprobs is not None
-            for seq_group in model_output.sampling_metadata.seq_groups)
+            for seq_group in seq_groups)
+        
         if logprobs_required or prompt_logprobs_required:
-            # We are one step ahead, so prompt is already marked as a computed.
-            # We need to reset the computed tokens count to 0,
-            # so that we can recompute the prompt logprobs.
+            # Recompute with actual tokens
             computed_tokens = []
             if model_output.is_prompt:
                 for seq_group in model_output.sampling_metadata.seq_groups:
                     seq_ids = seq_group.seq_ids
-                    assert len(seq_ids) == 1  # prompt has only 1 seq id.
+                    assert len(seq_ids) == 1
                     seq_data = seq_group.seq_data[seq_ids[0]]
                     computed_tokens.append(seq_data.get_num_computed_tokens())
                     seq_data._num_computed_tokens = 0
+            
             sampling_results = get_pythonized_sample_results(
                 model_output.deffered_sample_results)
             delayed_prompt_logprobs, delayed_logprobs = get_logprobs(
                 model_output.logprobs, model_output.sampling_metadata,
                 sampling_results)
-
-            # Reset the computed tokens count to the original value.
+            
+            # Restore computed tokens
             if model_output.is_prompt:
                 for seq_group in model_output.sampling_metadata.seq_groups:
                     seq_ids = seq_group.seq_ids
                     seq_data = seq_group.seq_data[seq_ids[0]]
                     seq_data.update_num_computed_tokens(computed_tokens.pop(0))
-
-        # Another hack. We need to pass the logprobs to the output data,
-        # which are part of scheduler output.
-        if logprobs_required and delayed_logprobs is not None:
-            for sg, real_logprobs in zip(
-                    output_data.scheduler_outputs.scheduled_seq_groups,
-                    delayed_logprobs):
-                assert len(sg.seq_group.seqs) == 1
-                assert len(real_logprobs) == 1
-                sg.seq_group.first_seq.output_logprobs[-1] = real_logprobs[0]
-
-        # If prompt logprobs are available, we need to patch them
-        # as well.
-        if prompt_logprobs_required and delayed_prompt_logprobs is not None:
-            seq_groups = output_data.scheduler_outputs.scheduled_seq_groups
-            assert len(seq_groups) == len(delayed_prompt_logprobs), \
-                f'''Output data has {len(seq_groups)} seq groups, but prompt
-                logprobs has {len(delayed_prompt_logprobs)} entries!'''
-            for sg, real_logprobs in zip(seq_groups, delayed_prompt_logprobs):
-                if real_logprobs is not None:
-                    # Prepending None just like in vllm.engine.output_processor
-                    # .single_step.single_step_process_prompt_logprob, but
-                    # hence we are not going through async output processor
-                    # with data from prompt in delayed sampling scenario we
-                    # need to do that manually.
-                    sg.seq_group.prompt_logprobs = [None] + real_logprobs
+            
+            # Patch logprobs
+            if logprobs_required and delayed_logprobs is not None:
+                for sg, real_logprobs in zip(
+                        output_data.scheduler_outputs.scheduled_seq_groups,
+                        delayed_logprobs):
+                    assert len(sg.seq_group.seqs) == 1
+                    assert len(real_logprobs) == 1
+                    sg.seq_group.first_seq.output_logprobs[-1] = real_logprobs[0]
+            
+            if prompt_logprobs_required and delayed_prompt_logprobs is not None:
+                seq_groups_out = output_data.scheduler_outputs.scheduled_seq_groups
+                for sg, real_logprobs in zip(seq_groups_out, delayed_prompt_logprobs):
+                    if real_logprobs is not None:
+                        sg.seq_group.prompt_logprobs = [None] + real_logprobs
+        
+        # Invoke delayed callback if it exists
+        if delayed_callback is not None:
+            delayed_callback()
+        
         self.has_patched_prev_output = True
