@@ -405,8 +405,14 @@ def _resolve_chat_template_content_format(
     jinja_text = (hf_chat_template if isinstance(hf_chat_template, str)
                   else load_chat_template(chat_template, is_literal=True))
 
-    detected_format = ("string" if jinja_text is None else
-                       _detect_content_format(jinja_text, default="string"))
+    # The InternVL template has mixed content access patterns that fail with automatic detection.
+    # Set string format for proper operation if InternVL is used.
+    model_type = getattr(model_config.hf_config, 'model_type', '')
+    if model_type == 'internvl_chat' or 'internvl' in model_config.model.lower():
+        detected_format = "string"
+    else:
+        detected_format = ("string" if jinja_text is None else
+                           _detect_content_format(jinja_text, default="string"))
 
     return detected_format
 
@@ -527,7 +533,8 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
 
             if model_type in ("aya_vision", "chameleon", "deepseek_vl_v2",
                               "internvl_chat", "ovis", "skywork_chat",
-                              "NVLM_D", "h2ovl_chat", "idefics3", "smolvlm"):
+                              "NVLM_D", "h2ovl_chat", "idefics3", "smolvlm",
+                              "ovis2_5"):
                 return "<image>"
             if model_type in ("mllama", "llama4"):
                 return "<|image|>"
