@@ -370,7 +370,7 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
             print(">> [chp]   encoding and return BatchFeature(input_ids)")
             return BatchFeature(dict(input_ids=[prompt_ids]), tensor_type="pt")
         else:
-            print(f">> [chp]   yes mm_data:{mm_data}")
+            print(">> [chp]   yes mm_data exist")
 
         processed_outputs = super()._call_hf_processor(
             prompt=prompt,

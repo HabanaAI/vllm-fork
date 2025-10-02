@@ -12,6 +12,49 @@ from transformers.image_utils import ImageInput
 from transformers.processing_utils import (ProcessingKwargs, ProcessorMixin,
                                            Unpack)
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
+
+from habana_frameworks.mediapipe import fn
+from habana_frameworks.mediapipe.mediapipe import MediaPipe
+from habana_frameworks.mediapipe.media_types import dtype as dt
+from habana_frameworks.mediapipe.media_types import imgtype as it
+from habana_frameworks.mediapipe.media_types import readerOutType as ro
+from habana_frameworks.mediapipe.operators.reader_nodes.reader_nodes import (
+    media_ext_reader_op_impl, media_ext_reader_op_tensor_info
+)
+from habana_frameworks.mediapipe.plugins.iterator_pytorch import (
+    MediaGenericPytorchIterator
+)
+# Handle MediaPipe pipe_manager destructor
+from habana_frameworks.mediapipe.backend.cal import (
+    pipe_manager, cpp_pipe_manager_list
+)
+
+from queue import Queue
+import os
+import io
+import time
+
+def _patched_close(self):
+    """Patched close method that handles None cpp_pipe_manager_list during shutdown"""
+    try:
+        # Check if cpp_pipe_manager_list exists and is not None
+        if cpp_pipe_manager_list is not None and self._pm_ in cpp_pipe_manager_list:
+            cpp_pipe_manager_list.remove(self._pm_)
+    except (TypeError, AttributeError):
+        # Handle case where cpp_pipe_manager_list is None or not iterable
+        pass
+
+    # Clean up the pipe manager
+    if self._pm_ is not None:
+        self._pm_.close()
+        self._pm_ = None
+
+pipe_manager.close = _patched_close
+
+# Queue shared between external reader and mediapipe call
+shared_q = Queue()
+
+
 from vllm.logger import init_logger
 logger = init_logger(__name__)
 
@@ -21,6 +64,110 @@ IMAGE_TOKEN = "<image>"
 VIDEO_TOKEN = "<video>"
 MIN_PIXELS = 448 * 448
 MAX_PIXELS = 1792 * 1792
+
+
+class MediaPytorchIterator(MediaGenericPytorchIterator):
+    def __init__(self, mediapipe):
+        super().__init__(mediapipe=mediapipe, device="hpu", fw_type="PYT_FW")
+
+
+class ExternalReader(media_ext_reader_op_impl):
+    def __init__(self, params, fw_params):
+        self.batch_size = fw_params.batch_size
+        self.max_file = ""
+        self.num_batches = 1
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        return self.num_batches
+
+    def __next__(self):
+        img_list = shared_q.get()
+        for i in range(len(img_list)):
+            # NOTE: this padding is needed because of HW alignmnet requirment
+            img_list[i] = np.pad(img_list[i],
+                                       (0, 64 - len(img_list[i]) % 64),
+                                       'constant')
+        return img_list
+
+    def get_media_output_type(self):
+        return ro.BUFFER_LIST
+
+    def get_largest_file(self):
+        return self.max_file
+
+    def gen_output_info(self):
+        out_info = []
+        o = media_ext_reader_op_tensor_info(
+            dt.NDT, np.array([self.batch_size], dtype=np.uint32), "")
+        out_info.append(o)
+        return out_info
+
+
+class HPUMediaPipe(MediaPipe):
+    def __init__(self, device, queue_depth, batch_size,
+                 num_threads, op_device,
+                 img_height, img_width):
+        super(
+            HPUMediaPipe,
+            self).__init__(
+            device,
+            queue_depth,
+            batch_size,
+            num_threads,
+            self.__class__.__name__)
+
+        mediapipe_seed = int(time.time_ns() % (2**31 - 1))
+
+        self.input = fn.MediaExtReaderOp(impl=ExternalReader,
+                                         num_outputs=1,
+                                         seed=mediapipe_seed,
+                                         device=op_device)
+        self.decode = fn.ImageDecoder(
+            device="hpu", output_format=it.RGB_I, resize=[img_width, img_height])
+
+        self.mean_node = fn.MediaConst(
+            data=np.array([127.5, 127.5, 127.5], dtype=dt.FLOAT32),
+            shape=[1, 1, 3],
+            dtype=dt.FLOAT32
+        )
+        self.std_node = fn.MediaConst(
+            data=np.array([1/127.5, 1/127.5, 1/127.5], dtype=dt.FLOAT32),
+            shape=[1, 1, 3],
+            dtype=dt.FLOAT32
+        )
+
+        self.cmn = fn.CropMirrorNorm(crop_w=img_width, crop_h=img_height, dtype=dt.FLOAT32, device="hpu")
+
+        self.transpose = fn.Transpose(
+            device="hpu",
+            tensorDim=4,
+            permutation=[1, 2, 0, 3] #NCHW
+        )
+
+    def definegraph(self):
+        images = self.input()
+        images = self.decode(images)
+        mean = self.mean_node()
+        std = self.std_node()
+        images = self.cmn(images, mean, std)
+        images = self.transpose(images)
+
+        return images
+
+def get_image_info(data):
+    # Get image info using PIL without decoding
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            return {
+                'format': img.format,
+                'size': img.size,
+                'mode': img.mode
+            }
+    except Exception as e:
+        raise ValueError(f"Input image bitstream is not in supported format: {str(e)}")
 
 
 class Ovis2_5ProcessorKwargs(ProcessingKwargs,
@@ -430,6 +577,87 @@ class Ovis2_5Processor(ProcessorMixin):
                 images = video
         min_pixels = min(max_pixels if max_pixels is not None else MAX_PIXELS,
                          min_pixels if min_pixels is not None else MIN_PIXELS)
+
+        use_hpu_mp = (os.getenv("VLLM_USE_MEDIA_PIPELINE", "false").lower() in ("1", "true", "yes"))
+        is_bytes_batch = isinstance(images, list) and images and isinstance(images[0], (bytes, bytearray))
+
+        if use_hpu_mp and is_bytes_batch:
+            queue_depth = 0
+            num_threads = 1
+
+            # Probe original size from first image (without decoding on CPU)
+            with PIL.Image.open(io.BytesIO(images[0])) as _probe:
+                width, height = _probe.size
+            # Ovis policy: factor = patch_size * hidden_stride
+            resized_height, resized_width = self.smart_resize(
+                height, width,
+                factor=self.patch_size * self.hidden_stride,
+                min_pixels=min_pixels, max_pixels=max_pixels,
+            )
+            batch_size = len(images)
+            # Build HPU pipeline and run once for the batch
+            pipe = HPUMediaPipe("legacy", queue_depth, batch_size, num_threads, "cpu",
+                                 resized_height, resized_width)
+
+            pipe.build()
+            data_loader = MediaPytorchIterator(pipe)
+            data_loader = iter(data_loader)
+
+            img_list = np.empty(shape=[batch_size, ], dtype=object)
+            for i in range(batch_size):
+                img_list[i] = np.frombuffer(images[i], dtype=np.uint8)
+
+            shared_q.put(img_list)
+            processed = next(data_loader)[0]  # (B, 3, H, W) on hpu
+
+            # @@
+            # for saving resized out
+            '''
+            dump_dir = "/ws"
+            dec_cpu = processed.detach().to("cpu")
+            print(">> decoded", tuple(dec_cpu.shape), dec_cpu.dtype, dec_cpu.min().item(), dec_cpu.max().item())
+            dec_cpu_save = processed.detach().to("cpu").numpy()
+            for i in range(dec_cpu_save.shape[0]):
+                PIL.Image.fromarray(dec_cpu_save[i], "RGB").save(os.path.join(dump_dir, f"decoded_{i}.jpg"))
+
+
+            '''
+            shared_q.task_done()
+            pipe.close()
+
+            print(f">> processed images shape: {processed.shape}")
+            ps = self.patch_size
+            hs = self.hidden_stride
+
+            # processed: (B, C, H, W)  — resize + normalized
+            B, C, H, W = processed.shape
+
+            # check sizes
+            assert H % ps == 0 and W % ps == 0, f"(H,W)=({H},{W}) not divisible by ps={ps}"
+            Ty, Tx = H // ps, W // ps
+            assert Ty % hs == 0 and Tx % hs == 0, f"(Ty,Tx)=({Ty},{Tx}) not divisible by hidden_stride={hs}"
+            Gy, Gx = Ty // hs, Tx // hs
+
+            # (B,C,H,W) -> (B,C,Ty,ps,Tx,ps) -> (B,C,Gy,hs,ps,Gx,hs,ps)
+            x = processed.contiguous().reshape(B, C, Ty, ps, Tx, ps) \
+                                    .reshape(B, C, Gy, hs, ps, Gx, hs, ps)
+
+            # stride-aware order: (B, Gy, Gx, hs, hs, C, ps, ps)
+            tiles = x.permute(0, 2, 5, 3, 6, 1, 4, 7).contiguous()
+
+            # (B*Ty*Tx, C*ps*ps)
+            flatten_patches = tiles.reshape(B * Ty * Tx, C * ps * ps).contiguous()
+
+            # grids/placeholder
+            grid_t = 1
+            grids = torch.tensor([[grid_t, Ty, Tx]] * B, device=flatten_patches.device)
+            visual_placeholders = [
+                self.construct_visual_placeholders([grid_t, Ty, Tx], is_video=False)
+                for _ in range(B)
+            ]
+
+            return flatten_patches, visual_placeholders, grids
+
         images = [
             image.convert("RGB")
             if convert_to_rgb and image.mode != 'RGB' else image

@@ -1842,8 +1842,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_positions=input_positions,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
-        multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
-                                                        device=self.device)
+
+        use_hpu_mp = os.getenv("VLLM_USE_MEDIA_PIPELINE", "false").lower() in ("1", "true", "yes")
+        if use_hpu_mp:
+            print(">> [pp] hpu mediapipe is enabled")
+            # With mediapipe path some tensors will already be on HPU, we only move to HPU if needed
+            for key in multi_modal_kwargs.keys():
+                if hasattr(multi_modal_kwargs[key], "device") and multi_modal_kwargs[key].device != self.device:
+                    multi_modal_kwargs[key] = self.move_to_device(multi_modal_kwargs[key])
+        else:
+            print(">> [pp] hpu mediapipe is not enabled")
+            multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
+                                                            device=self.device)
 
         return PreparePromptMetadata(input_tokens=input_tokens_tensor,
                                      input_positions=input_positions,
