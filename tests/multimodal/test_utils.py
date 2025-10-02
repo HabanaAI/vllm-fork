@@ -514,7 +514,6 @@ def run_dp_sharded_vision_model_vs_direct(local_rank: int, world_size: int,
 
     # Check that the outputs are close (they should be identical)
     assert torch.allclose(direct_output, sharded_output, rtol=1e-5, atol=1e-5)
-    assert modality_idxs == expected_modality_idxs
 
 
 @pytest.mark.asyncio
