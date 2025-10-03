@@ -411,10 +411,10 @@ def _resolve_chat_template_content_format(
     model_type = getattr(model_config.hf_config, 'model_type', '')
     if model_type == 'internvl_chat' or 'internvl' \
         in model_config.model.lower():
-        detected_format = "string"
+        detected_format:_ChatTemplateContentFormat = "string"
     else:
         detected_format = ("string" if jinja_text is None else
-                           _detect_content_format(jinja_text, default="string"))
+                        _detect_content_format(jinja_text, default="string"))
 
     return detected_format
 
