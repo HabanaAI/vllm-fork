@@ -159,9 +159,11 @@ class Singleton(type):
 
 
 def is_mm_optimized(model):
-    return 'Gemma3ForConditionalGeneration' in str(type(model.model)) \
-        if hasattr(model, 'model') else \
-        'Gemma3ForConditionalGeneration' in str(type(model))
+    mm_models = ['Gemma3ForConditionalGeneration', 'InternVLChatModel', 'Ovis2_5']
+
+    return any(m in str(type(model.model)) for m in mm_models) \
+        if hasattr(model, 'model') \
+        else any(m in str(type(model)) for m in mm_models)
 
 
 def pad_flat_tensor(tensor, desired_size):
@@ -379,6 +381,15 @@ class HpuModelAdapter(torch.nn.Module):
                             htorch.hpu.wrap_in_hpu_graph( \
                             self.model.multi_modal_projector, \
                             disable_tensor_cache=True)
+                if hasattr(self.model, 'vte'):
+                    self.model.vte = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.vte, disable_tensor_cache=True)
+                if hasattr(self.model, 'visual_tokenizer'):
+                    self.model.visual_tokenizer = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.visual_tokenizer, disable_tensor_cache=True)
+                # if hasattr(self.model, 'llm'):
+                #     self.model.llm = htorch.hpu.wrap_in_hpu_graph(
+                #         self.model.llm, disable_tensor_cache=True)
 
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
@@ -634,10 +645,11 @@ class HpuModelAdapter(torch.nn.Module):
                 warmup_mode and kwargs['attn_metadata'].is_prompt):
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
-            kwargs = self.model.prepare_attn_masks(
-                mask_dtype=self.dtype,
-                **kwargs,
-            )
+            if 'Ovis2_5' not in str(type(self.model)):
+                kwargs = self.model.prepare_attn_masks(
+                    mask_dtype=self.dtype,
+                    **kwargs,
+                )
             kwargs['input_ids'] = input_ids
             kwargs['positions'] = positions
 
@@ -1497,10 +1509,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                        non_blocking=True)
 
     def add_vision_buckets_to_mrope_mm_optimized(self):
-        model = self.get_model()
-        self.is_mm_optimized = is_mm_optimized(model)
+        self.is_mm_optimized = is_mm_optimized(self.model)
         if self.model_is_mrope or self.is_mm_optimized:
-            model.vision_buckets = VisionBuckets(self.is_mm_optimized)
+            if hasattr(self.model.model.config, 'mm_tokens_per_image'):
+                self.mm_tokens_per_image = \
+                    self.model.model.config.mm_tokens_per_image
+                self.image_token_id = self.model.model.config.image_token_id
+            elif 'InternVLChatModel' in str(type(self.model.model)) or\
+                'Ovis2_5' in str(type(self.model.model)):
+                self.image_token_id = 151667
+                if hasattr(self.model.model, "num_image_token"):
+                    self.mm_tokens_per_image = self.model.model.num_image_token
+            self.model.model.vision_buckets = VisionBuckets(self.model.model)
 
     def _prepare_prompt(
         self,
@@ -2707,16 +2727,77 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "image_grid_thw": image_grid_thw,
             }
         else:
-            s = self.model.model.config.vision_config.image_size
-            pixel_values = torch.randn([img_args, 3, s, s])
-            num_image_tokens = self.model.model.config.mm_tokens_per_image \
-                    * img_args
-            multi_modal_data = {
-                "pixel_values": pixel_values,
-                "num_crops": torch.zeros([img_args], dtype=torch.int32)
-            }
+            if 'Ovis2_5' in str(type(self.model.model)):
+                s = self.model.model.config.vit_config.image_size
+            else:
+                s = self.model.model.config.vision_config.image_size
+                pixel_values = torch.randn([img_args, 3, s, s])
 
-        image_token_id = self.get_model().config.image_token_id
+            if 'Gemma3ForConditionalGeneration' in str(type(self.model.model)):
+                multi_modal_data = {
+                    "pixel_values": pixel_values,
+                    "num_crops": torch.zeros([img_args], dtype=torch.int32),
+                }
+            elif 'InternVLChatModel' in str(type(self.model.model)):
+                multi_modal_data = {
+                    "pixel_values_flat":
+                    pixel_values.to(torch.bfloat16),
+                    "image_num_patches":
+                    torch.tensor([pixel_values.shape[0]], dtype=torch.int32),
+                    "image_token_id":
+                    torch.tensor([self.image_token_id], dtype=torch.int64),
+                }
+            elif "Ovis2_5" in str(type(self.model.model)):
+                vit_cfg = self.model.model.config.vit_config  
+                img_size = vit_cfg.image_size          
+                patch_size = vit_cfg.patch_size        
+                self.mm_tokens_per_image = (img_size // patch_size) * (img_size // patch_size)
+                image_token_id = getattr(self.model.model.config, "image_token_id", 151667)
+                
+                num_image_tokens = self.mm_tokens_per_image
+                
+                H, W = 112, 112   
+                pixel_values = torch.randn(1, 3, H*16, W*16,  device="hpu:0", dtype=torch.bfloat16)
+
+                indicator_tokens = torch.zeros((1, 2), dtype=torch.long, device=pixel_values.device)
+
+                grids = torch.tensor([[1, H, W]], dtype=torch.long, device=pixel_values.device)
+
+                multi_modal_data = {
+                    "pixel_values": pixel_values,
+                    "indicator_tokens": indicator_tokens,
+                    "grids": [grids],
+                }
+                # if not hasattr(self.get_model().config, "vit_config"):
+                #     raise ValueError("Expect Ovis model to have vit_config")
+                # vit_config = self.get_model().config.vit_config
+                # if not hasattr(vit_config, "spatial_merge_size"):
+                #     raise ValueError(
+                #         "Expect Ovis model to have spatial_merge_size")
+
+                # spatial_merge_unit = vit_config.spatial_merge_size**2
+                # num_image_tokens = img_args // spatial_merge_unit
+                # assert img_args % 8 == 0, (
+                #     f"Expects img_args to be multiples of 8, got: {img_args}")
+                # image_h = img_args // 8
+                # image_grid_thw = torch.tensor(
+                #     [[1, image_h, int(img_args / image_h)]])
+                # pixel_values = torch.randn(
+                #     image_grid_thw[0].prod(),
+                #     1176)  # TODO: figure out the variable name
+
+                # assert pixel_values.shape[0] % 64 == 0, (
+                #     f"pixel_values must be sliced in 64 chunks, "
+                #     f"got: {pixel_values.shape}")
+
+                # multi_modal_data = {
+                #     "pixel_values": pixel_values,
+                #     "image_grid_thw": image_grid_thw,
+                # }
+            else:
+                logger.warning("No support for other models yet")
+        if image_token_id is None:
+            image_token_id = self.get_model().config.image_token_id
         prompt_token_ids_image = [image_token_id] * num_image_tokens
         prompt_token_ids = [0] * (
             seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
