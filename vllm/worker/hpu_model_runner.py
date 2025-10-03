@@ -2051,6 +2051,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 indices[bid] = i
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
+            print(f"libin debug decode {indices=} {block_list=}")
             if self.interleaved_sliding_window is not None:
                 window_indices: List[Any]
                 window_indices = [None] * block_bucket_size
@@ -2074,7 +2075,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_list = padding_fn(block_list, _PAD_BLOCK_ID)
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
-
+        print(f"libin debug padded block_list {_PAD_BLOCK_ID=} {block_list=}")
         if self.interleaved_sliding_window is not None:
             window_block_list = window_padding_fn(window_block_list,
                                                   _PAD_BLOCK_ID)
