@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import io
 from abc import ABC, abstractmethod
 from collections import UserDict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import (TYPE_CHECKING, Any, Generic, Literal, NamedTuple, Optional,
                     TypeVar, Union)
 
-import io
 import numpy as np
 import torch
 from typing_extensions import TypeAlias, TypeGuard, assert_never
@@ -410,8 +410,7 @@ class MultiModalDataParser:
         if self._is_embeddings(data):
             return ImageEmbeddingItems(data)
 
-        if (isinstance(data, PILImage.Image)
-                or isinstance(data, (bytes, bytearray))
+        if (isinstance(data, (PILImage.Image, bytes, bytearray))
                 or isinstance(data,
                               (np.ndarray, torch.Tensor)) and data.ndim == 3):
             data_items = [data]

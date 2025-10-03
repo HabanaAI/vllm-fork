@@ -562,9 +562,9 @@ def merge_multimodal_embeddings(
             else:
                 flat_ids.append(int(x))
 
-        placeholder_token_id = torch.as_tensor(
-            flat_ids, device=input_ids.device, dtype=input_ids.dtype
-        )
+        placeholder_token_id = torch.as_tensor(flat_ids,
+                                               device=input_ids.device,
+                                               dtype=input_ids.dtype)
         return _merge_multimodal_embeddings(
             inputs_embeds,
             torch.isin(input_ids, placeholder_token_id),

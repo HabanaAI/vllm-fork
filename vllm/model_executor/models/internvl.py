@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import atexit
+import contextlib
+import io
 # adapted from https://huggingface.co/OpenGVLab/InternVL2-4B/blob/main/modeling_internvl_chat.py
 # --------------------------------------------------------
 # InternVL
@@ -8,32 +11,33 @@
 # Licensed under The MIT License [see LICENSE for details]
 # --------------------------------------------------------
 import os
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from queue import Queue
 from typing import Any, Literal, Optional, TypedDict, TypeVar, Union
 
+import numpy as np
 import numpy.typing as npt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
-from PIL import Image
-from transformers import BatchEncoding, PretrainedConfig, TensorType
-
 from habana_frameworks.mediapipe import fn
-from habana_frameworks.mediapipe.mediapipe import MediaPipe
+# Handle MediaPipe pipe_manager destructor
+from habana_frameworks.mediapipe.backend.cal import (cpp_pipe_manager_list,
+                                                     pipe_manager)
 from habana_frameworks.mediapipe.media_types import dtype as dt
 from habana_frameworks.mediapipe.media_types import imgtype as it
 from habana_frameworks.mediapipe.media_types import readerOutType as ro
-from habana_frameworks.mediapipe.operators.reader_nodes.reader_nodes import media_ext_reader_op_impl
-from habana_frameworks.mediapipe.operators.reader_nodes.reader_nodes import media_ext_reader_op_tensor_info
-from habana_frameworks.mediapipe.plugins.iterator_pytorch import MediaGenericPytorchIterator
-import numpy as np
-from queue import Queue
-import io
-import time
-import atexit
-from dataclasses import dataclass
+from habana_frameworks.mediapipe.mediapipe import MediaPipe
+from habana_frameworks.mediapipe.operators.reader_nodes.reader_nodes import (
+    media_ext_reader_op_impl, media_ext_reader_op_tensor_info)
+from habana_frameworks.mediapipe.plugins.iterator_pytorch import (
+    MediaGenericPytorchIterator)
+from PIL import Image
+from transformers import BatchEncoding, PretrainedConfig, TensorType
 
 from vllm.config import VllmConfig
 from vllm.model_executor.layers.quantization import QuantizationConfig
@@ -311,14 +315,14 @@ def video_to_pixel_values_internvl(
     pixel_values = torch.stack([transform(image) for image in frames_list])
     return pixel_values
 
-# Handle MediaPipe pipe_manager destructor
-from habana_frameworks.mediapipe.backend.cal import pipe_manager, cpp_pipe_manager_list
 
 def _patched_close(self):
-    """Patched close method that handles None cpp_pipe_manager_list during shutdown"""
+    """Patched close method that handles 
+    None cpp_pipe_manager_list during shutdown"""
     try:
         # Check if cpp_pipe_manager_list exists and is not None
-        if cpp_pipe_manager_list is not None and self._pm_ in cpp_pipe_manager_list:
+        if cpp_pipe_manager_list is not None and \
+            self._pm_ in cpp_pipe_manager_list:
             cpp_pipe_manager_list.remove(self._pm_)
     except (TypeError, AttributeError):
         # Handle case where cpp_pipe_manager_list is None or not iterable
@@ -329,6 +333,7 @@ def _patched_close(self):
         self._pm_.close()
         self._pm_ = None
 
+
 pipe_manager.close = _patched_close
 
 # Queue shared between external reader and mediapipe call
@@ -336,11 +341,13 @@ shared_q = Queue()
 
 
 class MediaPytorchIterator(MediaGenericPytorchIterator):
+
     def __init__(self, mediapipe):
         super().__init__(mediapipe=mediapipe, device="hpu", fw_type="PYT_FW")
 
 
 class external_reader(media_ext_reader_op_impl):
+
     def __init__(self, params, fw_params):
         self.batch_size = fw_params.batch_size
         self.max_file = ""
@@ -355,13 +362,11 @@ class external_reader(media_ext_reader_op_impl):
     def __next__(self):
         img_list = shared_q.get()
         for i in range(len(img_list)):
-            # NOTE: this padding is needed because of HW alignmnet requirment
+            # NOTE: this padding is needed because of HW alignment requirement
             rem = len(img_list[i]) % 64
             pad = (64 - rem) % 64
             if pad:
-                img_list[i] = np.pad(img_list[i],
-                                    (0, pad),
-                                    'constant')
+                img_list[i] = np.pad(img_list[i], (0, pad), 'constant')
         return img_list
 
     def get_media_output_type(self):
@@ -379,17 +384,11 @@ class external_reader(media_ext_reader_op_impl):
 
 
 class hpuMediaPipe(MediaPipe):
-    def __init__(self, device, queue_depth, batch_size,
-                 num_threads, op_device,
+
+    def __init__(self, device, queue_depth, batch_size, num_threads, op_device,
                  img_height, img_width):
-        super(
-            hpuMediaPipe,
-            self).__init__(
-            device,
-            queue_depth,
-            batch_size,
-            num_threads,
-            self.__class__.__name__)
+        super().__init__(device, queue_depth, batch_size, num_threads,
+                         self.__class__.__name__)
 
         mediapipe_seed = int(time.time_ns() % (2**31 - 1))
 
@@ -397,27 +396,35 @@ class hpuMediaPipe(MediaPipe):
                                          num_outputs=1,
                                          seed=mediapipe_seed,
                                          device=op_device)
-        self.decode = fn.ImageDecoder(
-            device="hpu", output_format=it.RGB_I, resize=[img_width, img_height])
+        self.decode = fn.ImageDecoder(device="hpu",
+                                      output_format=it.RGB_I,
+                                      resize=[img_width, img_height])
 
-        self.mean_node = fn.MediaConst(
-            data=np.array([IMAGENET_MEAN[0]*255.0,
-                           IMAGENET_MEAN[1]*255.0,
-                           IMAGENET_MEAN[2]*255.0], dtype=dt.FLOAT32),
-            shape=[1, 1, 3], dtype=dt.FLOAT32)
+        self.mean_node = fn.MediaConst(data=np.array([
+            IMAGENET_MEAN[0] * 255.0, IMAGENET_MEAN[1] * 255.0,
+            IMAGENET_MEAN[2] * 255.0
+        ],
+                                                     dtype=dt.FLOAT32),
+                                       shape=[1, 1, 3],
+                                       dtype=dt.FLOAT32)
 
-        self.std_node = fn.MediaConst(
-            data=np.array([1.0/(IMAGENET_STD[0]*255.0),
-                           1.0/(IMAGENET_STD[1]*255.0),
-                           1.0/(IMAGENET_STD[2]*255.0)], dtype=dt.FLOAT32),
-            shape=[1, 1, 3], dtype=dt.FLOAT32)
+        self.std_node = fn.MediaConst(data=np.array([
+            1.0 / (IMAGENET_STD[0] * 255.0), 1.0 /
+            (IMAGENET_STD[1] * 255.0), 1.0 / (IMAGENET_STD[2] * 255.0)
+        ],
+                                                    dtype=dt.FLOAT32),
+                                      shape=[1, 1, 3],
+                                      dtype=dt.FLOAT32)
 
-        self.cmn = fn.CropMirrorNorm(crop_w=img_width, crop_h=img_height, dtype=dt.FLOAT32, device="hpu")
+        self.cmn = fn.CropMirrorNorm(crop_w=img_width,
+                                     crop_h=img_height,
+                                     dtype=dt.FLOAT32,
+                                     device="hpu")
 
         self.transpose = fn.Transpose(
             device="hpu",
             tensorDim=4,
-            permutation=[1, 2, 0, 3] #NCHW
+            permutation=[1, 2, 0, 3]  #NCHW
         )
 
     def definegraph(self):
@@ -437,29 +444,31 @@ class hpuMediaPipe(MediaPipe):
 # -----------------------------------------------------------------------------
 @dataclass
 class _PipeState:
-    pipe:   hpuMediaPipe | None = None
-    it:     MediaGenericPytorchIterator | None = None
-    bsz:    int | None = None
-    H:      int | None = None
-    W:      int | None = None
+    pipe: hpuMediaPipe | None = None
+    it: MediaGenericPytorchIterator | None = None
+    bsz: int | None = None
+    H: int | None = None
+    W: int | None = None
 
 
 class MediaPipeTiler:
     """Owns and reuses MediaPipe pipes/iterators for main path"""
+
     def __init__(self) -> None:
-        self._main  = _PipeState()
+        self._main = _PipeState()
 
     def _rebuild(self, st: _PipeState, *, bsz: int, H: int, W: int) -> None:
         if st.pipe is not None:
-            try:
+            with contextlib.suppress(BaseException):
                 st.pipe.close()
-            except Exception:
-                pass
         pipe = hpuMediaPipe("legacy", 0, bsz, 1, "cpu", H, W)
         pipe.build()
-        st.pipe, st.it, st.bsz, st.H, st.W = pipe, iter(MediaPytorchIterator(pipe)), bsz, H, W
+        st.pipe, st.it, st.bsz, st.H, st.W = pipe, iter(
+            MediaPytorchIterator(pipe)), bsz, H, W
 
-    def ensure_main(self, *, bsz: int, H: int, W: int) -> tuple[hpuMediaPipe, MediaGenericPytorchIterator]:
+    def ensure_main(
+            self, *, bsz: int, H: int,
+            W: int) -> tuple[hpuMediaPipe, MediaGenericPytorchIterator]:
         st = self._main
         if st.pipe is None or st.bsz != bsz or st.H != H or st.W != W:
             self._rebuild(st, bsz=bsz, H=H, W=W)
@@ -486,17 +495,17 @@ class MediaPipeTiler:
 _MP = MediaPipeTiler()
 atexit.register(_MP.close_all)
 
+
 def get_image_info(data):
     # Get image info using PIL without decoding
     try:
         with Image.open(io.BytesIO(data)) as img:
-            return {
-                'format': img.format,
-                'size': img.size,
-                'mode': img.mode
-            }
+            return {'format': img.format, 'size': img.size, 'mode': img.mode}
     except Exception as e:
-        raise ValueError(f"Input image bitstream is not in supported format: {str(e)}")
+        raise ValueError(
+            f"Input image bitstream is not in supported format: {str(e)}"
+        ) from None
+
 
 def preprocess_images(
     images,
@@ -505,8 +514,6 @@ def preprocess_images(
     use_thumbnail=False,
 ):
     batch_size = 0
-    queue_depth = 0
-    num_threads = 1
 
     # validate images and create batches
     img_size = None
@@ -515,8 +522,11 @@ def preprocess_images(
     for img in images:
         img_info = get_image_info(img)
         if not (img_info['format'] == 'JPEG' and img_info['mode'] == 'RGB'):
-            raise ValueError(f"HPU media pipeline only supports JPEG images in RGB mode. Detected format={img_info['format']}, mode={img_info['mode']}")
-        if img_size==None:
+            raise ValueError(
+                f"HPU media pipeline only supports JPEG images in RGB mode. \
+                    Detected format={img_info['format']}, \
+                    mode={img_info['mode']}")
+        if img_size is None:
             img_size = img_info['size']
         else:
             if img_info['size'] != img_size:
@@ -543,9 +553,13 @@ def preprocess_images(
         )
 
         # if batch, H, W is changed, create new one
-        main_pipe, main_iter = _MP.ensure_main(bsz=batch_size, H=target_height, W=target_width)
+        main_pipe, main_iter = _MP.ensure_main(bsz=batch_size,
+                                               H=target_height,
+                                               W=target_width)
 
-        img_list = np.empty(shape=[batch_size, ], dtype=object)
+        img_list = np.empty(shape=[
+            batch_size,
+        ], dtype=object)
         for i in range(batch_size):
             img_list[i] = np.frombuffer(images[i], np.uint8)
 
@@ -554,50 +568,58 @@ def preprocess_images(
             processed_images = next(main_iter)[0]
         except StopIteration:
             _MP.reset_iter()
-            _, main_iter = _MP.ensure_main(bsz=batch_size, H=target_height, W=target_width)
+            _, main_iter = _MP.ensure_main(bsz=batch_size,
+                                           H=target_height,
+                                           W=target_width)
             processed_images = next(main_iter)[0]
         finally:
             shared_q.task_done()
 
-        # tiling vectorization: [N,C,H,W] -> [N,Ty,Tx,C,ps,ps] -> [N, T, C, ps, ps]
+        # tiling vectorization:
+        # [N,C,H,W] -> [N,Ty,Tx,C,ps,ps] -> [N, T, C, ps, ps]
         N, C, H, W = processed_images.shape
         Ty, Tx = H // patch_size, W // patch_size
         T = Ty * Tx
 
         use_thumb_now = use_thumbnail and (T > 1)
 
-        x = processed_images.view(N, C, Ty, patch_size, Tx, patch_size) \
+        x = processed_images.view(N, C, Ty, \
+                                  patch_size, Tx, patch_size) \
                               .permute(0, 2, 4, 1, 3, 5) \
                               .contiguous() \
-                              .view(N, T, C, patch_size, patch_size)  # [N,T,C,ps,ps]
+                              .view(N, T, C, \
+                                    patch_size, patch_size)  # [N,T,C,ps,ps]
 
         if use_thumb_now:
             # [N,3,ps,ps]
-            thumbs_batch = F.interpolate(processed_images, size=(patch_size, patch_size),
-                                         mode="bilinear", align_corners=False)
+            thumbs_batch = F.interpolate(processed_images,
+                                         size=(patch_size, patch_size),
+                                         mode="bilinear",
+                                         align_corners=False)
 
         num_patches = T + 1 if use_thumb_now else T
-        image_num_patches[image_num_patches_idx:image_num_patches_idx+batch_size] = num_patches
+        image_num_patches[image_num_patches_idx:image_num_patches_idx +
+                          batch_size] = num_patches
         image_num_patches_idx += batch_size
 
         # consist tensor batch based (tile + thumbnail)
         if use_thumb_now:
             out = torch.empty((N, T + 1, C, patch_size, patch_size),
-                              dtype=processed_images.dtype, device=processed_images.device)
+                              dtype=processed_images.dtype,
+                              device=processed_images.device)
             out[:, :T] = x
-            out[:, T]  = thumbs_batch
-            out = out.view(N * (T + 1), C, patch_size, patch_size)  # [N*(T+1),C,ps,ps]
+            out[:, T] = thumbs_batch
+            out = out.view(N * (T + 1), C, patch_size,
+                           patch_size)  # [N*(T+1),C,ps,ps]
         else:
             # no thumbnail (T==1 or off)
-            out = x.view(N * T, C, patch_size, patch_size)          # [N*T,C,ps,ps]
+            out = x.view(N * T, C, patch_size, patch_size)  # [N*T,C,ps,ps]
 
         batch_patches.append(out)
 
-    patches_flat = (
-        torch.cat(batch_patches, dim=0)
-        if batch_patches
-        else torch.empty((0, 3, patch_size, patch_size), dtype=torch.float32)
-    )
+    patches_flat = (torch.cat(batch_patches, dim=0)
+                    if batch_patches else torch.empty(
+                        (0, 3, patch_size, patch_size), dtype=torch.float32))
     return patches_flat, image_num_patches
 
 
@@ -756,7 +778,8 @@ class BaseInternVLProcessor(ABC):
         if len(images) == 0:
             image_inputs = {}
         else:
-            use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE", "false").lower() in ("1", "true", "yes")
+            use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE",
+                                      "false").lower() in ("1", "true", "yes")
             if use_mediapipe:
                 # Use HPU media pipeline for image preprocessing
                 min_num, max_num = self.resolve_min_max_num(
@@ -785,7 +808,9 @@ class BaseInternVLProcessor(ABC):
                     feature_size = num_patches * self.num_image_token
 
                     image_repl = self.get_image_repl(feature_size, num_patches)
-                    text = [t.replace('<image>', image_repl.full, 1) for t in text]
+                    text = [
+                        t.replace('<image>', image_repl.full, 1) for t in text
+                    ]
 
             else:
                 pixel_values_lst = self._images_to_pixel_values_lst(
@@ -806,7 +831,9 @@ class BaseInternVLProcessor(ABC):
                     feature_size = num_patches * self.num_image_token
 
                     image_repl = self.get_image_repl(feature_size, num_patches)
-                    text = [t.replace('<image>', image_repl.full, 1) for t in text]
+                    text = [
+                        t.replace('<image>', image_repl.full, 1) for t in text
+                    ]
 
         return text, image_inputs
 
@@ -821,7 +848,8 @@ class BaseInternVLProcessor(ABC):
     def __call__(
         self,
         text: Optional[Union[str, list[str]]] = None,
-        images: Optional[Union[Image.Image, list[Image.Image], bytes, list[bytes]]] = None,
+        images: Optional[Union[Image.Image, list[Image.Image], bytes,
+                               list[bytes]]] = None,
         min_dynamic_patch: Optional[int] = None,
         max_dynamic_patch: Optional[int] = None,
         dynamic_image_size: Optional[bool] = None,
@@ -940,7 +968,8 @@ class InternVLProcessor(BaseInternVLProcessor):
     def __call__(
         self,
         text: Optional[Union[str, list[str]]] = None,
-        images: Optional[Union[Image.Image, list[Image.Image], bytes, list[bytes]]] = None,
+        images: Optional[Union[Image.Image, list[Image.Image], bytes,
+                               list[bytes]]] = None,
         videos: Optional[Union[npt.NDArray, list[npt.NDArray]]] = None,
         min_dynamic_patch: Optional[int] = None,
         max_dynamic_patch: Optional[int] = None,
@@ -1784,8 +1813,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         elif inputs_embeds is None:
             if not is_hpu:
                 vision_embeddings = self.get_multimodal_embeddings(**kwargs)
-                inputs_embeds = self.get_input_embeddings(input_ids,
-                                                          vision_embeddings)
+                inputs_embeds = self.get_input_embeddings(
+                    input_ids, vision_embeddings)
                 input_ids = None
 
         forward_kwargs = {

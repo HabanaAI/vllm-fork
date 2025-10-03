@@ -567,8 +567,8 @@ class SamplingTensors:
 
         if do_penalties:
             if is_hpu:
-                if (prompt_tokens_cache is not None and
-                    prompt_tokens_cache.device == device):
+                if (prompt_tokens_cache is not None
+                        and prompt_tokens_cache.device == device):
                     # Reuse cached prompt_tokens already on HPU
                     prompt_t = prompt_tokens_cache
                 else:
@@ -580,17 +580,21 @@ class SamplingTensors:
                         pin_memory=pin_memory,
                         max_len_align=1024,
                     )
-                if (output_tokens_cache is not None and
-                    output_tokens_cache.device == device and
-                    len(output_tokens) > 0 and len(output_tokens_cache[0]) > 0):
+                if (output_tokens_cache is not None
+                        and output_tokens_cache.device == device
+                        and len(output_tokens) > 0
+                        and len(output_tokens_cache[0]) > 0):
                     # Get the last element from each list
                     last_elements = [out[-1] for out in output_tokens]
-                    lengths = [len(out)-1 for out in output_tokens]
+                    lengths = [len(out) - 1 for out in output_tokens]
                     indices = torch.tensor(lengths, device=device)
-                    rows = torch.arange(output_tokens_cache.shape[0], device=device)
+                    rows = torch.arange(output_tokens_cache.shape[0],
+                                        device=device)
                     # Convert to a PyTorch tensor with shape [4, 1]
-                    last_elements_t = torch.tensor(last_elements).unsqueeze(1).to(output_tokens_cache.device)
-                    output_t = output_tokens_cache.index_put_((rows, indices), last_elements_t)
+                    last_elements_t = torch.tensor(last_elements).unsqueeze(
+                        1).to(output_tokens_cache.device)
+                    output_t = output_tokens_cache.index_put_((rows, indices),
+                                                              last_elements_t)
                 else:
                     output_t = make_tensor_with_pad_align(
                         output_tokens,
@@ -675,6 +679,7 @@ class SamplingTensors:
                                                          non_blocking=True),
             repetition_penalties=repetition_penalties_t.to(device=device,
                                                            non_blocking=True),
-            prompt_tokens=prompt_t.to(device=device, non_blocking=True) if prompt_t.device != device else prompt_t,
-            output_tokens=output_t.to(device=device, non_blocking=True) if output_t.device != device else output_t
-        )
+            prompt_tokens=prompt_t.to(device=device, non_blocking=True)
+            if prompt_t.device != device else prompt_t,
+            output_tokens=output_t.to(device=device, non_blocking=True)
+            if output_t.device != device else output_t)

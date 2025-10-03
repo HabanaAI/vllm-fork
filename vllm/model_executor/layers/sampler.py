@@ -223,7 +223,8 @@ class Sampler(nn.Module):
          top_k_scalar, top_p_scalar, current_seq_ids) = \
             SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype, \
-             self._prompt_tokens_hpu_cache, self._output_tokens_hpu_cache, self._cached_seq_ids)
+             self._prompt_tokens_hpu_cache, self._output_tokens_hpu_cache, \
+             self._cached_seq_ids)
 
         self._sampling_tensors = sampling_tensors
         self._do_penalties = do_penalties

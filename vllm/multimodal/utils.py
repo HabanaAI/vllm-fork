@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
 from itertools import groupby
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, Union
 from urllib.parse import ParseResult, urlparse
 
-import os
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -114,7 +114,9 @@ class MediaConnector:
             data = connection.get_bytes(url, timeout=fetch_timeout)
 
             if load_type == "bytes":
-                msg = "Only data URLs are currently supported for raw bytes loading."
+                msg = "Only data URLs are currently supported \
+                    for raw bytes loading."
+
                 raise NotImplementedError(msg)
             else:
                 connection = self.connection
@@ -127,7 +129,9 @@ class MediaConnector:
 
         if url_spec.scheme == "file":
             if load_type == "bytes":
-                msg = "Only data URLs are currently supported for raw bytes loading."
+                msg = "Only data URLs are currently supported \
+                    for raw bytes loading."
+
                 raise NotImplementedError(msg)
             else:
                 return self._load_file_url(url_spec, media_io)
@@ -147,11 +151,14 @@ class MediaConnector:
 
         if url_spec.scheme.startswith("http"):
             if load_type == "bytes":
-                msg = "Only data URLs are currently supported for raw bytes loading."
+                msg = "Only data URLs are currently supported \
+                    for raw bytes loading."
+
                 raise NotImplementedError(msg)
             else:
                 connection = self.connection
-                data = await connection.async_get_bytes(url, timeout=fetch_timeout)
+                data = await connection.async_get_bytes(url,
+                                                        timeout=fetch_timeout)
 
                 return media_io.load_bytes(data)
 
@@ -160,7 +167,9 @@ class MediaConnector:
 
         if url_spec.scheme == "file":
             if load_type == "bytes":
-                msg = "Only data URLs are currently supported for raw bytes loading."
+                msg = "Only data URLs are currently supported \
+                    for raw bytes loading."
+
                 raise NotImplementedError(msg)
             else:
                 return self._load_file_url(url_spec, media_io)
@@ -210,7 +219,8 @@ class MediaConnector:
         By default, the image is converted into RGB format.
         """
         image_io = ImageMediaIO(image_mode=image_mode)
-        use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE", "false").lower() in ("1", "true", "yes")
+        use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE",
+                                  "false").lower() in ("1", "true", "yes")
         load_type = "bytes" if use_mediapipe else "PIL"
 
         try:
@@ -231,12 +241,14 @@ class MediaConnector:
         image_mode: str = "RGB",
     ) -> Image.Image:
         """
-        Asynchronously load a PIL image (or raw bytes) from a HTTP or base64 data URL.
+        Asynchronously load a PIL image (or raw bytes) 
+        from a HTTP or base64 data URL.
 
         By default, the image is converted into RGB format.
         """
         image_io = ImageMediaIO(image_mode=image_mode)
-        use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE", "false").lower() in ("1", "true", "yes")
+        use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE",
+                                  "false").lower() in ("1", "true", "yes")
         load_type = "bytes" if use_mediapipe else "PIL"
 
         try:
