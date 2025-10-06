@@ -3899,11 +3899,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                        ('pixel_values')in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
-                    if 'image_index' in model_input.multi_modal_kwargs:
-                        execute_model_kwargs[
-                            'image_index'] = model_input.multi_modal_kwargs[
-                                'image_index']
-                        model_input.multi_modal_kwargs.pop('image_index', None)
+                    mmks = model_input.multi_modal_kwargs
+                    if mmks is not None and 'image_index' in mmks:
+                        execute_model_kwargs['image_index'] = mmks[
+                            'image_index']
+                        mmks.pop('image_index', None)
 
                 if not bypass_model_exec:
                     if self.model_is_mrope or (self.is_mm_optimized

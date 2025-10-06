@@ -218,13 +218,15 @@ class Sampler(nn.Module):
         # have pinned memory.
         self._sampling_tensors = None
 
+        csi = self._cached_seq_ids if self._cached_seq_ids is not None else set(
+        )
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
          top_k_scalar, top_p_scalar, current_seq_ids) = \
             SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype, \
              self._prompt_tokens_hpu_cache, self._output_tokens_hpu_cache, \
-             self._cached_seq_ids)
+             csi)
 
         self._sampling_tensors = sampling_tensors
         self._do_penalties = do_penalties

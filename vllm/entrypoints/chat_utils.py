@@ -411,12 +411,12 @@ def _resolve_chat_template_content_format(
     model_type = getattr(model_config.hf_config, 'model_type', '')
     if model_type == 'internvl_chat' or 'internvl' \
         in model_config.model.lower():
-        detected_format:_ChatTemplateContentFormat = "string"
+        detected_format = "string"
     else:
         detected_format = ("string" if jinja_text is None else
-                        _detect_content_format(jinja_text, default="string"))
+                           _detect_content_format(jinja_text, default="string"))
 
-    return detected_format
+    return cast(_ChatTemplateContentFormat, detected_format)
 
 
 @lru_cache
@@ -734,7 +734,7 @@ class MultiModalContentParser(BaseMultiModalContentParser):
         )
 
     def parse_image(self, image_url: str) -> None:
-        image = self._connector.fetch_image(image_url)
+        image = self._connector.fetch_image(image_url, load_type="PIL")
 
         placeholder = self._tracker.add("image", image)
         self._add_placeholder(placeholder)
@@ -785,7 +785,9 @@ class AsyncMultiModalContentParser(BaseMultiModalContentParser):
         )
 
     def parse_image(self, image_url: str) -> None:
-        image_coro = self._connector.fetch_image_async(image_url)
+        image_coro = self._connector.fetch_image_async(
+                image_url, load_type="PIL"
+        )
 
         placeholder = self._tracker.add("image", image_coro)
         self._add_placeholder(placeholder)

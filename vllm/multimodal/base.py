@@ -214,6 +214,10 @@ class MediaIO(ABC, Generic[_T]):
         """
         raise NotImplementedError
 
+    def load_base64_bytes(self, media_type: str, data: str) -> bytes:
+        """ Optional """
+        raise NotImplementedError
+
     @abstractmethod
     def load_file(self, filepath: Path) -> _T:
         raise NotImplementedError
