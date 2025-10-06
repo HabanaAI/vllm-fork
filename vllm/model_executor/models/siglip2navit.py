@@ -439,7 +439,6 @@ class Siglip2Encoder(nn.Module):
                 vit_merger_window_size,
                 vit_merger_window_size,
             )
-            seqlens = (index_padded != -100).sum([2, 3]).reshape(-1)
             index_padded = index_padded.reshape(-1)
             index_new = index_padded[index_padded != -100]
             window_index.append(index_new + window_index_id)

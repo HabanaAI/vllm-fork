@@ -2772,7 +2772,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             }
         elif "Ovis2_5" in str(type(self.model.model)):
             vit_cfg = self.model.model.config.vit_config
-            image_token_id = getattr(self.model.model.config, "image_token_id",
+            self.image_token_id = getattr(self.model.model.config, "image_token_id",
                                      -200)
             image_h = 128
             image_w = int(img_args / image_h)
@@ -2780,7 +2780,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    (vit_cfg.hidden_stride**2))
             image_grid_thw = torch.tensor([[1, image_h, image_w]],
                                           dtype=torch.int32)
-            
+
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
                 vit_cfg.num_channels * vit_cfg.temporal_patch_size *
