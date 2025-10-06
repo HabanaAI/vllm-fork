@@ -5,9 +5,9 @@ from vllm.distributed import cleanup_dist_env_and_memory
 from vllm.entrypoints.llm import LLM
 import numpy as np
 
-RUN_20B_MODEL = True  # Set to False to run the 120B model instead
-MODEL_PATH = "unsloth/gpt-oss-20b-BF16"
-MODEL_PATH_120 = "unsloth/gpt-oss-120b-BF16"
+RUN_20B_MODEL = False  # Set to False to run the 120B model instead
+MODEL_PATH = "openai/gpt-oss-20b" #"unsloth/gpt-oss-20b-BF16"
+MODEL_PATH_120 = "openai/gpt-oss-120b"
 # reference https://github.com/huggingface/transformers/blob/68eb1a9a6353911f491b1c8139eb73d052a8e9b9/tests/models/gpt_oss/test_modeling_gpt_oss.py#L397
 original_output = "Roses are red, violets are blue, I love you, and I love you too!"
 # reference https://github.com/huggingface/transformers/blob/68eb1a9a6353911f491b1c8139eb73d052a8e9b9/tests/models/gpt_oss/test_modeling_gpt_oss.py#L462
@@ -45,12 +45,12 @@ original_logprobs_120 = [
 
 
 def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rtol: float, atol: float, max_num_seqs:int) -> list[str]:
-        prompts = [
-            "Roses are red, violets",
-            ] * max_num_seqs
+    prompts = [
+        "Roses are red, violets",
+        ] * max_num_seqs
 
     sampling_params = vllm.SamplingParams(temperature=0,
-                                          max_tokens=20,
+                                          max_tokens=13,
                                           logprobs=1 if not PT_PROFILE else None,)
     outputs = llm.generate(
         prompts,
@@ -69,7 +69,7 @@ def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rt
             print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
         assert prompts[0]+generated_texts[0] == original_output, "Generated text does not match the expected output."
-        assert np.allclose(np.array(logprobs[:-1]),np.array(original_logprobs),rtol=rtol, atol=atol), "Logprobs do not match the expected values."
+        assert np.allclose(np.array(logprobs[:]),np.array(original_logprobs),rtol=rtol, atol=atol), "Logprobs do not match the expected values."
         return generated_texts
     else:
         generated_texts: list[str] = []
