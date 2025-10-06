@@ -126,8 +126,6 @@ class VisionBuckets:
                               2))  #As use_thumbnail is true
                 elif 'Gemma3ForConditionalGeneration' in str(type(model)):
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
-                elif 'Ovis2_5' in str(type(model)):
-                    multimodal_buckets = [12544]
                 else:
                     self.is_batch_based = False
                     multimodal_buckets = [
@@ -666,12 +664,10 @@ class HpuModelAdapter(torch.nn.Module):
             if hasattr(self.model, 'prepare_attn_masks'):
                 input_ids = kwargs['input_ids']
                 positions = kwargs['positions']
-
-                if 'Ovis2_5' not in str(type(self.model)):
-                    kwargs = self.model.prepare_attn_masks(
-                        mask_dtype=self.dtype,
-                        **kwargs,
-                    )
+                kwargs = self.model.prepare_attn_masks(
+                    mask_dtype=self.dtype,
+                    **kwargs,
+                )
                 kwargs['input_ids'] = input_ids
                 kwargs['positions'] = positions
                 # done compute the visual tokens
@@ -2772,8 +2768,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             }
         elif "Ovis2_5" in str(type(self.model.model)):
             vit_cfg = self.model.model.config.vit_config
-            self.image_token_id = getattr(self.model.model.config, "image_token_id",
-                                     -200)
+            self.image_token_id = getattr(self.model.model.config,
+                                          "image_token_id", -200)
             image_h = 128
             image_w = int(img_args / image_h)
             num_image_tokens = int(image_h * image_w //

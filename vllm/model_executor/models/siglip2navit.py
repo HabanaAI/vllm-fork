@@ -439,9 +439,15 @@ class Siglip2Encoder(nn.Module):
                 vit_merger_window_size,
                 vit_merger_window_size,
             )
+            if self.fullatt_block_indexes:
+                seqlens = (index_padded != -100).sum([2, 3]).reshape(-1)
             index_padded = index_padded.reshape(-1)
             index_new = index_padded[index_padded != -100]
             window_index.append(index_new + window_index_id)
+            if self.fullatt_block_indexes:
+                cu_seqlens_tmp = seqlens.cumsum(
+                    0) * self.spatial_merge_unit + cu_window_seqlens[-1]
+                cu_window_seqlens.extend(cu_seqlens_tmp.tolist())
             window_index_id += (grid_t * llm_grid_h * llm_grid_w).item()
         window_index = torch.cat(window_index, dim=0)
 
