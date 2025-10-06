@@ -219,13 +219,13 @@ async def _handle_completions(api: str, request: Request):
         response_json = response.json()
         kv_transfer_params = response_json.get('kv_transfer_params', {})
         if kv_transfer_params:
-            remote_block_len = len(kv_transfer_params['remote_block_ids'])
-            logger.debug('buke: cut:', type(kv_transfer_params), kv_transfer_params['remote_block_ids'],kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8])
+            #remote_block_len = len(kv_transfer_params['remote_block_ids'])
+            #logger.debug('buke: cut:', type(kv_transfer_params), kv_transfer_params['remote_block_ids'],kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8])
             
-            kv_transfer_params['remote_block_ids'] = kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8]
-            if remote_block_len % 8 == 0:
-                kv_transfer_params['remote_block_ids'] = kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8-1]
-                logger.info('buke hit corner case multiples of 8:', remote_block_len)
+            #kv_transfer_params['remote_block_ids'] = kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8]
+            #if remote_block_len % 8 == 0:
+            #    kv_transfer_params['remote_block_ids'] = kv_transfer_params['remote_block_ids'][:(remote_block_len//8)*8-1]
+            #    logger.info('buke hit corner case multiples of 8:', remote_block_len)
             req_data["kv_transfer_params"] = kv_transfer_params
             #print(req_data)
         # Get the next decode client in round-robin fashion

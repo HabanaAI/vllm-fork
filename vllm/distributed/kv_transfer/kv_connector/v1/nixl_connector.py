@@ -88,6 +88,14 @@ class ReqMeta:
     remote_port: int
     remote_engine_id: str
     tp_size: int
+    # Whether this request had a full/partial in-memory (local) hit so
+    # that only the remainining blocks are required to read.
+    # This is a wicked fix for heterogeneous devices test between
+    # Nvidia device and Habana device since the block ids are not aligned.
+    # We should ideally set kv_transfer_params["is_mem_hit"] to True
+    # by scheduler/worker logic once a memory hit condition is detected.
+    # TODO: remove this field once vllm-fork rebases vllm upstream repo
+    is_mem_hit: bool = False
 
 
 class NixlConnectorMetadata(KVConnectorMetadata):
@@ -115,6 +123,7 @@ class NixlConnectorMetadata(KVConnectorMetadata):
             remote_port=kv_transfer_params["remote_port"],
             # P workers don't need to receive tp_size from proxy here.
             tp_size=kv_transfer_params.get("tp_size", 1),
+            is_mem_hit=kv_transfer_params.get("is_mem_hit", False),
         )
         if save_to_host:
             self.reqs_to_save[request_id] = _req
@@ -252,6 +261,7 @@ class NixlConnectorScheduler:
         self.use_host_buffer = \
             vllm_config.kv_transfer_config.kv_buffer_device == "cpu"
         logger.info("Initializing NIXL Scheduler %s", engine_id)
+        self.hetero_blk_id_wa = os.getenv('PT_HPU_HETERO_BLOCK_ID_WA', '1') == '1'
 
         # Requests that need to start recv/send.
         # New requests are added by update_state_after_alloc in
@@ -308,8 +318,6 @@ class NixlConnectorScheduler:
             "NIXLConnector update_state_after_alloc: "
             "num_external_tokens=%s, kv_transfer_params=%s",
             num_external_tokens, params)
-        if num_external_tokens == 0:
-            params["do_remote_prefill"] = False
         logger.debug(f'buke update_state_after_alloc: {vars(request)=}')
         if not params:
             return
@@ -333,14 +341,29 @@ class NixlConnectorScheduler:
             if params.get("remote_block_ids"):
                 if all(p in params for p in ("remote_engine_id", "remote_host",
                                              "remote_port")):
-                    # If remote_blocks and num_external_tokens = 0, we have
-                    # a full prefix cache hit on the D worker. We need to call
-                    # send_notif in _read_blocks to free the memory on the P.
-                    local_block_ids = (blocks.get_unhashed_block_ids()
-                                       if num_external_tokens > 0 else [])
-                    # Get unhashed blocks to pull from remote.
-                    self._reqs_need_recv[request.request_id] = (
-                        request, local_block_ids)
+                    if self.hetero_blk_id_wa:
+                        block_ids = blocks.get_block_ids()[0]
+                        local_block_ids = blocks.get_unhashed_block_ids()
+                        if num_external_tokens > 0:
+                            # Get unhashed blocks to pull from remote.
+                            self._reqs_need_recv[request.request_id] = (
+                                request, local_block_ids)
+                            if len(block_ids) > len(local_block_ids):
+                                params["is_mem_hit"] = True
+                                logger.debug(f"jwang {request.request_id=} {block_ids=} {local_block_ids=} need _reqs_need_recv ")
+                        else:
+                            #self._reqs_need_recv[request.request_id] = (request, [])
+                            assert len(block_ids) >= len(local_block_ids), \
+                                f"jwang oops, it really happens {request.request_id=} {block_ids=} {local_block_ids=}"
+                    else:
+                        # If remote_blocks and num_external_tokens = 0, we have
+                        # a full prefix cache hit on the D worker. We need to call
+                        # send_notif in _read_blocks to free the memory on the P.
+                        local_block_ids = (blocks.get_unhashed_block_ids()
+                                           if num_external_tokens > 0 else [])
+                        # Get unhashed blocks to pull from remote.
+                        self._reqs_need_recv[request.request_id] = (
+                            request, local_block_ids)
 
                 else:
                     logger.warning(
@@ -1264,11 +1287,12 @@ class NixlConnectorWorker:
             dst_engine_id=meta.remote_engine_id,
             local_block_ids=meta.local_block_ids,
             remote_block_ids=meta.remote_block_ids,
+            is_mem_hit=meta.is_mem_hit,
         )
 
     def _read_blocks(self, local_block_ids: list[int],
                      remote_block_ids: list[int], dst_engine_id: str,
-                     request_id: str):
+                     request_id: str, is_mem_hit: bool = False):
         # NOTE(rob): having the staging blocks be on the READER side is
         # not going to work well (since we will have to call rearrange tensors).
         # after we detect the txn is complete (which means we cannot make the
@@ -1314,12 +1338,15 @@ class NixlConnectorWorker:
 
         if self.block_factor > 1:
             local_sub_block_ids = [b for x in local_block_ids for b in range(x * self.block_factor, (x + 1) * self.block_factor)]
-            valid_len = min(len(local_sub_block_ids), len(remote_block_ids))
+            assert len(local_sub_block_ids) <= len(remote_block_ids)
+            valid_len = len(local_sub_block_ids)
             logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{valid_len=} |{len(remote_block_ids)}')
-            #remote_block_ids = truncate_remote_blocks(remote_block_ids, len(local_sub_block_ids), self.block_factor)
-            remote_block_ids = remote_block_ids[:valid_len]
+            if is_mem_hit:
+                remote_block_ids = remote_block_ids[-valid_len:]
+            else:
+                remote_block_ids = remote_block_ids[:valid_len]
             local_block_ids = local_sub_block_ids[:valid_len]
-            logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
+            logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=} | {is_mem_hit=}')
         else:
             if num_local_blocks < num_remote_blocks:
                 remote_block_ids = remote_block_ids[-num_local_blocks:]
