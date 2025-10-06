@@ -28,14 +28,21 @@ def parse_client_log(log_file):
     with open(log_file) as f:
         lines = f.readlines()
     throughput = 0
+    ttft = float("inf")
     for line in lines:
         if line.startswith("Total Token throughput (tok/s):"):
             pattern = r"(\d+(\.?\d+)?)\s*"
             match_throughput = re.search(pattern, line)
             if match_throughput:
                 throughput = float(match_throughput.group(1))
+        if line.startswith("Median TTFT (ms):"):
+            pattern = r"(\d+(\.?\d+)?)\s*"
+            match_ttft = re.search(pattern, line)
+            if match_ttft:
+                ttft = float(match_ttft.group(1))
+        if throughput > 0 and ttft != float("inf"):
             break
-    return throughput
+    return throughput, ttft
 
 
 def server_started(server_log_file):
@@ -211,6 +218,7 @@ def objective(trial, args):
         decode_block_bucket_max = None
 
     server_cmd_list = args.vllm_server_cmd.split()
+    benchmark_serving_cmd = args.benchmark_serving_cmd
     # currently only fixed block size: 128, 256 are supported
     if args.tune_block_size:
         block_size = trial.suggest_int('block_size', 128, 256, step=128)
@@ -218,6 +226,12 @@ def objective(trial, args):
     else:
         block_size = retrieve_block_size_value(server_cmd_list)
         trial.set_user_attr("block_size", block_size)
+
+    if decode_bs_bucket_max:
+        server_cmd_list = update_cmd_args(server_cmd_list, "--max-num-seqs", str(decode_bs_bucket_max))
+        client_cmd_list = benchmark_serving_cmd.split()
+        client_cmd_list = update_cmd_args(client_cmd_list, "--max-concurrency", str(decode_bs_bucket_max))
+        benchmark_serving_cmd = " ".join(client_cmd_list)
 
     set_trial_value(prompt_bs_bucket_min, prompt_bs_bucket_step, prompt_bs_bucket_max,
                     prompt_seq_bucket_min, prompt_seq_bucket_step, prompt_seq_bucket_max,
@@ -229,14 +243,16 @@ def objective(trial, args):
     server_log_file = f"tuning_online_benchmark_server_{trial.number}.log"
     vllm_server_cmd = vllm_server_cmd + " 2>&1 | tee " + server_log_file
     print(vllm_server_cmd)
+    trial.set_user_attr("vllm_server_cmd", vllm_server_cmd)
 
-    benchmark_serving_cmd = args.benchmark_serving_cmd
     client_log_file = f"tuning_online_benchmark_client_{trial.number}.log"
     benchmark_serving_cmd = benchmark_serving_cmd + " 2>&1 | tee " + client_log_file
     print(benchmark_serving_cmd)
+    trial.set_user_attr("benchmark_serving_cmd", benchmark_serving_cmd)
 
     throughput = 0
     warmup_time = float("inf")
+    ttft = float("inf")
     try:
         server_log_pipe = LogPipe()
         server_process = subprocess.Popen(vllm_server_cmd, shell=True,
@@ -256,7 +272,7 @@ def objective(trial, args):
             client_process = subprocess.Popen(benchmark_serving_cmd, shell=True,
                                               preexec_fn=os.setsid)
             client_process.wait()  # wait for finish
-            throughput = parse_client_log(client_log_file)
+            throughput, ttft = parse_client_log(client_log_file)
         elif (datetime.now() - server_start_time).total_seconds() >= args.time_out:
             raise TimeoutError
     except TimeoutError:
@@ -273,6 +289,15 @@ def objective(trial, args):
         except Exception:
             pass
         server_log_pipe.close()
+
+    trial.set_user_attr("ttft", ttft)
+
+    if args.target_ttft > 0 and ttft != float("inf"):
+        if ttft > args.target_ttft:
+            ttft = float("inf")
+        else:
+            ttft = args.target_ttft - ttft
+        return ttft, throughput, warmup_time
 
     return throughput, warmup_time
 
@@ -458,6 +483,19 @@ if __name__ == "__main__":
         required=True,
         help="Command to run benchmark-serving.",
     )
+    parser.add_argument(
+        "--target-ttft",
+        type=int,
+        required=False,
+        default=0,
+        help="setting max allowed ttft value in milliseconds to find best performance with that",
+    )
+    parser.add_argument(
+        "--override-study",
+        action="store_true",
+        help="Overriding existing optuna Study",
+        default=False
+    )
 
     args = parser.parse_args()
     validate_args(args)
@@ -473,10 +511,18 @@ if __name__ == "__main__":
                          engine_kwargs={
                              "pool_size": 100,
                              "connect_args": {"timeout": 30}})  # Increase timeout to 30 seconds
-    study = optuna.create_study(study_name=study_name,
-                                storage=storage,
-                                load_if_exists=True,
-                                directions=["maximize", "minimize"])  # max throughput, min warmup time
+    if args.override_study:
+        optuna.delete_study(study_name=study_name, storage=storage_name)
+    if args.target_ttft > 0:
+        study = optuna.create_study(study_name=study_name,
+                                    storage=storage,
+                                    load_if_exists=True,
+                                    directions=["minimize", "maximize", "minimize"])  # min ttft upto target value, throughput, min warmup time
+    else:
+        study = optuna.create_study(study_name=study_name,
+                                    storage=storage,
+                                    load_if_exists=True,
+                                    directions=["maximize", "minimize"])  # max throughput, min warmup time
 
     objective_with_param = partial(objective, args=args)
     study.optimize(objective_with_param, n_trials=args.num_trials)
@@ -496,6 +542,13 @@ if __name__ == "__main__":
                         best_trial.params.get("decode_block_bucket_max"),
                         best_trial.params.get("block_size"), print_only=True)
         best_values = best_trial.values
-        print(f"\t [Throughput(tokens/s), Warmup-Time(sec)]: {best_values}")
+        ttft = best_trial.user_attrs.get("ttft")
+        if args.target_ttft > 0:
+            best_values[0] = ttft
+        else:
+            best_values.insert(0, ttft)
+        print(f"\t [TTFT(ms), Throughput(tokens/s), Warmup-Time(sec)]: {best_values}")
+        print(f"\t VLLM Server command: \n {best_trial.user_attrs.get("vllm_server_cmd")} \n")
+        print(f"\t Benchmark Serving command: \n {best_trial.user_attrs.get("benchmark_serving_cmd")} \n")
 
     exit(0)
