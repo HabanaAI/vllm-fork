@@ -126,6 +126,8 @@ class VisionBuckets:
                               2))  #As use_thumbnail is true
                 elif 'Gemma3ForConditionalGeneration' in str(type(model)):
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
+                elif 'Ovis2_5' in str(type(model)):
+                    multimodal_buckets = [12544]
                 else:
                     self.is_batch_based = False
                     multimodal_buckets = [
@@ -165,7 +167,9 @@ class Singleton(type):
 
 
 def is_mm_optimized(model):
-    mm_models = ['Gemma3ForConditionalGeneration', 'InternVLChatModel']
+    mm_models = [
+        'Gemma3ForConditionalGeneration', 'InternVLChatModel', 'Ovis2_5'
+    ]
 
     return any(m in str(type(model.model)) for m in mm_models) \
         if hasattr(model, 'model') \
@@ -394,6 +398,13 @@ class HpuModelAdapter(torch.nn.Module):
                 if hasattr(self.model, 'mlp1'):
                     self.model.mlp1 = htorch.hpu.wrap_in_hpu_graph(
                         self.model.mlp1, disable_tensor_cache=True)
+                if hasattr(self.model, 'vte'):
+                    self.model.vte = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.vte, disable_tensor_cache=False)
+                if hasattr(self.model, 'visual_tokenizer'):
+                    self.model.visual_tokenizer = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.visual_tokenizer,
+                        disable_tensor_cache=False)
 
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
@@ -655,10 +666,12 @@ class HpuModelAdapter(torch.nn.Module):
             if hasattr(self.model, 'prepare_attn_masks'):
                 input_ids = kwargs['input_ids']
                 positions = kwargs['positions']
-                kwargs = self.model.prepare_attn_masks(
-                    mask_dtype=self.dtype,
-                    **kwargs,
-                )
+
+                if 'Ovis2_5' not in str(type(self.model)):
+                    kwargs = self.model.prepare_attn_masks(
+                        mask_dtype=self.dtype,
+                        **kwargs,
+                    )
                 kwargs['input_ids'] = input_ids
                 kwargs['positions'] = positions
                 # done compute the visual tokens
@@ -2756,6 +2769,28 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_data = {
                 "pixel_values": pixel_values,
                 "image_grid_thw": image_grid_thw,
+            }
+        elif "Ovis2_5" in str(type(self.model.model)):
+            vit_cfg = self.model.model.config.vit_config
+            image_token_id = getattr(self.model.model.config, "image_token_id",
+                                     -200)
+            image_h = 128
+            image_w = int(img_args / image_h)
+            num_image_tokens = int(image_h * image_w //
+                                   (vit_cfg.hidden_stride**2))
+            image_grid_thw = torch.tensor([[1, image_h, image_w]],
+                                          dtype=torch.int32)
+            
+            pixel_values = torch.randn(
+                image_grid_thw[0].prod(),
+                vit_cfg.num_channels * vit_cfg.temporal_patch_size *
+                vit_cfg.patch_size * vit_cfg.patch_size)
+            indicator_tokens = torch.tensor([65532, 65533],
+                                            device='hpu:0').unsqueeze(0)
+            multi_modal_data = {
+                "pixel_values": pixel_values,
+                "indicator_tokens": indicator_tokens,
+                "grids": [image_grid_thw],
             }
         else:
             s = self.model.model.config.vision_config.image_size
