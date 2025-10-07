@@ -2443,7 +2443,10 @@ class HPUModelRunner:
                     else:
                         value_cache = None
                     kv_caches[layer_name] = (key_cache, value_cache)
-                    #logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
+                    #if value_cache is not None:
+                        #logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
+                    #else:
+                        #logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|value_cache=None")
                 else:
                     # TODO: add new branches when introducing more types of
                     # KV cache specs.
@@ -2519,8 +2522,8 @@ def _make_src_and_dst_indices(
     dst_device: Union[torch.device, str],
 ) -> tuple[torch.Tensor, torch.Tensor]:
     #convert to slot mapping
-    src_slot_mapping = np.concat([np.arange(start=s*block_size, stop=(s+1)*block_size) for s in src_block_ids])
-    dst_slot_mapping = np.concat([np.arange(start=d*block_size, stop=(d+1)*block_size) for d in dst_block_ids])
+    src_slot_mapping = np.concatenate([np.arange(start=s*block_size, stop=(s+1)*block_size) for s in src_block_ids])
+    dst_slot_mapping = np.concatenate([np.arange(start=d*block_size, stop=(d+1)*block_size) for d in dst_block_ids])
     
     src_slot_mapping = torch.tensor(src_slot_mapping,
                                device=src_device,
@@ -2531,6 +2534,7 @@ def _make_src_and_dst_indices(
     return src_slot_mapping, dst_slot_mapping
 
 def copy_kv_blocks(
+    use_mla: int,
     block_size: int,
     src_kv_caches: dict[str, torch.Tensor],
     dst_kv_caches: dict[str, torch.Tensor],
@@ -2566,7 +2570,8 @@ def copy_kv_blocks(
         value_cache = src_kv_caches[layer_name][1]
 
         dst_kv_caches[layer_name][0].index_put_((dst_slot_mapping,), key_cache.index_select(0, src_slot_mapping).to(target_device))
-        dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))
+        if not use_mla:
+            dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))
         i = i+1
         
     torch.hpu.synchronize()

@@ -719,7 +719,12 @@ class NixlConnectorWorker:
         """Register the KV Cache data in nixl."""
         _, first_kv_cache = next(iter(kv_caches.items()))
         if self.device_type == "hpu":
-            kv_elem_size = first_kv_cache[0][0].dtype.itemsize
+            if self.use_mla:
+                # MLA: kv_cache is a single tensor (latent), not a tuple
+                kv_elem_size = first_kv_cache[0].dtype.itemsize
+            else:
+                # Standard: kv_cache is a tuple of (key, value)
+                kv_elem_size = first_kv_cache[0][0].dtype.itemsize
         else:
             kv_elem_size = first_kv_cache.element_size()
 
@@ -779,17 +784,30 @@ class NixlConnectorWorker:
                 self.slot_size_bytes = kv_elem_size * n_kv_heads * head_dim
             assert block_size == self.block_size
         elif self.device_type == "hpu":
-            # habana kv_cache: [2, num_blocks*block_size, kv_heads, head_dim]
-            #from remote_pdb import RemotePdb; RemotePdb('0.0.0.0', 4444).set_trace()
-            self.num_blocks = first_kv_cache[0].shape[0] // self.block_size
-            block_rank = 3  # [block_size, kv_heads, head_dim]
-            block_shape = first_kv_cache[0].shape[-block_rank:]
-            block_shape = list(block_shape)
-            block_shape[0] = block_shape[0] // self.num_blocks
-            block_shape = torch.Size(block_shape)
-            block_size, n_kv_heads, head_dim = block_shape[-3:]
-            # head size in bytes.
-            self.slot_size_bytes = kv_elem_size * n_kv_heads * head_dim
+            if self.use_mla:
+                # MLA case.
+                # habana kv_cache with MLA (num_blocks * block_size, head_size)
+                use_mla = True
+                self.num_blocks = first_kv_cache[0].shape[0] // self.block_size
+                # Reshape to (num_blocks, block_size, head_size)
+                reshaped_cache = first_kv_cache[0].view(-1, self.block_size, first_kv_cache[0].shape[-1])
+                # Now extract block_shape
+                block_shape = reshaped_cache.shape[1:]  # (block_size, head_size)
+                block_size, kv_latent_dim = block_shape
+                # head size in bytes.
+                self.slot_size_bytes = kv_elem_size * kv_latent_dim
+            else:
+                # habana kv_cache: [2, num_blocks*block_size, kv_heads, head_dim]
+                #from remote_pdb import RemotePdb; RemotePdb('0.0.0.0', 4444).set_trace()
+                self.num_blocks = first_kv_cache[0].shape[0] // self.block_size
+                block_rank = 3  # [block_size, kv_heads, head_dim]
+                block_shape = first_kv_cache[0].shape[-block_rank:]
+                block_shape = list(block_shape)
+                block_shape[0] = block_shape[0] // self.num_blocks
+                block_shape = torch.Size(block_shape)
+                block_size, n_kv_heads, head_dim = block_shape[-3:]
+                # head size in bytes.
+                self.slot_size_bytes = kv_elem_size * n_kv_heads * head_dim
         else:
             raise RuntimeError(
                 f"{self.device_type} ({self.backend_name}) is not supported.")
@@ -1041,7 +1059,7 @@ class NixlConnectorWorker:
         assert self.copy_blocks is not None
 
         local_block_ids = meta.local_block_ids
-        self.copy_blocks(self.block_size, self.host_xfer_buffers, self.device_kv_caches,
+        self.copy_blocks(self.use_mla, self.block_size, self.host_xfer_buffers, self.device_kv_caches,
                          local_block_ids, local_block_ids, "h2d")
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -1065,7 +1083,7 @@ class NixlConnectorWorker:
                     "local_block_ids: %s. ", req_id,
                     ",".join(map(str, meta.local_block_ids)))
             # blocking
-            self.copy_blocks(self.block_size, self.device_kv_caches, self.host_xfer_buffers,
+            self.copy_blocks(self.use_mla, self.block_size, self.device_kv_caches, self.host_xfer_buffers,
                              meta.local_block_ids, meta.local_block_ids, "d2h")
             logger.info(f"libin debug save_kv_to_host {os.getenv('RANK')} time:{time.perf_counter()-self.req_send_time[req_id]}")
 
