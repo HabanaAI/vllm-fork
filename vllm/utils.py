@@ -1965,11 +1965,14 @@ def migrate_to_cpu():
     sys.modules['habana_frameworks'] = MagicMock()
     sys.modules['habana_frameworks'].__spec__ = spec
 
-    # Make sure that custom ops use the native implementation instead of the HPU implementation
-    from vllm.platforms import current_platform
+    # Make sure that custom ops use the native implementation instead of the
+    # HPU implementation
     from vllm.model_executor.custom_op import CustomOp
+    from vllm.platforms import current_platform
     original_dispatch_forward = CustomOp.dispatch_forward
-    CustomOp.dispatch_forward = lambda self: self.forward_native if current_platform.is_hpu() else original_dispatch_forward(self)
+    CustomOp.dispatch_forward = lambda self: (self.forward_native
+                                              if current_platform.is_hpu() else
+                                              original_dispatch_forward(self))
 
     builtin_import = __builtins__['__import__']  # type: ignore
 
