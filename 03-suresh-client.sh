@@ -1,0 +1,13 @@
+python3 benchmarks/ben2.py \
+    --backend vllm \
+    --model "ibm-granite/granite-3.3-8b-instruct" \
+    --dataset-name tool_calling \
+    --num-prompts 80 \
+    --max-concurrency 8 \
+    --port 8080 \
+    --request-rate 8 \
+    --tokenizer "ibm-granite/granite-3.3-8b-instruct" \
+    --tool-calling-input-tokens 4096 \
+    --tool-calling-output-tokens 1024 \
+    --percentile-metrics ttft,tpot,itl,e2el \
+    --metric-percentiles 50,90
