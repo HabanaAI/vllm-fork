@@ -1112,30 +1112,65 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.delayed_callbacks: Dict[str, Callable] = {}
         # For delayed sampling - persistent worker thread
         self.use_delayed_sampling = get_config().use_delayed_sampling and can_use_delayed_sampling
-        if self.use_delayed_sampling:
-            self._callback_queue = queue.Queue()
-            self._callback_worker_thread = threading.Thread(
-                target=self._callback_worker_loop, 
-                daemon=True
-            )
-            self._callback_worker_thread.start()
+        # For delayed sampling - shared memory ring buffer
+        self.shared_ring_buffer = None
+        if self.use_delayed_sampling and self.is_driver_worker:
+            self._init_shared_memory_buffers()
+        # if self.use_delayed_sampling:
+        #     self._callback_queue = queue.Queue()
+        #     self._callback_worker_thread = threading.Thread(
+        #         target=self._callback_worker_loop, 
+        #         daemon=True
+        #     )
+        #     self._callback_worker_thread.start()
 
-    def _callback_worker_loop(self):
-        """Persistent worker thread that processes callbacks."""
-        while True:
-            try:
-                # Blocks until work is available
-                callback_task = self._callback_queue.get(timeout=1.0)
-                if callback_task is None:  # Shutdown signal
-                    break
+    def _init_shared_memory_buffers(self):
+        """Initialize shared memory ONCE - called during model runner setup."""
+        if not self.use_delayed_sampling or not self.is_driver_worker:
+            return
+        
+        from vllm.worker.hpu_shared_memory import SharedTensorRingBuffer
+        
+        # Ring buffer for 8 slots (tune based on your pipeline depth)
+        max_batch = self.scheduler_config.max_num_seqs
+        vocab = self.model_config.get_vocab_size()
+        
+        logger.info(f"Initializing shared memory ring buffer: "
+                f"8 slots, max_batch={max_batch}, vocab={vocab}")
+        
+        self.shared_ring_buffer = SharedTensorRingBuffer(
+            buffer_size=8,
+            max_batch_size=max_batch,
+            vocab_size=vocab
+        )
+        
+        logger.info("Shared memory ring buffer initialized successfully")
+
+    def get_shared_ring_buffer_info(self) -> Optional[dict]:
+        """
+        This method will be called by the LLMEngine on the worker process
+        to get the connection details.
+        """
+        if self.shared_ring_buffer:
+            return self.shared_ring_buffer.get_attach_info()
+        return None
+
+    # def _callback_worker_loop(self):
+    #     """Persistent worker thread that processes callbacks."""
+    #     while True:
+    #         try:
+    #             # Blocks until work is available
+    #             callback_task = self._callback_queue.get(timeout=1.0)
+    #             if callback_task is None:  # Shutdown signal
+    #                 break
                 
-                try:
-                    # Execute the callback
-                    callback_task()
-                except Exception as e:
-                    logger.error(f"Error in callback worker: {e}", exc_info=True)
-            except queue.Empty:
-                continue  # Timeout, keep waiting
+    #             try:
+    #                 # Execute the callback
+    #                 callback_task()
+    #             except Exception as e:
+    #                 logger.error(f"Error in callback worker: {e}", exc_info=True)
+    #         except queue.Empty:
+    #             continue  # Timeout, keep waiting
 
     def _set_gc_threshold(self) -> None:
         """
@@ -3690,8 +3725,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         is_dummy_run: bool = False,
         is_pt_profiler_run: bool = False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+        print(f"[EXECUTE_MODEL] ========== ENTRY ==========")
+        print(f"[EXECUTE_MODEL] warmup_mode={warmup_mode}, is_dummy_run={is_dummy_run}")
+        print(f"[EXECUTE_MODEL] use_delayed_sampling config: {self.use_delayed_sampling}")
+        print(f"[EXECUTE_MODEL] model_input.is_first_multi_step={model_input.is_first_multi_step}")
+        print(f"[EXECUTE_MODEL] model_input.is_prompt={model_input.attn_metadata.is_prompt if model_input.attn_metadata else None}")
+        print(f"[EXECUTE_MODEL] async_callback present: {model_input.async_callback is not None}")
+        
         self.has_patched_prev_output = False
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
+        
+        print(f"[EXECUTE_MODEL] use_delayed_sampling (final): {use_delayed_sampling}")
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
         assert not (use_delayed_sampling and
@@ -3736,10 +3780,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             torch.hpu.synchronize()
             
         if model_input.is_first_multi_step:
-            # PHASE 1: Patch previous output
-            if use_delayed_sampling and self.is_driver_worker:
-                if len(self.cached_step_inputs) > 0 and len(self.cached_step_outputs) > 0:
-                    self._patch_prev_output()
+            # PHASE 1: No more patching here - moved to API server!
+            # All patching now happens in LLMEngine._patch_delayed_sampling_output
             
             if self.lora_config:
                 assert model_input.lora_requests is not None
@@ -3855,16 +3897,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
             htorch.core.mark_step()
 
-            # PHASE 2: Submit callback to worker thread
-            if use_delayed_sampling and self.is_driver_worker:
-                if not hasattr(self, '_pending_cpu_data'):
-                    self._pending_cpu_data = []
-                
-                if len(self._pending_cpu_data) > 0:
-                    cpu_data = self._pending_cpu_data.pop(0)
-                    
-                    # Submit work to persistent thread (non-blocking)
-                    self._callback_queue.put(cpu_data['callback'])
+            # PHASE 2: No more threading! Callback invoked automatically by engine
+            # All CPU processing now happens in API server via _process_model_outputs
             
             if self.is_driver_worker:
                 model_event_name = ("model_"
@@ -3938,7 +3972,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 'image_index']
                         model_input.multi_modal_kwargs.pop('image_index', None)
 
-                # PHASE 3: HPU forward pass (thread does CPU work in parallel)
+                # PHASE 3: HPU forward pass (API server does CPU work in parallel process)
                 if not bypass_model_exec:
                     if self.model_is_mrope or (self.is_mm_optimized
                                             and is_prompt):
@@ -3993,7 +4027,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not get_pp_group().is_last_rank:
                     return hidden_states
 
-                # Compute logits
+                # PHASE 4: Compute logits
                 with self.profiler.record_event('internal',
                                                 ('compute_logits_'
                                                 f'{phase}_bs'
@@ -4011,7 +4045,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     continue
 
-                # PHASE 4: Sample on HPU
+                # PHASE 5: Sample on HPU
                 with self.profiler.record_event('internal',
                                                 ('sample_'
                                                 f'{phase}_'
@@ -4028,39 +4062,63 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_outputs.append(
                             CachedStepOutput(output))
                             
-                    # PHASE 5: Handle delayed sampling
+                    # PHASE 6: Handle delayed sampling - attach CPU data to callback context
                     if use_delayed_sampling and self.is_driver_worker:
+                        print(f"[WORKER] PHASE 6: Handling delayed sampling")
+                        
                         token_ids_hpu = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
                         
-                        # Blocking copy in main thread
+                        print(f"[WORKER] Copying tokens to CPU...")
+                        # Fast CPU copy (~3μs, no mark_step!)
                         token_ids_cpu = token_ids_hpu.cpu()
                         logprobs_cpu = output.logprobs.cpu() if output.logprobs is not None else None
                         
-                        # Store data...
+                        print(f"[WORKER] token_ids_cpu shape: {token_ids_cpu.shape}")
+                        
+                        # Store HPU tensors for decode path
                         self.cached_step_outputs.append(
                             CachedStepOutput(
-                                token_ids_hpu,  # HPU tensor for decode
-                                output.logprobs,
+                                token_ids_hpu, output.logprobs,
                                 output.deferred_sample_results_args,
-                                sampling_metadata, 
-                                is_prompt))
+                                sampling_metadata, is_prompt))
                         self.cached_step_inputs.append(model_input)
                         
-                        if model_input.async_callback is not None and not warmup_mode:
-                            if not hasattr(self, '_pending_cpu_data'):
-                                self._pending_cpu_data = []
-                            self._pending_cpu_data.append({
-                                'token_ids': token_ids_cpu,
-                                'logprobs': logprobs_cpu,
-                                'callback': model_input.async_callback
+                        print(f"[WORKER] Cached outputs len: {len(self.cached_step_outputs)}")
+                        
+                        # CRITICAL: Write to shared memory (FAST, no serialization!)
+                        if model_input.async_callback is not None:
+                            slot_idx = self.shared_ring_buffer.write_slot(
+                                token_ids_cpu, logprobs_cpu)
+                            
+                            print(f"[WORKER] Wrote to shared memory slot {slot_idx}")
+                            
+                            # Send only lightweight metadata through queue
+                            ctx = model_input.async_callback.keywords["ctx"]
+                            
+                            if not hasattr(ctx, 'cpu_data_queue'):
+                                ctx.cpu_data_queue = []
+                            
+                            # Only metadata - NO tensors! Just references
+                            ctx.cpu_data_queue.append({
+                                'slot_idx': slot_idx,  # Just an int!
+                                'token_shape': tuple(token_ids_cpu.shape),
+                                'logprob_shape': tuple(logprobs_cpu.shape) if logprobs_cpu is not None else None,
+                                'model_output_meta': {
+                                    'is_prompt': is_prompt,
+                                    'sampling_metadata': sampling_metadata,
+                                    'deferred_sample_results': output.deferred_sample_results_args,
+                                }
                             })
+                            
+                            print(f"[WORKER] Queued metadata for slot {slot_idx}")
+                        else:
+                            print(f"[WORKER] WARNING: No async_callback found!")
                         
-                        # REMOVE the join - no thread to join anymore!
-                        # if callback_thread is not None:
-                        #     callback_thread.join(timeout=5.0)
-                        
+                        # Return fake output immediately
+                        print(f"[WORKER] Creating fake output...")
                         fake_output = self._delayed_sampler_outputs(model_input)
+                        print(f"[WORKER] Returning fake output, PHASE 6 complete")
                         return [fake_output]
 
                     # Standard async path
@@ -4244,11 +4302,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
     def __del__(self):
         # Shutdown callback worker
-        if hasattr(self, '_callback_queue'):
-            self._callback_queue.put(None)  # Signal shutdown
-            if hasattr(self, '_callback_worker_thread'):
-                self._callback_worker_thread.join(timeout=2.0)
-        
+        # if hasattr(self, '_callback_queue'):
+        #     self._callback_queue.put(None)  # Signal shutdown
+        #     if hasattr(self, '_callback_worker_thread'):
+        #         self._callback_worker_thread.join(timeout=2.0)
+        # Cleanup shared memory (worker is the owner)
+        if hasattr(self, 'shared_ring_buffer') and self.shared_ring_buffer:
+            self.shared_ring_buffer.cleanup()
+            logger.info("[WORKER_CLEANUP] Destroyed shared memory")
         self.shutdown_inc()
 
     def _patch_prev_output(self):

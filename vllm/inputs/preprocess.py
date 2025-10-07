@@ -887,6 +887,8 @@ class InputPreprocessor:
         Async version of
         [`preprocess`][vllm.inputs.preprocess.InputPreprocessor.preprocess].
         """
+        print(f"[PREPROCESS_ASYNC] ========== START ==========")
+        print(f"[PREPROCESS_ASYNC] Prompt type: {type(prompt)}")
         if self.model_config.is_encoder_decoder:
             assert not return_mm_hashes, (
                 "Multimodal hashes for encoder-decoder models should not be ",
@@ -898,12 +900,19 @@ class InputPreprocessor:
         if is_explicit_encoder_decoder_prompt(prompt):
             raise ValueError("Cannot pass encoder-decoder prompt "
                              "to decoder-only models")
-
-        # Decoder-only operation
-        return await self._process_decoder_only_prompt_async(
-            prompt,
-            tokenization_kwargs=tokenization_kwargs,
-            lora_request=lora_request,
-            prompt_adapter_request=prompt_adapter_request,
-            return_mm_hashes=return_mm_hashes,
-        )
+        try:
+            results = await self._process_decoder_only_prompt_async(
+                prompt,
+                tokenization_kwargs=tokenization_kwargs,
+                lora_request=lora_request,
+                prompt_adapter_request=prompt_adapter_request,
+                return_mm_hashes=return_mm_hashes,
+            )
+            print(f"[PREPROCESS_ASYNC] _process_input completed")
+            # Decoder-only operation
+            return results
+        except Exception as e:
+            print(f"[PREPROCESS_ASYNC] ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            raise

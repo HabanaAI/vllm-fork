@@ -548,12 +548,19 @@ async def show_version():
 @load_aware_call
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
+    print(f"[API_ENDPOINT] ========== CHAT COMPLETION REQUEST ==========")
+    print(f"[API_ENDPOINT] Model: {request.model}")
+    print(f"[API_ENDPOINT] Stream: {request.stream}")
+    print(f"[API_ENDPOINT] Messages count: {len(request.messages)}")
+    
     handler = chat(raw_request)
     if handler is None:
         return base(raw_request).create_error_response(
             message="The model does not support Chat Completions API")
 
+    print(f"[API_ENDPOINT] Calling handler.create_chat_completion...")
     generator = await handler.create_chat_completion(request, raw_request)
+    print(f"[API_ENDPOINT] handler.create_chat_completion returned")
 
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),

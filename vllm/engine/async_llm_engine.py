@@ -281,58 +281,56 @@ class _AsyncLLMEngine(LLMEngine):
         """
         # these are cached outputs from previous iterations. None if on first
         # iteration
+        print(f"[STEP_ASYNC] Entry: virtual_engine={virtual_engine}")
+        
         cached_outputs = self.cached_scheduler_outputs[virtual_engine]
         seq_group_metadata_list = cached_outputs.seq_group_metadata_list
         scheduler_outputs = cached_outputs.scheduler_outputs
         allow_async_output_proc = cached_outputs.allow_async_output_proc
 
         ctx = self.scheduler_contexts[virtual_engine]
-
-        # Clear outputs for each new scheduler iteration
+        
+        print(f"[STEP_ASYNC] Clearing request_outputs")
         ctx.request_outputs.clear()
 
-        # skip the scheduler if there are any remaining steps in the seq groups.
-        # This ensures that the scheduler is only called again when the current
-        # batch has completed.
         if not self._has_remaining_steps(seq_group_metadata_list):
-
-            # Schedule iteration
+            print(f"[STEP_ASYNC] No remaining steps, calling scheduler")
+            
             (seq_group_metadata_list, scheduler_outputs,
-             allow_async_output_proc
-             ) = self.scheduler[virtual_engine].schedule()
+            allow_async_output_proc
+            ) = self.scheduler[virtual_engine].schedule()
 
+            print(f"[STEP_ASYNC] Scheduler returned: seq_groups={len(seq_group_metadata_list) if seq_group_metadata_list else 0}")
+            
             ctx.seq_group_metadata_list = seq_group_metadata_list
             ctx.scheduler_outputs = scheduler_outputs
 
+            # finished_requests_ids = self.scheduler[
+            #     virtual_engine].get_and_reset_finished_requests_ids()
             if not scheduler_outputs.is_empty():
-                # this will cause mamba_cache/minimax_cache failed
-                # to release finished_requests_ids of the last steps
-                finished_requests_ids = self.scheduler[
-                    virtual_engine].get_and_reset_finished_requests_ids()
+                finished_requests_ids = self.scheduler[virtual_engine].get_and_reset_finished_requests_ids()
+            else:
+                finished_requests_ids = []
 
-            # Maybe switch from async mode to sync mode
             if not allow_async_output_proc and len(ctx.output_queue) > 0:
+                print(f"[STEP_ASYNC] Processing model outputs (sync mode)")
                 self._process_model_outputs(ctx=ctx)
 
             if (self.scheduler_config.is_multi_step
                     and scheduler_outputs.num_lookahead_slots > 0):
-                # cache the scheduler outputs for the next iteration if we have
-                # lookahead slots
                 self._cache_scheduler_outputs_for_multi_step(
                     virtual_engine, seq_group_metadata_list, scheduler_outputs,
                     allow_async_output_proc)
         else:
             finished_requests_ids = list()
+            print(f"[STEP_ASYNC] Has remaining steps, skipping scheduler")
 
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
 
         if not scheduler_outputs.is_empty():
+            print(f"[STEP_ASYNC] Scheduler outputs not empty, executing model...")
 
-            # Check if we have a cached last_output from the previous iteration.
-            # For supporting PP this is probably the best way to pass the
-            # sampled_token_ids, as a separate broadcast over all the PP stages
-            # will cause one virtual engine's microbatch to block the pipeline.
             last_sampled_token_ids = \
                 self._get_last_sampled_token_ids(virtual_engine)
 
@@ -345,33 +343,42 @@ class _AsyncLLMEngine(LLMEngine):
                 num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
                 running_queue_size=scheduler_outputs.running_queue_size,
                 finished_requests_ids=finished_requests_ids,
-                # We use ExecuteModelRequest to pass the last sampled_token_ids
-                # to each of the non-last PP stages for in-place prepare_input.
                 last_sampled_token_ids=last_sampled_token_ids)
 
             if allow_async_output_proc:
                 execute_model_req.async_callback = self.async_callbacks[
                     virtual_engine]
+                print(f"[STEP_ASYNC] Set async_callback on execute_model_req")
 
-            # Execute the model.
+            print(f"[STEP_ASYNC] Calling model_executor.execute_model_async...")
             outputs = await self.model_executor.execute_model_async(
                 execute_model_req)
+            print(f"[STEP_ASYNC] execute_model_async returned")
 
-            # we need to do this here so that last step's sampled_token_ids can
-            # be passed to the next iteration for PP.
+            # if allow_async_output_proc and execute_model_req.async_callback is not None:
+            #     print(f"[STEP_ASYNC] Manually invoking async callback")
+            #     execute_model_req.async_callback()
+
             if self.scheduler_config.is_multi_step:
                 self._update_cached_scheduler_output(virtual_engine, outputs)
         else:
+            print(f"[STEP_ASYNC] Scheduler outputs empty")
             if len(ctx.output_queue) > 0:
                 self._process_model_outputs(ctx=ctx)
             outputs = []
 
+        # ========== RESTORE MISSING FINALIZATION CODE ==========
+        print(f"[STEP_ASYNC] Starting output finalization...")
+        
         # Finish the current step for all the sequence groups.
         if self.scheduler_config.is_multi_step:
+            print(f"[STEP_ASYNC] Finishing steps for {len(seq_group_metadata_list)} seq groups")
             for seq_group in seq_group_metadata_list:
                 seq_group.finish_step()
 
         if not self._has_remaining_steps(seq_group_metadata_list):
+            print(f"[STEP_ASYNC] No remaining steps - finalizing outputs")
+            
             # Clear the cache if we have finished all the steps
             if self.scheduler_config.is_multi_step:
                 self.cached_scheduler_outputs[
@@ -383,14 +390,18 @@ class _AsyncLLMEngine(LLMEngine):
             is_first_step_output: bool = False if not seq_group_metadata_list \
                 else seq_group_metadata_list[0].state.num_steps == 1
 
+            print(f"[STEP_ASYNC] Appending outputs: is_first_step_output={is_first_step_output}, "
+                f"allow_async={allow_async_output_proc}, outputs_len={len(outputs) if outputs else 0}")
+            
             ctx.append_output(outputs=outputs,
-                              seq_group_metadata_list=seq_group_metadata_list,
-                              scheduler_outputs=scheduler_outputs,
-                              is_async=allow_async_output_proc,
-                              is_last_step=True,
-                              is_first_step_output=is_first_step_output)
+                            seq_group_metadata_list=seq_group_metadata_list,
+                            scheduler_outputs=scheduler_outputs,
+                            is_async=allow_async_output_proc,
+                            is_last_step=True,
+                            is_first_step_output=is_first_step_output)
 
             if outputs and allow_async_output_proc:
+                print(f"[STEP_ASYNC] Advancing to next step (async mode)")
                 assert len(
                     outputs
                 ) == 1, "Async postprocessor expects only a single output set"
@@ -399,6 +410,7 @@ class _AsyncLLMEngine(LLMEngine):
                     scheduler_outputs.scheduled_seq_groups)
 
             if not allow_async_output_proc:
+                print(f"[STEP_ASYNC] Processing model outputs (sync finalization)")
                 self._process_model_outputs(ctx=ctx)
 
                 # Log stats.
@@ -408,15 +420,19 @@ class _AsyncLLMEngine(LLMEngine):
                 self.do_tracing(scheduler_outputs)
 
         else:
-            # Multi-step case
+            # Multi-step case - still has remaining steps
+            print(f"[STEP_ASYNC] Multi-step case - returning early with {len(ctx.request_outputs)} outputs")
             return ctx.request_outputs
 
         if not self.has_unfinished_requests():
+            print(f"[STEP_ASYNC] No unfinished requests - draining async postprocessor")
             # Drain async postprocessor (if exists)
             if len(ctx.output_queue) > 0:
+                print(f"[STEP_ASYNC] Draining output queue: {len(ctx.output_queue)} items")
                 self._process_model_outputs(ctx=ctx)
             assert len(ctx.output_queue) == 0
 
+        print(f"[STEP_ASYNC] FINAL: Returning {len(ctx.request_outputs)} request outputs")
         return ctx.request_outputs
 
     async def stop_remote_worker_execution_loop_async(self) -> None:
@@ -775,15 +791,20 @@ class AsyncLLMEngine(EngineClient):
 
         Returns True if there are in-progress requests."""
 
+        print(f"[ENGINE_STEP] Entry: virtual_engine={virtual_engine}")
+
         new_requests, aborted_requests = (
             self._request_tracker.get_new_and_aborted_requests())
 
+        print(f"[ENGINE_STEP] new_requests={len(new_requests)}, aborted_requests={len(aborted_requests)}")
+
         for new_request in new_requests:
-            # Add the request into the vLLM engine's waiting queue.
+            print(f"[ENGINE_STEP] Adding request to engine: {new_request['request_id']}")
             try:
                 await self.engine.add_request_async(**new_request)
+                print(f"[ENGINE_STEP] Request added successfully")
             except ValueError as e:
-                # TODO: use a vLLM specific error for failed validation
+                print(f"[ENGINE_STEP] ERROR adding request: {e}")
                 self._request_tracker.process_exception(
                     new_request["request_id"],
                     e,
@@ -793,19 +814,18 @@ class AsyncLLMEngine(EngineClient):
         if aborted_requests:
             await self._engine_abort(aborted_requests)
 
+        print(f"[ENGINE_STEP] Calling engine.step_async...")
         request_outputs = await self.engine.step_async(virtual_engine)
+        print(f"[ENGINE_STEP] engine.step_async returned {len(request_outputs)} outputs")
 
         # Put the outputs into the corresponding streams.
-        # If used as a callback, then already invoked inside
-        # LLMEngine's _process_model_outputs
         if not self.use_process_request_outputs_callback:
             all_finished = self.process_request_outputs(request_outputs)
         else:
-            # For callback case, we only need to detect when all
-            # requests are finished
             all_finished = all(request_output.finished
-                               for request_output in request_outputs)
+                            for request_output in request_outputs)
 
+        print(f"[ENGINE_STEP] all_finished={all_finished}")
         return not all_finished
 
     def process_request_outputs(self, request_outputs) -> bool:
@@ -944,25 +964,22 @@ class AsyncLLMEngine(EngineClient):
         *,
         inputs: Optional[PromptType] = None,  # DEPRECATED
     ) -> AsyncGenerator[Union[RequestOutput, PoolingRequestOutput], None]:
+        print(f"[ASYNC_ENGINE] add_request called: request_id={request_id}")
+        print(f"[ASYNC_ENGINE] is_running={self.is_running}, start_engine_loop={self.start_engine_loop}")
+        
         if inputs is not None:
             prompt = inputs
         assert prompt is not None and params is not None
 
         if not self.is_running:
+            print(f"[ASYNC_ENGINE] Engine not running, attempting to start...")
             if self.start_engine_loop:
                 self.start_background_loop()
+                print(f"[ASYNC_ENGINE] Background loop started")
             else:
-                raise AsyncEngineDeadError(
-                    "Background loop is not running. If it was running, "
-                    "inspect the output to find the stacktrace of the "
-                    "error that caused the background loop to stop "
-                    "(AsyncEngineDeadError).")
+                raise AsyncEngineDeadError("Background loop is not running...")
 
-        if (priority != 0
-                and not self.engine.scheduler_config.policy == "priority"):
-            raise ValueError(f"Got priority {priority} but "
-                             "Priority scheduling is not enabled.")
-
+        print(f"[ASYNC_ENGINE] Creating stream via request_tracker.add_request...")
         stream = self._request_tracker.add_request(
             request_id,
             verbose=self.log_requests,
@@ -976,6 +993,7 @@ class AsyncLLMEngine(EngineClient):
             data_parallel_rank=data_parallel_rank,
         )
 
+        print(f"[ASYNC_ENGINE] Stream created, returning generator")
         return stream.generator()
 
     async def generate(

@@ -9,7 +9,7 @@ import contextlib
 import gc
 import os
 import queue
-from typing import List, Optional, Set, Tuple, Type
+from typing import List, Optional, Set, Tuple, Type, Optional
 
 import habana_frameworks.torch as htorch  # noqa:F401
 import torch
@@ -125,6 +125,21 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
     def _is_encoder_decoder_model(self):
         return self.model_config.is_encoder_decoder
+
+    def get_shared_ring_buffer_info(self) -> Optional[dict]:
+        """Expose model runner's shared ring buffer info to the engine.
+        
+        This is called by LLMEngine during initialization to get the
+        shared memory attachment information.
+        """
+        if hasattr(self, 'model_runner') and self.model_runner:
+            if hasattr(self.model_runner, 'get_shared_ring_buffer_info'):
+                info = self.model_runner.get_shared_ring_buffer_info()
+                logger.info(f"[HPU_WORKER] Returning shared ring buffer info: "
+                        f"{info['buffer_size'] if info else 'None'} slots")
+                return info
+        logger.warning("[HPU_WORKER] No shared ring buffer info available")
+        return None
 
     def start_profile(self):
         if self.profiler is None:

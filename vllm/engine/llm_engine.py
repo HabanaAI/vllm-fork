@@ -273,6 +273,11 @@ class LLMEngine:
 
         self.model_executor = executor_class(vllm_config=vllm_config)
 
+        # Initialize shared memory ring buffer for delayed sampling
+        self.shared_ring_buffer = None
+        # if self.model_config.use_async_output_proc:
+        #     self._init_shared_ring_buffer()
+
         if self.model_config.runner_type != "pooling":
             self._initialize_kv_caches()
 
@@ -402,8 +407,66 @@ class LLMEngine:
         # the next step without re-scheduling.
         self._skip_scheduling_next_step = False
 
+        print(f"[ENGINE_INIT] ========================================")
+        print(f"[ENGINE_INIT] model_config.use_async_output_proc: {self.model_config.use_async_output_proc}")
+        print(f"[ENGINE_INIT] scheduler_config: {self.scheduler_config}")
+        print(f"[ENGINE_INIT] Creating {len(self.async_callbacks)} async callbacks")
+        print(f"[ENGINE_INIT] ========================================")
+
         # Don't keep the dummy data in memory
         self.reset_mm_cache()
+
+    def _init_shared_ring_buffer(self):
+        """Initialize shared memory ring buffer by attaching to worker's memory."""
+        print("[ENGINE_INIT] Requesting shared memory attachment info...")
+        
+        # Get attachment info from worker
+        attach_info = self._get_shared_ring_buffer_info_from_worker()
+        
+        if attach_info:
+            print(f"[ENGINE_INIT] Received attachment info: "
+                f"{attach_info['buffer_size']} slots")
+            
+            from vllm.worker.hpu_shared_memory import SharedTensorRingBuffer
+            
+            # Attach to existing shared memory in THIS process
+            self.shared_ring_buffer = SharedTensorRingBuffer(
+                buffer_size=attach_info['buffer_size'],
+                max_batch_size=attach_info['max_batch_size'],
+                vocab_size=attach_info['vocab_size'],
+                attach_info=attach_info  # Key parameter
+            )
+            
+            print("[ENGINE_INIT] Successfully attached to shared memory ring buffer")
+        else:
+            print("[ENGINE_INIT] No shared memory info available "
+                "(worker may not use delayed sampling)")
+
+    def _get_shared_ring_buffer_info_from_worker(self) -> Optional[dict]:
+        """
+        Call the worker to get shared memory attachment info.
+        This works across different executor types.
+        """
+        try:
+            # Try to call the method on model_executor
+            # This works for both single-process and multi-process executors
+            if hasattr(self.model_executor, 'driver_worker'):
+                # Single process executor
+                return self.model_executor.driver_worker.get_shared_ring_buffer_info()
+            elif hasattr(self.model_executor, '_run_workers'):
+                # Multi-process executor
+                results = self.model_executor._run_workers(
+                    "get_shared_ring_buffer_info",
+                    driver_only=True
+                )
+                return results[0] if results else None
+            else:
+                logger.warning("Unable to get shared ring buffer info: "
+                            "unknown executor type")
+                return None
+        except Exception as e:
+            logger.warning(f"Error getting shared ring buffer info: {e}")
+            return None
 
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
@@ -514,6 +577,10 @@ class LLMEngine:
         raise RuntimeError("LLMEngine should not be pickled!")
 
     def __del__(self):
+        # Detach from shared memory (don't destroy - worker owns it)
+        if hasattr(self, 'shared_ring_buffer') and self.shared_ring_buffer:
+            self.shared_ring_buffer.detach()
+            logger.info("[ENGINE_CLEANUP] Detached from shared memory")
         # Shutdown model executor when engine is garbage collected
         # Use getattr since __init__ can fail before the field is set
         if model_executor := getattr(self, "model_executor", None):
@@ -990,6 +1057,112 @@ class LLMEngine:
             seq_group.update_num_computed_tokens(
                 seq_group_meta.token_chunk_size)
 
+    def _patch_delayed_sampling_output(
+            self,
+            cpu_data: dict,
+            ctx: SchedulerContext) -> None:
+        """Patch output with real tokens from shared memory.
+        
+        All heavy lifting happens here in API server process, fully decoupled.
+        """
+        print(f"[PATCH] Entry: output_queue_len={len(ctx.output_queue)}")
+        
+        if len(ctx.output_queue) == 0:
+            print(f"[PATCH] Queue empty, returning")
+            return
+        
+        output_data = ctx.output_queue[0]
+        
+        # Read from shared memory (FAST, no deserialization!)
+        slot_idx = cpu_data['slot_idx']
+        token_shape = cpu_data['token_shape']
+        logprob_shape = cpu_data['logprob_shape']
+        
+        print(f"[PATCH] Reading from shared memory slot {slot_idx}")
+        
+        # Access shared memory ring buffer
+        token_ids_cpu, logprobs_cpu = self.shared_ring_buffer.read_slot(
+            slot_idx, token_shape, logprob_shape)
+        
+        print(f"[PATCH] Read token_ids_cpu shape: {token_ids_cpu.shape}")
+        
+        meta = cpu_data['model_output_meta']
+        sampling_metadata = meta['sampling_metadata']
+        is_prompt = meta['is_prompt']
+        seq_groups = sampling_metadata.seq_groups
+        
+        print(f"[PATCH] is_prompt={is_prompt}, num_seq_groups={len(seq_groups)}")
+        
+        # PHASE 1: Fast token patching
+        if is_prompt and any(
+            seq_group.sampling_params.prompt_logprobs is not None
+            for seq_group in seq_groups):
+            sample_idx_tensor = torch.tensor(
+                [sdx for sg in seq_groups for sdx in sg.sample_indices])
+            sampled_tokens = token_ids_cpu[sample_idx_tensor]
+            delayed_tokens = sampled_tokens.squeeze(-1).tolist()
+        else:
+            delayed_tokens = token_ids_cpu.squeeze(-1).tolist()
+        
+        print(f"[PATCH] delayed_tokens (first 5): {delayed_tokens[:5]}")
+        
+        # Patch tokens in output
+        for idx, (fake_out, real_out) in enumerate(zip(output_data.outputs[0], delayed_tokens)):
+            print(f"[PATCH] Patching output {idx}: fake={fake_out.samples[0].output_token} -> real={real_out}")
+            fake_out.samples[0].output_token = real_out
+        
+        for sg, real_out in zip(output_data.seq_group_metadata_list, delayed_tokens):
+            seq_data = list(sg.seq_data.values())[0]
+            seq_data.output_token_ids_array[-1] = real_out
+            seq_data._cached_all_token_ids[-1] = real_out
+        
+        # PHASE 2: Logprobs processing
+        logprobs_required = any(seq_group.sampling_params.logprobs is not None
+                            for seq_group in seq_groups)
+        prompt_logprobs_required = any(
+            seq_group.sampling_params.prompt_logprobs is not None
+            for seq_group in seq_groups)
+        
+        print(f"[PATCH] logprobs_required={logprobs_required}, prompt_logprobs_required={prompt_logprobs_required}")
+        
+        if logprobs_required or prompt_logprobs_required:
+            from vllm.model_executor.layers.sampler import (
+                get_pythonized_sample_results, get_logprobs)
+            
+            computed_tokens = []
+            if is_prompt:
+                for seq_group in seq_groups:
+                    seq_ids = seq_group.seq_ids
+                    seq_data = seq_group.seq_data[seq_ids[0]]
+                    computed_tokens.append(seq_data.get_num_computed_tokens())
+                    seq_data._num_computed_tokens = 0
+            
+            print(f"[PATCH] Getting logprobs...")
+            sampling_results = get_pythonized_sample_results(
+                meta['deferred_sample_results'])
+            delayed_prompt_logprobs, delayed_logprobs = get_logprobs(
+                logprobs_cpu, sampling_metadata, sampling_results)
+            
+            if is_prompt:
+                for seq_group in seq_groups:
+                    seq_ids = seq_group.seq_ids
+                    seq_data = seq_group.seq_data[seq_ids[0]]
+                    seq_data.update_num_computed_tokens(computed_tokens.pop(0))
+            
+            if logprobs_required and delayed_logprobs is not None:
+                for sg, real_logprobs in zip(
+                        output_data.scheduler_outputs.scheduled_seq_groups,
+                        delayed_logprobs):
+                    sg.seq_group.first_seq.output_logprobs[-1] = real_logprobs[0]
+            
+            if prompt_logprobs_required and delayed_prompt_logprobs is not None:
+                seq_groups_out = output_data.scheduler_outputs.scheduled_seq_groups
+                for sg, real_logprobs in zip(seq_groups_out, delayed_prompt_logprobs):
+                    if real_logprobs is not None:
+                        sg.seq_group.prompt_logprobs = [None] + real_logprobs
+        
+        print(f"[PATCH] Completed successfully")
+
     def _process_model_outputs(self,
                                ctx: SchedulerContext,
                                request_id: Optional[str] = None) -> None:
@@ -1000,21 +1173,69 @@ class LLMEngine:
         request_id: If provided, then only this request is going to be processed
         """
 
+        print(f"[PROCESS] Entry: output_queue_len={len(ctx.output_queue)}, request_id={request_id}")
+        
         now = time.time()
 
         if len(ctx.output_queue) == 0:
+            print(f"[PROCESS] Queue empty, returning")
             return None
 
+        # LAZY INIT: Initialize shared memory on first use
+        if (self.shared_ring_buffer is None and 
+            self.model_config.use_async_output_proc and
+            hasattr(ctx, 'cpu_data_queue') and 
+            len(ctx.cpu_data_queue) > 0):
+            print(f"[PROCESS] Lazy initializing shared memory ring buffer...")
+            try:
+                self._init_shared_ring_buffer()
+                print(f"[PROCESS] Shared memory initialized successfully")
+            except Exception as e:
+                print(f"[PROCESS] Failed to initialize shared memory: {e}")
+                # Continue without patching
+                ctx.cpu_data_queue.clear()
+
+        print(f"[PROCESS] Checking for cpu_data_queue: {hasattr(ctx, 'cpu_data_queue')}")
+        if hasattr(ctx, 'cpu_data_queue'):
+            print(f"[PROCESS] cpu_data_queue length: {len(ctx.cpu_data_queue)}")
+        
+        # NEW: Process delayed sampling CPU data if available
+        # CRITICAL: This must happen AFTER output is in queue but BEFORE we pop it
+        if hasattr(ctx, 'cpu_data_queue') and len(ctx.cpu_data_queue) > 0:
+            print(f"[PROCESS] Found CPU data, checking queue sync...")
+            
+            # CRITICAL FIX: Ensure 1:1 correspondence between cpu_data_queue and output_queue
+            if len(ctx.cpu_data_queue) > len(ctx.output_queue):
+                print(f"[PROCESS] ERROR: Queue sync issue - cpu_data:{len(ctx.cpu_data_queue)} > output:{len(ctx.output_queue)}")
+                # Clear excess cpu_data to maintain sync
+                excess_items = len(ctx.cpu_data_queue) - len(ctx.output_queue)
+                for _ in range(excess_items):
+                    ctx.cpu_data_queue.pop(0)
+                print(f"[PROCESS] Cleared {excess_items} excess cpu_data items")
+            
+            # Only patch if we have both cpu_data AND output
+            if len(ctx.output_queue) > 0 and len(ctx.cpu_data_queue) > 0:
+                print(f"[PROCESS] Attempting patch...")
+                cpu_data = ctx.cpu_data_queue.pop(0)
+                
+                # Do all CPU-intensive patching HERE in API server
+                self._patch_delayed_sampling_output(cpu_data, ctx)
+                print(f"[PROCESS] Patch completed successfully")
+
+
         # Get pending async postprocessor
-        if request_id:
-            # When we process only one request, no pop is required
-            # (since later we will process all of the rest)
-            (outputs, seq_group_metadata_list, scheduler_outputs, is_async,
-             is_last_step, is_first_step_output, skip) = ctx.output_queue[0]
-        else:
-            (outputs, seq_group_metadata_list, scheduler_outputs, is_async,
-             is_last_step, is_first_step_output,
-             skip) = ctx.output_queue.popleft()
+        # if request_id:
+        #     print(f"[PROCESS] Processing specific request_id: {request_id}")
+        #     (outputs, seq_group_metadata_list, scheduler_outputs, is_async,
+        #     is_last_step, is_first_step_output, skip) = ctx.output_queue.popleft()
+        # else:
+        print(f"[PROCESS] Processing all requests, popping from queue")
+        (outputs, seq_group_metadata_list, scheduler_outputs, is_async,
+        is_last_step, is_first_step_output,
+        skip) = ctx.output_queue.popleft()
+
+        print(f"[PROCESS] Got outputs: len={len(outputs)}, is_async={is_async}, is_last_step={is_last_step}")
+        
 
         # Sanity check
         assert len(seq_group_metadata_list) == len(
@@ -1511,7 +1732,14 @@ class LLMEngine:
             # Drain async postprocessor (if exists)
             if len(ctx.output_queue) > 0:
                 self._process_model_outputs(ctx=ctx)
-            assert len(ctx.output_queue) == 0
+            # Handle delayed sampling case where output_queue may not be empty
+            if len(ctx.output_queue) > 0:
+                if hasattr(self.model_config, 'use_async_output_proc') and self.model_config.use_async_output_proc:
+                    print(f"[DEBUG] Delayed sampling: clearing {len(ctx.output_queue)} remaining outputs")
+                    ctx.output_queue.clear()
+                else:
+                    assert len(ctx.output_queue) == 0, f"Expected empty output_queue, got {len(ctx.output_queue)} items"
+
 
             # Stop the execute model loop in parallel workers until there are
             # more requests to process. This avoids waiting indefinitely in

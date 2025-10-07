@@ -1628,7 +1628,10 @@ class Scheduler:
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.
         scheduler_start_time = time.perf_counter()
-
+        # if self._async_callback is not None:
+        #     print(f"[SCHEDULER] async_callback IS SET")
+        # else:
+        #     print(f"[SCHEDULER] async_callback IS NONE")
         scheduler_outputs: SchedulerOutputs = self._schedule()
         now = time.time()
 
