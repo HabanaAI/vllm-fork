@@ -33,6 +33,7 @@ from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.processors.ovis2_5 import Ovis2_5Processor
 from vllm.worker.hpu_model_runner import VisionBuckets
 from .interfaces import MultiModalEmbeddings, SupportsMultiModal
+from .utils import merge_multimodal_embeddings_static
 
 logger = init_logger(__name__)
 
@@ -597,6 +598,21 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
             embeddings.extend(self._process_image_input(video_input))
 
         return tuple(embeddings) if embeddings else None
+
+    def get_input_embeddings_hpu(
+        self,
+        input_ids: torch.Tensor,
+        image_index_tensor: torch.Tensor,
+        multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
+    ) -> torch.Tensor:
+        inputs_embeds = self.llm.get_input_embeddings(input_ids)
+        if multimodal_embeddings is not None:
+            inputs_embeds = merge_multimodal_embeddings_static(
+                image_index_tensor,
+                inputs_embeds,
+                multimodal_embeddings,
+            )
+        return inputs_embeds
 
     def get_input_embeddings(
         self,
