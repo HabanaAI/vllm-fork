@@ -333,7 +333,7 @@ class AsyncLLM(EngineClient):
                 # Note: both OutputProcessor and EngineCore handle their
                 # own request cleanup based on finished.
                 finished = out.finished
-                logger.info(f"libin debug async_llm generate loop my rank:{os.getenv('RANK')}| time:{s5-s4}")
+                # logger.info(f"libin debug async_llm generate loop my rank:{os.getenv('RANK')}| time:{s5-s4}")
                 yield out
 
         # If the request is disconnected by the client, generate()
@@ -362,7 +362,7 @@ class AsyncLLM(EngineClient):
             if self.log_requests:
                 logger.info("Request %s failed.", request_id)
             raise EngineGenerateError() from e
-        logger.info(f"libin debug async_llm generate my rank:{os.getenv('RANK')}| takes:{time.perf_counter()-s1}| request:{s3-s1}")
+        # logger.info(f"libin debug async_llm generate my rank:{os.getenv('RANK')}| takes:{time.perf_counter()-s1}| request:{s3-s1}")
 
     def _run_output_handler(self):
         """Background loop: pulls from EngineCore and pushes to AsyncStreams."""
