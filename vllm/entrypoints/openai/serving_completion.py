@@ -80,7 +80,7 @@ class OpenAIServingCompletion(OpenAIServing):
             - suffix (the language models we currently support do not support
             suffix)
         """
-        logger.info(f"libin enter create_completion my rank:{os.getenv('RANK')}")
+        # logger.info(f"libin enter create_completion my rank:{os.getenv('RANK')}")
         s1 = time.perf_counter()
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
@@ -104,7 +104,7 @@ class OpenAIServingCompletion(OpenAIServing):
         request_id = f"cmpl-{self._base_request_id(raw_request)}"
         created_time = int(time.time())
         s2 = time.perf_counter()
-        logger.info(f"libin create_completion my rank:{os.getenv('RANK')} create req {request_id}")
+        # logger.info(f"libin create_completion my rank:{os.getenv('RANK')} create req {request_id}")
         request_metadata = RequestResponseMetadata(request_id=request_id)
         if raw_request:
             raw_request.state.request_metadata = request_metadata
@@ -137,7 +137,7 @@ class OpenAIServingCompletion(OpenAIServing):
             logger.exception("Error in preprocessing prompt inputs")
             return self.create_error_response(str(e))
         s3 = time.perf_counter()
-        logger.info(f"libin create_completion my rank:{os.getenv('RANK')} schedule {request_id}")
+        # logger.info(f"libin create_completion my rank:{os.getenv('RANK')} schedule {request_id}")
         # Schedule the request and get the result generator.
         generators: list[AsyncGenerator[RequestOutput, None]] = []
         try:
@@ -221,7 +221,7 @@ class OpenAIServingCompletion(OpenAIServing):
                   and (request.best_of is None or request.n == request.best_of)
                   and not request.use_beam_search)
         s6 = time.perf_counter()
-        logger.info(f"libin create_completion my rank:{os.getenv('RANK')} creating result {request_id}")
+        # logger.info(f"libin create_completion my rank:{os.getenv('RANK')} creating result {request_id}")
         # Streaming response
         if stream:
             ret =  self.completion_stream_generator(
@@ -233,7 +233,7 @@ class OpenAIServingCompletion(OpenAIServing):
                 num_prompts=num_prompts,
                 tokenizer=tokenizer,
                 request_metadata=request_metadata)
-            logger.info(f"libin create_completion done response stream my rank:{os.getenv('RANK')} time:{s6-s1}| b_schedure:{s3-s1}| schedule:{s4-s3}| merge:{s5-s4}| {s6-s5=}")
+            # logger.info(f"libin create_completion done response stream my rank:{os.getenv('RANK')} time:{s6-s1}| b_schedure:{s3-s1}| schedule:{s4-s3}| merge:{s5-s4}| {s6-s5=}")
             return ret
 
         # Non-streaming response
@@ -282,10 +282,10 @@ class OpenAIServingCompletion(OpenAIServing):
                 yield f"data: {response_json}\n\n"
                 yield "data: [DONE]\n\n"
             s7 = time.perf_counter()
-            logger.info(f"libin create_completion done response fake stream my rank:{os.getenv('RANK')} time:{s7-s1}| b_schedure:{s3-s1}| schedule:{s4-s3}| merge:{s5-s4}| {s6-s5=}| result:{s7-s6}")
+            # logger.info(f"libin create_completion done response fake stream my rank:{os.getenv('RANK')} time:{s7-s1}| b_schedure:{s3-s1}| schedule:{s4-s3}| merge:{s5-s4}| {s6-s5=}| result:{s7-s6}")
             return fake_stream_generator()
         s7 = time.perf_counter()
-        logger.info(f"libin create_completion done response non-stream my rank:{os.getenv('RANK')} time:{s7-s1}| b_schedure:{s3-s1}| schedule:{s4-s3}| merge:{s5-s4}| {s6-s5=}| result:{s7-s6}")
+        # logger.info(f"libin create_completion done response non-stream my rank:{os.getenv('RANK')} time:{s7-s1}| b_schedure:{s3-s1}| schedule:{s4-s3}| merge:{s5-s4}| {s6-s5=}| result:{s7-s6}")
         return response
 
     async def completion_stream_generator(
@@ -300,7 +300,7 @@ class OpenAIServingCompletion(OpenAIServing):
         request_metadata: RequestResponseMetadata,
     ) -> AsyncGenerator[str, None]:
         s1 = time.perf_counter()
-        logger.info(f"libin enter completion_stream_generator my rank:{os.getenv('RANK')}")
+        # logger.info(f"libin enter completion_stream_generator my rank:{os.getenv('RANK')}")
         num_choices = 1 if request.n is None else request.n
         previous_text_lens = [0] * num_choices * num_prompts
         previous_num_tokens = [0] * num_choices * num_prompts
@@ -317,7 +317,7 @@ class OpenAIServingCompletion(OpenAIServing):
 
         try:
             async for prompt_idx, res in result_generator:
-                logger.info(f"libin result_generator completion_stream_generator my rank:{os.getenv('RANK')} {time.perf_counter()- s1}")
+                # logger.info(f"libin result_generator completion_stream_generator my rank:{os.getenv('RANK')} {time.perf_counter()- s1}")
                 prompt_token_ids = res.prompt_token_ids
                 prompt_logprobs = res.prompt_logprobs
                 prompt_text = res.prompt
@@ -408,7 +408,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         )
 
                     response_json = chunk.model_dump_json(exclude_unset=False)
-                    logger.info(f"libin debug process output not end my rank:{os.getenv('RANK')}")
+                    # logger.info(f"libin debug process output not end my rank:{os.getenv('RANK')}")
                     yield f"data: {response_json}\n\n"
 
             total_prompt_tokens = sum(num_prompt_tokens)
@@ -428,7 +428,7 @@ class OpenAIServingCompletion(OpenAIServing):
                 )
                 final_usage_data = (final_usage_chunk.model_dump_json(
                     exclude_unset=False, exclude_none=True))
-                logger.info(f"libin debug process output 1 end my rank:{os.getenv('RANK')}")
+                # logger.info(f"libin debug process output 1 end my rank:{os.getenv('RANK')}")
                 yield f"data: {final_usage_data}\n\n"
 
             # report to FastAPI middleware aggregate usage across all choices
@@ -438,7 +438,7 @@ class OpenAIServingCompletion(OpenAIServing):
             # TODO: Use a vllm-specific Validation Error
             data = self.create_streaming_error_response(str(e))
             yield f"data: {data}\n\n"
-        logger.info(f"libin debug process output end my rank:{os.getenv('RANK')}")
+        # logger.info(f"libin debug process output end my rank:{os.getenv('RANK')}")
         yield "data: [DONE]\n\n"
 
     def request_output_to_completion_response(
