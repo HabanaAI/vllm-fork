@@ -445,7 +445,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             raise ValueError(
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {supported_head_sizes}.")
-
+        self.is_prompt = None
         self.attn_type = attn_type
         if (self.attn_type != AttentionType.DECODER
                 and self.attn_type != AttentionType.ENCODER_DECODER
@@ -528,6 +528,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         if attn_metadata.is_prompt:
             # Prompt run.
+            self.is_prompt = True
             query_shape = (batch_size, seq_len, self.num_heads, self.head_size)
             kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
                         self.head_size)
@@ -597,6 +598,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
+            self.is_prompt = False
             if not self.sliding_window:
                 block_list = attn_metadata.block_list
                 block_groups = attn_metadata.block_groups
@@ -645,8 +647,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             'batch2block_matmul_op': self.batch2block_matmul,
             'block2batch_matmul_op': self.block2batch_matmul,
             'fsdpa_op': self.fused_scaled_dot_product_attention,
-            'keys_fetch_func': self.k_cache.fetch_from_cache,
-            'values_fetch_func': self.v_cache.fetch_from_cache,
+            'keys_fetch_func': self.k_cache.fetch_from_cache if (not self.is_prompt or not self.use_contiguous_pa) else self.k_cache.fetch_from_cache_prompt,
+            'values_fetch_func': self.v_cache.fetch_from_cache if (not self.is_prompt or not self.use_contiguous_pa) else self.v_cache.fetch_from_cache_prompt,
             'softmax_op': self.softmax,
             'block_list': block_list,
             'key_cache': key_cache,
