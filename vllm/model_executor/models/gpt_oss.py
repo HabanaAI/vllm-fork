@@ -570,9 +570,10 @@ class GptOssForCausalLM(nn.Module):
 
         tp_rank = get_tensor_model_parallel_rank()
         tp_size = get_tensor_model_parallel_world_size()
-        intermediate_size = self.model_config.intermediate_size
 
+        intermediate_size = self.model_config.intermediate_size
         per_rank_intermediate_size = cdiv(intermediate_size, tp_size)
+
         # Calculate common slicing bounds for current rank
         tp_rank_start = tp_rank * per_rank_intermediate_size
         tp_rank_end = min((tp_rank + 1) * per_rank_intermediate_size,
@@ -598,77 +599,47 @@ class GptOssForCausalLM(nn.Module):
                 # Handle MLP gate and up projection weights
                 new_name = name.replace(".experts.gate_up_proj_blocks",
                                         ".experts.w13_weight")
-
-                # Extract gate and up projection parts
-                # since the weight is shuffled, we can slice directly
-                if use_ep:
-                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
-                else:
-                    narrow_weight = weight[:, :,
-                                           2 * tp_rank_start:2 * tp_rank_end]
-                if os.getenv("PT_HPU_GPT_MOE_WT_INTERLEAVED",
-                             "").lower() in ("0", "false"):
-                    gate_weight = narrow_weight[:, 0::2, :, :]
-                    up_weight = narrow_weight[:, 1::2, :, :]
-                    narrow_weight = torch.cat([gate_weight, up_weight], dim=1)
-                new_dict[new_name] = narrow_weight
-                #param = params_dict[new_name]
-
-                #param.copy_(narrow_weight)
-                #loaded_params.add(new_name)
+                new_dict[new_name] = weight
 
             elif ".experts.gate_up_proj_scales" in name and "bias" not in name:
                 # Handle MLP gate and up projection weights
                 new_name = name.replace(".experts.gate_up_proj_scales",
                                         ".experts.w13_weight")
 
-                # Extract gate and up projection parts
-                # since the weight is shuffled, we can slice directly
+                param = params_dict[new_name]
+                weight = self.convert_moe_packed_tensors(new_dict[new_name], weight)
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
-                    narrow_weight = weight[:, :,
-                                           2 * tp_rank_start:2 * tp_rank_end]
+                    narrow_weight = weight[:, :, 2 * tp_rank_start:2 * tp_rank_end]
                 narrow_weight.contiguous()
                 if os.getenv("PT_HPU_GPT_MOE_WT_INTERLEAVED",
                              "").lower() in ("0", "false"):
-                    gate_weight = narrow_weight[:, 0::2, :]
-                    up_weight = narrow_weight[:, 1::2, :]
-                    narrow_weight = torch.cat([gate_weight, up_weight], dim=1)
-                param = params_dict[new_name]
-                param.copy_(self.convert_moe_packed_tensors(new_dict[new_name], narrow_weight))
-                #param.copy_(narrow_weight)
+                    gate_weight = narrow_weight[:, :, 0::2]
+                    up_weight = narrow_weight[:, :, 1::2]
+                    narrow_weight = torch.cat([gate_weight, up_weight], dim=2)
+                param.copy_(narrow_weight)
                 loaded_params.add(new_name)
 
             elif ".experts.down_proj_blocks" in name and "bias" not in name:
                 # Handle MLP down projection weights
                 new_name = name.replace(".experts.down_proj_blocks",
                                         ".experts.w2_weight")
-
-                if use_ep:
-                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
-                else:
-                    narrow_weight = weight[:, tp_rank_start:tp_rank_end, :]
-                narrow_weight.contiguous()
-                new_dict[new_name] = narrow_weight
-                #param = params_dict[new_name]
-
-                #param.copy_(narrow_weight)
-                #loaded_params.add(new_name)
+                new_dict[new_name] = weight
 
             elif ".experts.down_proj_scales" in name and "bias" not in name:
                 # Handle MLP down projection scales
                 new_name = name.replace(".experts.down_proj_scales",
                                         ".experts.w2_weight")
 
+                param = params_dict[new_name]
+                weight = self.convert_moe_packed_tensors(new_dict[new_name], weight)
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
                     narrow_weight = weight[:, tp_rank_start:tp_rank_end, :]
                 narrow_weight.contiguous()
-                param = params_dict[new_name]
-                param.copy_(self.convert_moe_packed_tensors(new_dict[new_name], narrow_weight))
-                #param.copy_(narrow_weight)
+                param.copy_(narrow_weight)
                 loaded_params.add(new_name)
 
             elif "gate_up_proj_bias" in name:
@@ -687,7 +658,6 @@ class GptOssForCausalLM(nn.Module):
                     up_bias = narrow_weight[:, 1::2]
                     narrow_weight = torch.cat([gate_bias, up_bias], dim=1)
                 param = params_dict[new_name]
-
                 param.copy_(narrow_weight)
                 loaded_params.add(new_name)
 

@@ -5,7 +5,7 @@ from vllm.distributed import cleanup_dist_env_and_memory
 from vllm.entrypoints.llm import LLM
 import numpy as np
 
-RUN_20B_MODEL = False  # Set to False to run the 120B model instead
+RUN_20B_MODEL = True  # Set to False to run the 120B model instead
 MODEL_PATH = "openai/gpt-oss-20b" #"unsloth/gpt-oss-20b-BF16"
 MODEL_PATH_120 = "openai/gpt-oss-120b"
 # reference https://github.com/huggingface/transformers/blob/68eb1a9a6353911f491b1c8139eb73d052a8e9b9/tests/models/gpt_oss/test_modeling_gpt_oss.py#L397
