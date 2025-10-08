@@ -2775,7 +2775,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_image_tokens = int(image_h * image_w //
                                    (vit_cfg.hidden_stride**2))
             image_grid_thw = torch.tensor([[1, image_h, image_w]],
-                                          dtype=torch.int64).to('hpu')
+                                          dtype=torch.int64)
 
             pixel_values = torch.randn(1,
                                        image_grid_thw[0].prod(),
