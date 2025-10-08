@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
 from itertools import groupby
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, TypeVar, Union
+from typing import (TYPE_CHECKING, Any, Literal, Optional, TypeVar, Union,
+                    overload)
 from urllib.parse import ParseResult, urlparse
 
 import numpy as np
@@ -62,19 +64,41 @@ class MediaConnector:
 
         self.allowed_local_media_path = allowed_local_media_path_
 
+    @overload
     def _load_data_url(
         self,
         url_spec: ParseResult,
         media_io: MediaIO[_M],
+        load_type: Literal["PIL"] = "PIL",
     ) -> _M:
+        ...
+
+    @overload
+    def _load_data_url(
+        self,
+        url_spec: ParseResult,
+        media_io: MediaIO[_M],
+        load_type: Literal["bytes"],
+    ) -> bytes:
+        ...
+
+    def _load_data_url(
+        self,
+        url_spec: ParseResult,
+        media_io: MediaIO[_M],
+        load_type: Literal["PIL", "bytes"] = "PIL",
+    ) -> Union[_M, bytes]:
         data_spec, data = url_spec.path.split(",", 1)
         media_type, data_type = data_spec.split(";", 1)
 
         if data_type != "base64":
-            msg = "Only base64 data URLs are supported for now."
-            raise NotImplementedError(msg)
+            raise NotImplementedError(
+                "Only base64 data URLs are supported for now.")
 
-        return media_io.load_base64(media_type, data)
+        if load_type == "bytes":
+            return media_io.load_base64_bytes(media_type, data)
+        else:
+            return media_io.load_base64(media_type, data)
 
     def _load_file_url(
         self,
@@ -94,29 +118,79 @@ class MediaConnector:
 
         return media_io.load_file(filepath)
 
+    @overload
+    def load_from_url(
+        self,
+        url: str,
+        media_io: MediaIO[_M],
+        *,
+        fetch_timeout: Optional[int] = ...,
+        load_type: Literal["PIL"] = "PIL",
+    ) -> _M:
+        ...
+
+    @overload
+    def load_from_url(
+        self,
+        url: str,
+        media_io: MediaIO[_M],
+        *,
+        fetch_timeout: Optional[int] = ...,
+        load_type: Literal["bytes"],
+    ) -> bytes:
+        ...
+
     def load_from_url(
         self,
         url: str,
         media_io: MediaIO[_M],
         *,
         fetch_timeout: Optional[int] = None,
-    ) -> _M:
+        load_type: Literal["PIL", "bytes"] = "bytes",
+    ) -> Union[_M, bytes]:
         url_spec = urlparse(url)
 
         if url_spec.scheme.startswith("http"):
-            connection = self.connection
-            data = connection.get_bytes(url, timeout=fetch_timeout)
-
+            if load_type == "bytes":
+                raise NotImplementedError(
+                    "Only data URLs are currently supported for bytes loading."
+                )
+            data = self.connection.get_bytes(url, timeout=fetch_timeout)
             return media_io.load_bytes(data)
 
         if url_spec.scheme == "data":
-            return self._load_data_url(url_spec, media_io)
+            return self._load_data_url(url_spec, media_io, load_type)
 
         if url_spec.scheme == "file":
+            if load_type == "bytes":
+                raise NotImplementedError(
+                    "Only data URLs are currently supported for bytes loading."
+                )
             return self._load_file_url(url_spec, media_io)
 
-        msg = "The URL must be either a HTTP, data or file URL."
-        raise ValueError(msg)
+        raise ValueError("The URL must be either a HTTP, data or file URL.")
+
+    @overload
+    async def load_from_url_async(
+        self,
+        url: str,
+        media_io: MediaIO[_M],
+        *,
+        fetch_timeout: Optional[int] = ...,
+        load_type: Literal["PIL"] = "PIL",
+    ) -> _M:
+        ...
+
+    @overload
+    async def load_from_url_async(
+        self,
+        url: str,
+        media_io: MediaIO[_M],
+        *,
+        fetch_timeout: Optional[int] = ...,
+        load_type: Literal["bytes"],
+    ) -> bytes:
+        ...
 
     async def load_from_url_async(
         self,
@@ -124,23 +198,30 @@ class MediaConnector:
         media_io: MediaIO[_M],
         *,
         fetch_timeout: Optional[int] = None,
-    ) -> _M:
+        load_type: Literal["PIL", "bytes"] = "bytes",
+    ) -> Union[_M, bytes]:
         url_spec = urlparse(url)
 
         if url_spec.scheme.startswith("http"):
-            connection = self.connection
-            data = await connection.async_get_bytes(url, timeout=fetch_timeout)
-
+            if load_type == "bytes":
+                raise NotImplementedError(
+                    "Only data URLs are currently supported for bytes loading."
+                )
+            data = await self.connection.async_get_bytes(url,
+                                                         timeout=fetch_timeout)
             return media_io.load_bytes(data)
 
         if url_spec.scheme == "data":
-            return self._load_data_url(url_spec, media_io)
+            return self._load_data_url(url_spec, media_io, load_type)
 
         if url_spec.scheme == "file":
+            if load_type == "bytes":
+                raise NotImplementedError(
+                    "Only data URLs are currently supported for bytes loading."
+                )
             return self._load_file_url(url_spec, media_io)
 
-        msg = "The URL must be either a HTTP, data or file URL."
-        raise ValueError(msg)
+        raise ValueError("The URL must be either a HTTP, data or file URL.")
 
     def fetch_audio(
         self,
@@ -172,47 +253,98 @@ class MediaConnector:
             fetch_timeout=envs.VLLM_AUDIO_FETCH_TIMEOUT,
         )
 
+    @overload
     def fetch_image(
         self,
         image_url: str,
         *,
         image_mode: str = "RGB",
+        load_type: Literal["PIL"],
     ) -> Image.Image:
+        ...
+
+    @overload
+    def fetch_image(
+        self,
+        image_url: str,
+        *,
+        image_mode: str = "RGB",
+        load_type: Literal["bytes"],
+    ) -> bytes:
+        ...
+
+    def fetch_image(
+        self,
+        image_url: str,
+        *,
+        image_mode: str = "RGB",
+        load_type: Optional[Literal["PIL", "bytes"]] = None,
+    ) -> Union[Image.Image, bytes]:
         """
-        Load a PIL image from a HTTP or base64 data URL.
+        Load a PIL image or raw bytes from a HTTP/base64 data URL.
 
         By default, the image is converted into RGB format.
         """
         image_io = ImageMediaIO(image_mode=image_mode)
+        use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE",
+                                  "false").lower() in ("1", "true", "yes")
+        load_type = "bytes" if use_mediapipe else "PIL"
 
         try:
             return self.load_from_url(
                 image_url,
                 image_io,
                 fetch_timeout=envs.VLLM_IMAGE_FETCH_TIMEOUT,
+                load_type=load_type,
             )
         except UnidentifiedImageError as e:
             # convert to ValueError to be properly caught upstream
             raise ValueError(str(e)) from e
+
+    @overload
+    async def fetch_image_async(
+        self,
+        image_url: str,
+        *,
+        image_mode: str = "RGB",
+        load_type: Literal["PIL"],
+    ) -> Image.Image:
+        ...
+
+    @overload
+    async def fetch_image_async(
+        self,
+        image_url: str,
+        *,
+        image_mode: str = "RGB",
+        load_type: Literal["bytes"],
+    ) -> bytes:
+        ...
 
     async def fetch_image_async(
         self,
         image_url: str,
         *,
         image_mode: str = "RGB",
-    ) -> Image.Image:
+        load_type: Optional[Literal["PIL", "bytes"]] = None,
+    ) -> Union[Image.Image, bytes]:
         """
-        Asynchronously load a PIL image from a HTTP or base64 data URL.
+        Asynchronously load a PIL image (or raw bytes) 
+        from a HTTP or base64 data URL.
 
         By default, the image is converted into RGB format.
         """
         image_io = ImageMediaIO(image_mode=image_mode)
+        use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE",
+                                  "false").lower() in ("1", "true", "yes")
+        load_type = "bytes" if use_mediapipe else "PIL"
 
         try:
             return await self.load_from_url_async(
                 image_url,
                 image_io,
                 fetch_timeout=envs.VLLM_IMAGE_FETCH_TIMEOUT,
+                load_type=load_type,
             )
         except UnidentifiedImageError as e:
             # convert to ValueError to be properly caught upstream

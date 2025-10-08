@@ -197,6 +197,10 @@ class Sampler(nn.Module):
         # speculative decoding and when prompt embeddings are specified.
         self.include_gpu_probs_tensor = False
         self.should_modify_greedy_probs_inplace = False
+        # Add HPU cache class variables
+        self._prompt_tokens_hpu_cache: Optional[torch.Tensor] = None
+        self._output_tokens_hpu_cache: Optional[torch.Tensor] = None
+        self._cached_seq_ids: Optional[set] = None
 
     def _init_sampling_tensors(
         self,
@@ -214,10 +218,15 @@ class Sampler(nn.Module):
         # have pinned memory.
         self._sampling_tensors = None
 
+        csi = self._cached_seq_ids if self._cached_seq_ids is not None else set(
+        )
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
-         top_k_scalar, top_p_scalar) = SamplingTensors.from_sampling_metadata(
-             sampling_metadata, vocab_size, logits.device, logits.dtype)
+         top_k_scalar, top_p_scalar, current_seq_ids) = \
+            SamplingTensors.from_sampling_metadata(
+             sampling_metadata, vocab_size, logits.device, logits.dtype, \
+             self._prompt_tokens_hpu_cache, self._output_tokens_hpu_cache, \
+             csi)
 
         self._sampling_tensors = sampling_tensors
         self._do_penalties = do_penalties
@@ -227,6 +236,13 @@ class Sampler(nn.Module):
         self._top_p_scalar = top_p_scalar
 
         self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
+        # Check if batch composition changed - if so, invalidate prompt cache
+
+        # After tensors are created, update cache
+        if self._cached_seq_ids != current_seq_ids:
+            self._prompt_tokens_hpu_cache = None
+            self._output_tokens_hpu_cache = None
+            self._cached_seq_ids = current_seq_ids
 
     def forward(
         self,

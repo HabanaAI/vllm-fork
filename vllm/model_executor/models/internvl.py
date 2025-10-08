@@ -1,20 +1,41 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import atexit
+import contextlib
+import io
 # adapted from https://huggingface.co/OpenGVLab/InternVL2-4B/blob/main/modeling_internvl_chat.py
 # --------------------------------------------------------
 # InternVL
 # Copyright (c) 2023 OpenGVLab
 # Licensed under The MIT License [see LICENSE for details]
 # --------------------------------------------------------
+import os
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from queue import Queue
 from typing import Any, Literal, Optional, TypedDict, TypeVar, Union
 
+import numpy as np
 import numpy.typing as npt
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision.transforms as T
+from habana_frameworks.mediapipe import fn
+# Handle MediaPipe pipe_manager destructor
+from habana_frameworks.mediapipe.backend.cal import (cpp_pipe_manager_list,
+                                                     pipe_manager)
+from habana_frameworks.mediapipe.media_types import dtype as dt
+from habana_frameworks.mediapipe.media_types import imgtype as it
+from habana_frameworks.mediapipe.media_types import readerOutType as ro
+from habana_frameworks.mediapipe.mediapipe import MediaPipe
+from habana_frameworks.mediapipe.operators.reader_nodes.reader_nodes import (
+    media_ext_reader_op_impl, media_ext_reader_op_tensor_info)
+from habana_frameworks.mediapipe.plugins.iterator_pytorch import (
+    MediaGenericPytorchIterator)
 from PIL import Image
 from transformers import BatchEncoding, PretrainedConfig, TensorType
 
@@ -35,13 +56,16 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         BaseProcessingInfo, PromptReplacement,
                                         PromptUpdate, PromptUpdateDetails)
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
-from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
-                    maybe_prefix, merge_multimodal_embeddings)
+from .utils import (AutoWeightsLoader, flatten_bn, greedy_plan,
+                    init_vllm_registered_model, maybe_prefix,
+                    merge_multimodal_embeddings,
+                    merge_multimodal_embeddings_static)
 
 IMG_START = '<img>'
 IMG_END = '</img>'
@@ -49,6 +73,9 @@ IMG_CONTEXT = '<IMG_CONTEXT>'
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+
+is_hpu = current_platform.is_hpu()
+is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
 
 
 class InternVLImagePixelInputs(TypedDict):
@@ -289,6 +316,313 @@ def video_to_pixel_values_internvl(
     return pixel_values
 
 
+def _patched_close(self):
+    """Patched close method that handles 
+    None cpp_pipe_manager_list during shutdown"""
+    try:
+        # Check if cpp_pipe_manager_list exists and is not None
+        if cpp_pipe_manager_list is not None and \
+            self._pm_ in cpp_pipe_manager_list:
+            cpp_pipe_manager_list.remove(self._pm_)
+    except (TypeError, AttributeError):
+        # Handle case where cpp_pipe_manager_list is None or not iterable
+        pass
+
+    # Clean up the pipe manager
+    if self._pm_ is not None:
+        self._pm_.close()
+        self._pm_ = None
+
+
+pipe_manager.close = _patched_close
+
+# Queue shared between external reader and mediapipe call
+shared_q = Queue()
+
+
+class MediaPytorchIterator(MediaGenericPytorchIterator):
+
+    def __init__(self, mediapipe):
+        super().__init__(mediapipe=mediapipe, device="hpu", fw_type="PYT_FW")
+
+
+class external_reader(media_ext_reader_op_impl):
+
+    def __init__(self, params, fw_params):
+        self.batch_size = fw_params.batch_size
+        self.max_file = ""
+        self.num_batches = 1
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        return self.num_batches
+
+    def __next__(self):
+        img_list = shared_q.get()
+        for i in range(len(img_list)):
+            # NOTE: this padding is needed because of HW alignment requirement
+            rem = len(img_list[i]) % 64
+            pad = (64 - rem) % 64
+            if pad:
+                img_list[i] = np.pad(img_list[i], (0, pad), 'constant')
+        return img_list
+
+    def get_media_output_type(self):
+        return ro.BUFFER_LIST
+
+    def get_largest_file(self):
+        return self.max_file
+
+    def gen_output_info(self):
+        out_info = []
+        o = media_ext_reader_op_tensor_info(
+            dt.NDT, np.array([self.batch_size], dtype=np.uint32), "")
+        out_info.append(o)
+        return out_info
+
+
+class hpuMediaPipe(MediaPipe):
+
+    def __init__(self, device, queue_depth, batch_size, num_threads, op_device,
+                 img_height, img_width):
+        super().__init__(device, queue_depth, batch_size, num_threads,
+                         self.__class__.__name__)
+
+        mediapipe_seed = int(time.time_ns() % (2**31 - 1))
+
+        self.input = fn.MediaExtReaderOp(impl=external_reader,
+                                         num_outputs=1,
+                                         seed=mediapipe_seed,
+                                         device=op_device)
+        self.decode = fn.ImageDecoder(device="hpu",
+                                      output_format=it.RGB_I,
+                                      resize=[img_width, img_height])
+
+        self.mean_node = fn.MediaConst(data=np.array([
+            IMAGENET_MEAN[0] * 255.0, IMAGENET_MEAN[1] * 255.0,
+            IMAGENET_MEAN[2] * 255.0
+        ],
+                                                     dtype=dt.FLOAT32),
+                                       shape=[1, 1, 3],
+                                       dtype=dt.FLOAT32)
+
+        self.std_node = fn.MediaConst(data=np.array([
+            1.0 / (IMAGENET_STD[0] * 255.0), 1.0 /
+            (IMAGENET_STD[1] * 255.0), 1.0 / (IMAGENET_STD[2] * 255.0)
+        ],
+                                                    dtype=dt.FLOAT32),
+                                      shape=[1, 1, 3],
+                                      dtype=dt.FLOAT32)
+
+        self.cmn = fn.CropMirrorNorm(crop_w=img_width,
+                                     crop_h=img_height,
+                                     dtype=dt.FLOAT32,
+                                     device="hpu")
+
+        self.transpose = fn.Transpose(
+            device="hpu",
+            tensorDim=4,
+            permutation=[1, 2, 0, 3]  #NCHW
+        )
+
+    def definegraph(self):
+        images = self.input()
+        images = self.decode(images)
+        mean = self.mean_node()
+        std = self.std_node()
+        images = self.cmn(images, mean, std)
+        images = self.transpose(images)
+
+        # Return the full processed image - we'll do tiling in Python
+        return images
+
+
+# -----------------------------------------------------------------------------
+# MediaPipe manager (persist pipes/iterators)
+# -----------------------------------------------------------------------------
+@dataclass
+class _PipeState:
+    pipe: hpuMediaPipe | None = None
+    it: MediaGenericPytorchIterator | None = None
+    bsz: int | None = None
+    H: int | None = None
+    W: int | None = None
+
+
+class MediaPipeTiler:
+    """Owns and reuses MediaPipe pipes/iterators for main path"""
+
+    def __init__(self) -> None:
+        self._main = _PipeState()
+
+    def _rebuild(self, st: _PipeState, *, bsz: int, H: int, W: int) -> None:
+        if st.pipe is not None:
+            with contextlib.suppress(BaseException):
+                st.pipe.close()
+        pipe = hpuMediaPipe("legacy", 0, bsz, 1, "cpu", H, W)
+        pipe.build()
+        st.pipe, st.it, st.bsz, st.H, st.W = pipe, iter(
+            MediaPytorchIterator(pipe)), bsz, H, W
+
+    def ensure_main(
+            self, *, bsz: int, H: int,
+            W: int) -> tuple[hpuMediaPipe, MediaGenericPytorchIterator]:
+        st = self._main
+        if st.pipe is None or st.bsz != bsz or st.H != H or st.W != W:
+            self._rebuild(st, bsz=bsz, H=H, W=W)
+        return st.pipe, st.it  # type: ignore[return-value]
+
+    def reset_iter(self) -> None:
+        st = self._main
+        if st.pipe is not None:
+            st.it = iter(MediaPytorchIterator(st.pipe))
+
+    def close_all(self) -> None:
+        st = self._main
+        try:
+            if st.pipe is not None:
+                st.pipe.close()
+        except Exception:
+            pass
+        finally:
+            st.pipe = None
+            st.it = None
+            st.bsz = st.H = st.W = None
+
+
+_MP = MediaPipeTiler()
+atexit.register(_MP.close_all)
+
+
+def get_image_info(data):
+    # Get image info using PIL without decoding
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            return {'format': img.format, 'size': img.size, 'mode': img.mode}
+    except Exception as e:
+        raise ValueError(
+            f"Input image bitstream is not in supported format: {str(e)}"
+        ) from None
+
+
+def preprocess_images(
+    images,
+    target_ratios: list[tuple[int, int]],
+    patch_size=448,
+    use_thumbnail=False,
+):
+    batch_size = 0
+
+    # validate images and create batches
+    img_size = None
+    img_sizes = []
+    batch_sizes = []
+    for img in images:
+        img_info = get_image_info(img)
+        if not (img_info['format'] == 'JPEG' and img_info['mode'] == 'RGB'):
+            raise ValueError(
+                f"HPU media pipeline only supports JPEG images in RGB mode. \
+                    Detected format={img_info['format']}, \
+                    mode={img_info['mode']}")
+        if img_size is None:
+            img_size = img_info['size']
+        else:
+            if img_info['size'] != img_size:
+                img_sizes.append(img_size)
+                batch_sizes.append(batch_size)
+                batch_size = 0
+                img_size = img_info['size']
+        batch_size += 1
+    img_sizes.append(img_size)
+    batch_sizes.append(batch_size)
+
+    image_num_patches = torch.zeros(len(images), dtype=torch.int64)
+
+    batch_patches = []
+    image_num_patches_idx = 0
+    for batch_size, img_size in zip(batch_sizes, img_sizes):
+        # calculate the number of blocks without thumbnail
+        blocks, target_width, target_height = calculate_internvl_targets(
+            orig_width=img_size[0],
+            orig_height=img_size[1],
+            target_ratios=target_ratios,
+            image_size=patch_size,
+            use_thumbnail=False,
+        )
+
+        # if batch, H, W is changed, create new one
+        main_pipe, main_iter = _MP.ensure_main(bsz=batch_size,
+                                               H=target_height,
+                                               W=target_width)
+
+        img_list = np.empty(shape=[
+            batch_size,
+        ], dtype=object)
+        for i in range(batch_size):
+            img_list[i] = np.frombuffer(images[i], np.uint8)
+
+        shared_q.put(img_list)
+        try:
+            processed_images = next(main_iter)[0]
+        except StopIteration:
+            _MP.reset_iter()
+            _, main_iter = _MP.ensure_main(bsz=batch_size,
+                                           H=target_height,
+                                           W=target_width)
+            processed_images = next(main_iter)[0]
+        finally:
+            shared_q.task_done()
+
+        # tiling vectorization:
+        # [N,C,H,W] -> [N,Ty,Tx,C,ps,ps] -> [N, T, C, ps, ps]
+        N, C, H, W = processed_images.shape
+        Ty, Tx = H // patch_size, W // patch_size
+        T = Ty * Tx
+
+        use_thumb_now = use_thumbnail and (T > 1)
+
+        x = processed_images.view(N, C, Ty, \
+                                  patch_size, Tx, patch_size) \
+                              .permute(0, 2, 4, 1, 3, 5) \
+                              .contiguous() \
+                              .view(N, T, C, \
+                                    patch_size, patch_size)  # [N,T,C,ps,ps]
+
+        if use_thumb_now:
+            # [N,3,ps,ps]
+            thumbs_batch = F.interpolate(processed_images,
+                                         size=(patch_size, patch_size),
+                                         mode="bilinear",
+                                         align_corners=False)
+
+        num_patches = T + 1 if use_thumb_now else T
+        image_num_patches[image_num_patches_idx:image_num_patches_idx +
+                          batch_size] = num_patches
+        image_num_patches_idx += batch_size
+
+        # consist tensor batch based (tile + thumbnail)
+        if use_thumb_now:
+            out = torch.empty((N, T + 1, C, patch_size, patch_size),
+                              dtype=processed_images.dtype,
+                              device=processed_images.device)
+            out[:, :T] = x
+            out[:, T] = thumbs_batch
+            out = out.view(N * (T + 1), C, patch_size,
+                           patch_size)  # [N*(T+1),C,ps,ps]
+        else:
+            # no thumbnail (T==1 or off)
+            out = x.view(N * T, C, patch_size, patch_size)  # [N*T,C,ps,ps]
+
+        batch_patches.append(out)
+
+    patches_flat = (torch.cat(batch_patches, dim=0)
+                    if batch_patches else torch.empty(
+                        (0, 3, patch_size, patch_size), dtype=torch.float32))
+    return patches_flat, image_num_patches
+
+
 class BaseInternVLProcessor(ABC):
     """
     This model doesn't define its own HF processor,
@@ -444,25 +778,63 @@ class BaseInternVLProcessor(ABC):
         if len(images) == 0:
             image_inputs = {}
         else:
-            pixel_values_lst = self._images_to_pixel_values_lst(
-                images,
-                min_dynamic_patch=min_dynamic_patch,
-                max_dynamic_patch=max_dynamic_patch,
-                dynamic_image_size=dynamic_image_size,
-            )
-            image_inputs: dict[str, NestedTensors] = {
-                "pixel_values_flat":
-                torch.cat(pixel_values_lst),
-                "image_num_patches":
-                torch.tensor([len(item) for item in pixel_values_lst]),
-            }
+            use_mediapipe = os.getenv("VLLM_USE_MEDIA_PIPELINE",
+                                      "false").lower() in ("1", "true", "yes")
+            if use_mediapipe:
+                # Use HPU media pipeline for image preprocessing
+                min_num, max_num = self.resolve_min_max_num(
+                    min_dynamic_patch=min_dynamic_patch,
+                    max_dynamic_patch=max_dynamic_patch,
+                    dynamic_image_size=dynamic_image_size,
+                    use_thumbnail=False,  # Applied in image_to_pixel_values
+                )
 
-            for pixel_values in pixel_values_lst:
-                num_patches = pixel_values.shape[0]
-                feature_size = num_patches * self.num_image_token
+                target_ratios = get_internvl_target_ratios(min_num, max_num)
 
-                image_repl = self.get_image_repl(feature_size, num_patches)
-                text = [t.replace('<image>', image_repl.full, 1) for t in text]
+                pixel_values_flat, image_num_patches = preprocess_images(
+                    images,
+                    target_ratios=target_ratios,
+                    patch_size=self.image_size,
+                    use_thumbnail=self.use_thumbnail,
+                )
+
+                image_inputs = {
+                    "pixel_values_flat": pixel_values_flat,
+                    "image_num_patches": image_num_patches,
+                }
+
+                for i in range(len(images)):
+                    num_patches = image_num_patches[i].item()
+                    feature_size = num_patches * self.num_image_token
+
+                    image_repl = self.get_image_repl(feature_size, num_patches)
+                    text = [
+                        t.replace('<image>', image_repl.full, 1) for t in text
+                    ]
+
+            else:
+                pixel_values_lst = self._images_to_pixel_values_lst(
+                    images,
+                    min_dynamic_patch=min_dynamic_patch,
+                    max_dynamic_patch=max_dynamic_patch,
+                    dynamic_image_size=dynamic_image_size,
+                )
+                image_inputs: dict[str, NestedTensors] = {
+                    "pixel_values_flat":
+                    torch.cat(pixel_values_lst),
+                    "image_num_patches":
+                    torch.tensor([len(item) for item in pixel_values_lst]),
+                }
+
+                for pixel_values in pixel_values_lst:
+                    num_patches = pixel_values.shape[0]
+                    feature_size = num_patches * self.num_image_token
+
+                    image_repl = self.get_image_repl(feature_size, num_patches)
+                    text = [
+                        t.replace('<image>', image_repl.full, 1) for t in text
+                    ]
+
         return text, image_inputs
 
     def _make_batch_input(self,
@@ -476,7 +848,8 @@ class BaseInternVLProcessor(ABC):
     def __call__(
         self,
         text: Optional[Union[str, list[str]]] = None,
-        images: Optional[Union[Image.Image, list[Image.Image]]] = None,
+        images: Optional[Union[Image.Image, list[Image.Image], bytes,
+                               list[bytes]]] = None,
         min_dynamic_patch: Optional[int] = None,
         max_dynamic_patch: Optional[int] = None,
         dynamic_image_size: Optional[bool] = None,
@@ -595,7 +968,8 @@ class InternVLProcessor(BaseInternVLProcessor):
     def __call__(
         self,
         text: Optional[Union[str, list[str]]] = None,
-        images: Optional[Union[Image.Image, list[Image.Image]]] = None,
+        images: Optional[Union[Image.Image, list[Image.Image], bytes,
+                               list[bytes]]] = None,
         videos: Optional[Union[npt.NDArray, list[npt.NDArray]]] = None,
         min_dynamic_patch: Optional[int] = None,
         max_dynamic_patch: Optional[int] = None,
@@ -1062,6 +1436,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         self.visual_token_mask = None
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
+        if is_hpu:
+            self.graphed_multimodal_buckets = None
 
     def _patch_quant_config(self, config: PretrainedConfig,
                             quant_config: QuantizationConfig):
@@ -1127,16 +1503,77 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         return x
 
     def extract_feature(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        vit_embeds = self.vision_model(pixel_values=pixel_values)
-        vit_embeds = vit_embeds[:, 1:, :]
+        if is_hpu:
+            if self.vision_buckets.multimodal_buckets:
+                batch_breakdown = greedy_plan(pixel_values.shape[0], \
+                        self.vision_buckets.multimodal_buckets)
+            else:
+                batch_breakdown = [pixel_values.shape[0]]
 
-        h = w = int(vit_embeds.shape[1]**0.5)
-        vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], h, w, -1)
-        vit_embeds = self.pixel_shuffle(vit_embeds,
-                                        scale_factor=self.downsample_ratio)
-        vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], -1,
-                                        vit_embeds.shape[-1])
-        vit_embeds = self.mlp1(vit_embeds)
+            total_mb = len(batch_breakdown)
+            need_copy = total_mb > 1
+
+            start_idx = 0
+            vit_embeds_minibatches = []
+
+            for mb_idx, i in enumerate(batch_breakdown):
+                end_idx = start_idx + i
+                batch_sliced_pixel_values = \
+                        pixel_values[start_idx:end_idx, ...]
+                if is_lazy:
+                    vit_embeds_minibatch = \
+                        self.vision_model(
+                            pixel_values=batch_sliced_pixel_values,
+                            bypass_hpu_graphs=i
+                            not in self.graphed_multimodal_buckets
+                            and len(self.graphed_multimodal_buckets) > 0)
+                else:
+                    vit_embeds_minibatch = \
+                        self.vision_model(
+                            pixel_values=batch_sliced_pixel_values)
+
+                vit_embeds_minibatch = vit_embeds_minibatch[:, 1:, :]
+
+                h = w = int(vit_embeds_minibatch.shape[1]**0.5)
+                vit_embeds_minibatch = vit_embeds_minibatch.reshape(
+                    vit_embeds_minibatch.shape[0], h, w, -1)
+                vit_embeds_minibatch = self.pixel_shuffle(
+                    vit_embeds_minibatch, scale_factor=self.downsample_ratio)
+                vit_embeds_minibatch = vit_embeds_minibatch.reshape(
+                    vit_embeds_minibatch.shape[0], -1,
+                    vit_embeds_minibatch.shape[-1])
+
+                if is_lazy:
+                    proj = self.mlp1(
+                        vit_embeds_minibatch,
+                        bypass_hpu_graphs=i
+                        not in self.graphed_multimodal_buckets
+                        and len(self.graphed_multimodal_buckets) > 0)
+                else:
+                    proj = self.mlp1(vit_embeds_minibatch)
+
+                if need_copy and (mb_idx < total_mb - 1):
+                    proj_safe = torch.empty_like(proj)
+                    proj_safe.copy_(proj)
+                    if is_lazy:
+                        import habana_frameworks.torch as htorch
+                        htorch.core.mark_step()
+                    vit_embeds_minibatches.append(proj_safe)
+                else:
+                    vit_embeds_minibatches.append(proj)
+
+                start_idx = end_idx
+            vit_embeds = torch.cat(vit_embeds_minibatches, dim=0)
+        else:
+            vit_embeds = self.vision_model(pixel_values=pixel_values)
+            vit_embeds = vit_embeds[:, 1:, :]
+            h = w = int(vit_embeds.shape[1]**0.5)
+            vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], h, w, -1)
+            vit_embeds = self.pixel_shuffle(vit_embeds,
+                                            scale_factor=self.downsample_ratio)
+            vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], -1,
+                                            vit_embeds.shape[-1])
+            vit_embeds = self.mlp1(vit_embeds)
         return vit_embeds
 
     def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:
@@ -1180,8 +1617,11 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
         image_token_id = kwargs["image_token_id"]
         assert isinstance(image_token_id, torch.Tensor)
-        self.img_context_token_id = image_token_id.flatten().unique().item()
-
+        if is_hpu:
+            self.img_context_token_id = image_token_id.flatten()
+        else:
+            self.img_context_token_id = image_token_id.flatten().unique().item(
+            )
         if pixel_values_flat is not None:
             if not isinstance(pixel_values_flat, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
@@ -1207,7 +1647,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             self, **kwargs: object) -> Optional[InternVLVideoPixelInputs]:
         pixel_values_flat_video = kwargs.pop("pixel_values_flat_video", None)
         video_num_patches = kwargs.pop("video_num_patches", None)
-        video_embeds = kwargs.pop("image_embeds", None)
+        video_embeds = kwargs.pop("video_embeds", None)
 
         if pixel_values_flat_video is None and video_embeds is None:
             return None
@@ -1306,7 +1746,9 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
     def get_multimodal_embeddings(
             self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
-
+        if is_hpu:
+            self.graphed_multimodal_buckets = kwargs.pop(
+                'graphed_multimodal_buckets', [])
         modalities = self._parse_and_validate_multimodal_inputs(**kwargs)
         if not modalities:
             return None
@@ -1328,6 +1770,21 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                 multimodal_embeddings += video_embeddings
 
         return multimodal_embeddings
+
+    def get_input_embeddings_hpu(
+        self,
+        input_ids: torch.Tensor,
+        image_index_tensor: torch.Tensor,
+        multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
+    ) -> torch.Tensor:
+        inputs_embeds = self.language_model.get_input_embeddings(input_ids)
+        if multimodal_embeddings is not None:
+            inputs_embeds = merge_multimodal_embeddings_static(
+                image_index_tensor,
+                inputs_embeds,
+                multimodal_embeddings,
+            )
+        return inputs_embeds
 
     def get_input_embeddings(
         self,
@@ -1367,10 +1824,11 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
-            vision_embeddings = self.get_multimodal_embeddings(**kwargs)
-            inputs_embeds = self.get_input_embeddings(input_ids,
-                                                      vision_embeddings)
-            input_ids = None
+            if not is_hpu:
+                vision_embeddings = self.get_multimodal_embeddings(**kwargs)
+                inputs_embeds = self.get_input_embeddings(
+                    input_ids, vision_embeddings)
+                input_ids = None
 
         forward_kwargs = {
             "input_ids": input_ids,
