@@ -463,12 +463,13 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
         if layer.model_type in ["gpt_oss"]:
+            from vllm.utils import round_up
             # Fused gate_up_proj (column parallel)
             w13_weight = torch.nn.Parameter(
                 torch.empty(
                     num_experts,
                     hidden_size,
-                    2 * intermediate_size_per_partition,
+                    2 * round_up(intermediate_size_per_partition,32),
                     # hidden_size,
                     dtype=params_dtype),
                 requires_grad=False)
@@ -477,7 +478,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 
             w13_bias = torch.nn.Parameter(torch.zeros(
                 num_experts,
-                2 * intermediate_size_per_partition,
+                2 * round_up(intermediate_size_per_partition,32),
                 dtype=params_dtype),
                                           requires_grad=False)
             layer.register_parameter("w13_bias", w13_bias)
@@ -488,7 +489,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 torch.empty(
                     num_experts,
                     # hidden_size,
-                    intermediate_size_per_partition,
+                    round_up(intermediate_size_per_partition, 32),
                     hidden_size,
                     dtype=params_dtype),
                 requires_grad=False)
