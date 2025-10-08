@@ -1802,8 +1802,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
-        if seq_group_metadata.multi_modal_data and self.is_mm_optimized and \
-            'InternVLChatModel' in str(type(self.model.model)):
+        if (seq_group_metadata.multi_modal_data and self.is_mm_optimized
+                and ('InternVLChatModel' in str(type(self.model.model))
+                     or 'Ovis2_5' in str(type(self.model.model)))):
             is_image_flatten = (
                 input_tokens_tensor == self.image_token_id).flatten()
             image_index_tensor = is_image_flatten.nonzero().squeeze(-1)
@@ -2769,7 +2770,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         elif "Ovis2_5" in str(type(self.model.model)):
             vit_cfg = self.model.model.config.vit_config
             self.image_token_id = getattr(self.model.model.config,
-                                          "image_token_id", -200)
+                                          "image_token_id", 151667)
             image_h = 128
             image_w = int(img_args / image_h)
             num_image_tokens = int(image_h * image_w //
