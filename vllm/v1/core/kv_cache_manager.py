@@ -387,9 +387,10 @@ class KVCacheManager:
 
     def cache_blocks(self, request: Request, block_hashes: list[BlockHash],
                      num_computed_tokens: int) -> None:
-        """Cache the blocks for the request."""
-        self.coordinator.cache_blocks(request, block_hashes,
-                                      num_computed_tokens)
+        """Cache the blocks for the request, if enabled."""
+        if self.enable_caching:
+            self.coordinator.cache_blocks(request, block_hashes,
+                                          num_computed_tokens)
 
     def create_empty_block_list(self) -> KVCacheBlocks:
         """Creates a new KVCacheBlocks instance with no blocks."""

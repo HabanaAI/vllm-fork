@@ -319,7 +319,7 @@ async def async_request_openai_completions(
                                     first_chunk_received = True
                                     ttft = time.perf_counter() - st
                                     output.ttft = ttft
-                                    print(f'libin debug backend request {ttft=}')
+                                    # print(f'libin debug backend request {ttft=}')
                                     sys.stdout.flush()
                                 # Decoding phase
                                 else:

@@ -884,7 +884,7 @@ class DPEngineCoreProc(EngineCoreProc):
                          EngineCoreOutputs(wave_complete=self.current_wave)))
                 self.current_wave += 1
             s5 = time.perf_counter()
-            logger.info(f"libin debug core run_busy {os.getenv('RANK')| total:{s5-s1}| input:{s2-s1}| step:{s3-s2} | after_s:{s4-s3} | not_finished{s5-s4}}")
+            # logger.info(f"libin debug core run_busy {os.getenv('RANK')| total:{s5-s1}| input:{s2-s1}| step:{s3-s2} | after_s:{s4-s3} | not_finished{s5-s4}}")
             
     def _has_global_unfinished_reqs(self, local_unfinished: bool) -> bool:
 

@@ -244,7 +244,7 @@ class NixlConnector(KVConnectorBase_V1):
         if self.connector_worker.use_host_buffer and \
            self.connector_worker.copy_blocks:
             self.connector_worker.save_kv_to_host(self._connector_metadata)
-            logger.info(f"libin debug wait_for_save {os.getenv('RANK')}, takes {time.perf_counter() - s1}")
+            # logger.info(f"libin debug wait_for_save {os.getenv('RANK')}, takes {time.perf_counter() - s1}")
 
 class NixlConnectorScheduler:
     """Implementation of Scheduler side methods"""
@@ -726,7 +726,7 @@ class NixlConnectorWorker:
                 with self._handshake_lock:
                     nixl2 = time.perf_counter()
                     global nixl1
-                    logger.info(f"libin debug done_callback {os.getenv('RANK')}, HANDSHAKE takes:{nixl2-nixl1}")
+                    # logger.info(f"libin debug done_callback {os.getenv('RANK')}, HANDSHAKE takes:{nixl2-nixl1}")
                     del self._handshake_futures[eid]
                     try:
                         self._remote_agents[eid] = f.result()
@@ -1087,7 +1087,7 @@ class NixlConnectorWorker:
         for req_id, meta in metadata.reqs_to_save.items():
             if req_id not in self.req_send_time.keys():
                 self.req_send_time[req_id] = time.perf_counter()
-                logger.info(f"libin debug save_kv_to_host starts{os.getenv('RANK')} {req_id=} ")
+                # logger.info(f"libin debug save_kv_to_host starts{os.getenv('RANK')} {req_id=} ")
 
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
@@ -1097,7 +1097,7 @@ class NixlConnectorWorker:
             # blocking
             self.copy_blocks(self.block_size, self.device_kv_caches, self.host_xfer_buffers,
                              meta.local_block_ids, meta.local_block_ids, "d2h")
-            logger.info(f"libin debug save_kv_to_host {os.getenv('RANK')} time:{time.perf_counter()-self.req_send_time[req_id]}")
+            # logger.info(f"libin debug save_kv_to_host {os.getenv('RANK')} time:{time.perf_counter()-self.req_send_time[req_id]}")
 
     def get_finished(self) -> tuple[set[str], set[str]]:
         """
@@ -1140,7 +1140,7 @@ class NixlConnectorWorker:
                 meta = self._recving_metadata.pop(req_id)
                 assert meta, f"{req_id} not found in recving_metadata list"
                 self.sync_recved_kv_to_device(req_id, meta)
-                logger.info(f"libin debug get_finished {os.getenv('RANK')}, d2h {time.perf_counter()-s2}| {req_id=}")
+                # logger.info(f"libin debug get_finished {os.getenv('RANK')}, d2h {time.perf_counter()-s2}| {req_id=}")
 
         # Handle timeout to avoid stranding blocks on remote.
         now = time.perf_counter()
@@ -1201,7 +1201,7 @@ class NixlConnectorWorker:
                 xfer_state = self.nixl_wrapper.check_xfer_state(handle)
                 if xfer_state == "DONE":
                     xfer_end_time = time.perf_counter()
-                    logger.info(f"libin debug _pop_done_transfers: {req_id=}|{handle=}|{xfer_end_time=}|{xfer_end_time-_xfer_stime=}")
+                    # logger.info(f"libin debug _pop_done_transfers: {req_id=}|{handle=}|{xfer_end_time=}|{xfer_end_time-_xfer_stime=}")
                     self.nixl_wrapper.release_xfer_handle(handle)
                 elif xfer_state == "PROC":
                     in_progress = True
@@ -1247,7 +1247,7 @@ class NixlConnectorWorker:
         for req_id, meta in metadata.reqs_to_recv.items():
             if req_id not in self.req_recv_time.keys():
                 self.req_recv_time[req_id] = time.perf_counter()
-                logger.info(f"libin debug start_load_kv starts {os.getenv('RANK')} for {req_id=}")
+                # logger.info(f"libin debug start_load_kv starts {os.getenv('RANK')} for {req_id=}")
             remote_engine_id = meta.remote_engine_id
             logger.debug(
                 "start_load_kv for request %s from remote engine %s. "
@@ -1261,7 +1261,7 @@ class NixlConnectorWorker:
                 with self._handshake_lock:
                     if remote_engine_id not in self._remote_agents:
                         s2 = time.perf_counter()
-                        logger.info(f"libin debug start_load_kv  {os.getenv('RANK')}, start handleshake before {s2 - s1} {req_id=}")
+                        # logger.info(f"libin debug start_load_kv  {os.getenv('RANK')}, start handleshake before {s2 - s1} {req_id=}")
                         self._background_nixl_handshake(
                             req_id, remote_engine_id, meta)
                         continue
