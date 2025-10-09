@@ -597,12 +597,24 @@ class GptOssForCausalLM(nn.Module):
         new_dict = dict()
 
         for name, weight in weights:
-            print(name, " : ", weight.shape, weight.dtype)  # --- IGNORE ---
             if ".experts.gate_up_proj_blocks" in name and "bias" not in name:
                 # Handle MLP gate and up projection weights
                 new_name = name.replace(".experts.gate_up_proj_blocks",
                                         ".experts.w13_weight")
-                new_dict[new_name] = weight
+                if use_ep:
+                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
+                else:
+                    narrow_weight = weight[:, 2 * tp_rank_start:2 * tp_rank_end, :, :]
+                narrow_weight.contiguous()
+                if os.getenv("PT_HPU_GPT_MOE_WT_INTERLEAVED",
+                             "").lower() in ("0", "false"):
+                    gate_weight = narrow_weight[:, 0::2, :, :]
+                    up_weight = narrow_weight[:, 1::2, :, :]
+                    weight_shape = narrow_weight.shape
+                    pad = torch.zeros(weight_shape[0], per_rank_intermediate_size-tp_rank_end+tp_rank_start, weight_shape[2], weight_shape[3], dtype=narrow_weight.dtype, device=narrow_weight.device)
+                    narrow_weight = torch.cat([gate_weight, pad, up_weight, pad], dim=1)
+                narrow_weight.contiguous()
+                new_dict[new_name] = narrow_weight
 
             elif ".experts.gate_up_proj_scales" in name and "bias" not in name:
                 # Handle MLP gate and up projection weights
@@ -610,19 +622,6 @@ class GptOssForCausalLM(nn.Module):
                                         ".experts.w13_weight")
 
                 param = params_dict[new_name]
-                arg1 = new_dict[new_name]
-                if use_ep:
-                    narrow_arg1 = arg1[ep_rank_start:ep_rank_end, ...]
-                else:
-                    narrow_arg1 = arg1[:, 2 * tp_rank_start:2 * tp_rank_end, :, :]
-                narrow_arg1.contiguous()
-                if os.getenv("PT_HPU_GPT_MOE_WT_INTERLEAVED",
-                             "").lower() in ("0", "false"):
-                    gate_arg1 = narrow_arg1[:, 0::2, :, :]
-                    up_arg1 = narrow_arg1[:, 1::2, :, :]
-                    pad = torch.zeros(128, per_rank_intermediate_size-tp_rank_end+tp_rank_start, 90, 16, dtype=narrow_arg1.dtype, device=narrow_arg1.device)
-                    narrow_arg1 = torch.cat([gate_arg1, pad, up_arg1, pad], dim=1)
-                narrow_arg1.contiguous()
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
@@ -631,10 +630,11 @@ class GptOssForCausalLM(nn.Module):
                              "").lower() in ("0", "false"):
                     gate_weight = narrow_weight[:, 0::2, :]
                     up_weight = narrow_weight[:, 1::2, :]
-                    pad = torch.zeros(128, per_rank_intermediate_size-tp_rank_end+tp_rank_start, 90, dtype=narrow_weight.dtype, device=narrow_weight.device)
+                    weight_shape = narrow_weight.shape
+                    pad = torch.zeros(weight_shape[0], per_rank_intermediate_size-tp_rank_end+tp_rank_start, weight_shape[2], dtype=narrow_weight.dtype, device=narrow_weight.device)
                     narrow_weight = torch.cat([gate_weight, pad, up_weight, pad], dim=1)
                 narrow_weight.contiguous()
-                weight = self.convert_moe_packed_tensors(narrow_arg1, narrow_weight)
+                weight = self.convert_moe_packed_tensors(new_dict[new_name], narrow_weight)
                 param.copy_(weight)
                 loaded_params.add(new_name)
 
@@ -642,7 +642,12 @@ class GptOssForCausalLM(nn.Module):
                 # Handle MLP down projection weights
                 new_name = name.replace(".experts.down_proj_blocks",
                                         ".experts.w2_weight")
-                new_dict[new_name] = weight
+                if use_ep:
+                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
+                else:
+                    narrow_weight = weight[:, :, tp_rank_start//mxfp4_block:tp_rank_end//mxfp4_block, :]
+                narrow_weight.contiguous()
+                new_dict[new_name] = narrow_weight
 
             elif ".experts.down_proj_scales" in name and "bias" not in name:
                 # Handle MLP down projection scales
@@ -650,18 +655,12 @@ class GptOssForCausalLM(nn.Module):
                                         ".experts.w2_weight")
 
                 param = params_dict[new_name]
-                arg1 = new_dict[new_name]
-                if use_ep:
-                    narrow_arg1 = arg1[ep_rank_start:ep_rank_end, ...]
-                else:
-                    narrow_arg1 = arg1[:, :, tp_rank_start//32:tp_rank_end//32, :]
-                narrow_arg1.contiguous()
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
-                    narrow_weight = weight[:, :, tp_rank_start//32:tp_rank_end//32]
+                    narrow_weight = weight[:, :, tp_rank_start//mxfp4_block:tp_rank_end//mxfp4_block]
                 narrow_weight.contiguous()
-                weight = self.convert_moe_packed_tensors(narrow_arg1, narrow_weight)
+                weight = self.convert_moe_packed_tensors(new_dict[new_name], narrow_weight)
                 param[:, :tp_rank_end - tp_rank_start,:] = weight
                 loaded_params.add(new_name)
 
@@ -679,7 +678,8 @@ class GptOssForCausalLM(nn.Module):
                              "").lower() in ("0", "false"):
                     gate_bias = narrow_weight[:, 0::2]
                     up_bias = narrow_weight[:, 1::2]
-                    pad = torch.zeros(128, per_rank_intermediate_size-tp_rank_end+tp_rank_start, dtype=narrow_weight.dtype, device=narrow_weight.device)
+                    weight_shape = weight.shape
+                    pad = torch.zeros(weight_shape[0], per_rank_intermediate_size-tp_rank_end+tp_rank_start, dtype=narrow_weight.dtype, device=narrow_weight.device)
                     narrow_weight = torch.cat([gate_bias, pad, up_bias, pad], dim=1)
                 param = params_dict[new_name]
                 param.copy_(narrow_weight)
