@@ -26,8 +26,10 @@ Help() {
     echo "    The environment variable 'QUANT_CONFIG' will override this option."
     echo "-i  Input range, str, format='input_min,input_max', default='4,1024'"
     echo "    Make sure the range cover all the possible lengths from the benchmark/client."
-    echo "-p  Max number of prefill sequences, int, default=${PREFERED_BATCHED_TOKENS}/input_min"
-    echo "    Used to control the max batch size for prefill to optimize the TTFT."
+    echo "-p  Max number of the prefill sequences, int, default=1"
+    echo "    Used to control the max batch size for prefill to balance the TTFT and throughput."
+    echo "    The default value of 1 is used to optimize the TTFT."
+    echo "    Set to ${PREFERED_BATCHED_TOKENS}/input_min to optimize the throughput for short prompts."
     echo "-o  Output range, str, format='output_min,output_max', default='4,2048'"
     echo "    Make sure the range cover all the possible lengths from the benchmark/client."
     echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_NUM_SEQS}"
@@ -136,7 +138,7 @@ dtype=${dtype:-"bfloat16"}
 quant_config=${quant_config:-""}
 input_min=${input_min:-"4"}
 input_max=${input_max:-"1024"}
-max_num_prefill_seqs=${max_num_prefill_seqs:-""}
+max_num_prefill_seqs=${max_num_prefill_seqs:-"1"}
 output_min=${output_min:-"4"}
 output_max=${output_max:-"2048"}
 max_num_seqs=${max_num_seqs:-$PREFERED_NUM_SEQS}
@@ -178,7 +180,7 @@ python3 -m vllm.entrypoints.openai.api_server \
     --model "${weights_path}" \
     --dtype "${DATA_TYPE}" \
     --max-num-seqs "${max_num_seqs}" \
-    --max-num-prefill-seqs "${max_num_prefill_seqs}" \
+    --max-num-prefill-seqs "${prompt_bs_max}" \
     --max-num-batched-tokens "${max_num_batched_tokens}" \
     --max-seq-len-to-capture "${max_seq_len_to_capture}" \
     --gpu-memory-utilization "${gpu_memory_utilization}" \
