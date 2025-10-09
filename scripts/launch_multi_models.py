@@ -28,12 +28,12 @@
 #    performance
 
 import argparse
+import json
 import os
 import signal
 import subprocess
-import time
-import json
 import sys
+import time
 
 import requests
 
@@ -94,43 +94,67 @@ Examples:
   VLLM_SKIP_WARMUP=false --env PT_HPU_LAZY_MODE=1
         """)
 
-    parser.add_argument("--models", nargs="+", required=True,
+    parser.add_argument("--models",
+                        nargs="+",
+                        required=True,
                         help="List of models to load (required)")
-    parser.add_argument("--force-restart", action="store_true",
+    parser.add_argument("--force-restart",
+                        action="store_true",
                         help="Force restart the server")
-    parser.add_argument("--port", type=int, default=8000,
+    parser.add_argument("--port",
+                        type=int,
+                        default=8000,
                         help="Port for the vLLM server (default: 8000)")
-    parser.add_argument("--stop-all", action="store_true",
+    parser.add_argument("--stop-all",
+                        action="store_true",
                         help="Stop all running models")
-    parser.add_argument("--max-model-len", type=int, default=512,
+    parser.add_argument("--max-model-len",
+                        type=int,
+                        default=512,
                         help="Maximum model length (default: 512)")
-    parser.add_argument("--dtype", type=str, default="bfloat16",
+    parser.add_argument("--dtype",
+                        type=str,
+                        default="bfloat16",
                         choices=["bfloat16", "float32"],
                         help="Data type (default: bfloat16)")
-    parser.add_argument("--gpu-memory-utilization", type=float, default=0.3,
-                        help="GPU memory utilization (0.0-1.0), auto-calculated"
-                             "if not specified")
-    parser.add_argument("--timeout", type=int, default=300,
-                        help="Server startup timeout in seconds (default: 300)")
-    parser.add_argument("--log-file", type=str, default=LOG_FILE,
+    parser.add_argument(
+        "--gpu-memory-utilization",
+        type=float,
+        default=0.3,
+        help="GPU memory utilization (0.0-1.0), auto-calculated"
+        "if not specified")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Server startup timeout in seconds (default: 300)")
+    parser.add_argument("--log-file",
+                        type=str,
+                        default=LOG_FILE,
                         help=f"Log file path (default: {LOG_FILE})")
 
     # Environment variable options
     env_group = parser.add_mutually_exclusive_group()
-    env_group.add_argument("--env-preset", type=str,
+    env_group.add_argument("--env-preset",
+                           type=str,
                            choices=["default", "performance"],
                            default="default",
                            help="Environment variable preset"
-                                "(default: default)")
-    env_group.add_argument("--env-config", type=str,
+                           "(default: default)")
+    env_group.add_argument("--env-config",
+                           type=str,
                            help="Path to JSON file containing environment "
-                                "variables")
+                           "variables")
 
-    parser.add_argument("--env", action="append", default=[],
-                        help="Set individual environment variable (can be used "
-                             "multiple times)")
+    parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        help="Set individual environment variable (can be used "
+        "multiple times)")
 
-    parser.add_argument("--list-env-presets", action="store_true",
+    parser.add_argument("--list-env-presets",
+                        action="store_true",
                         help="List available environment variable presets")
 
     return parser.parse_args()
@@ -153,7 +177,7 @@ def list_env_presets():
 def load_env_config(config_path: str) -> dict[str, str]:
     """Load environment variables from JSON config file."""
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             config = json.load(f)
             if not isinstance(config, dict):
                 raise ValueError("Config must be a dictionary")
@@ -247,8 +271,7 @@ def kill_existing_pid(pid):
 
 
 def launch_server(models, port, max_model_len, device, dtype,
-                  gpu_memory_utilization,
-                  env_vars, log_file, timeout):
+                  gpu_memory_utilization, env_vars, log_file, timeout):
     """Launch a vLLM server with customized configuration."""
 
     # Calculate memory ratio if not provided
@@ -264,14 +287,12 @@ def launch_server(models, port, max_model_len, device, dtype,
     print(f"  Port: {port}")
 
     command = [
-        "python3", "-m", "vllm.entrypoints.openai.mm_api_server",
-        "--port", str(port),
-        "--device", device,
-        "--dtype", dtype,
-        "--gpu-memory-utilization", str(gpu_memory_utilization),
-        "--use-v2-block-manager",
-        "--max-model-len", str(max_model_len),
-        "--models"
+        "python3", "-m", "vllm.entrypoints.openai.mm_api_server", "--port",
+        str(port), "--device", device, "--dtype", dtype,
+        "--gpu-memory-utilization",
+        str(gpu_memory_utilization), "--use-v2-block-manager",
+        "--max-model-len",
+        str(max_model_len), "--models"
     ]
     command += models
 
@@ -365,17 +386,15 @@ def main():
         kill_existing_pid(existing_pid)
 
     # Launch new server
-    success = launch_server(
-        models=args.models,
-        port=args.port,
-        max_model_len=args.max_model_len,
-        device="hpu",
-        dtype=args.dtype,
-        gpu_memory_utilization=args.gpu_memory_utilization,
-        env_vars=env_vars,
-        log_file=args.log_file,
-        timeout=args.timeout
-    )
+    success = launch_server(models=args.models,
+                            port=args.port,
+                            max_model_len=args.max_model_len,
+                            device="hpu",
+                            dtype=args.dtype,
+                            gpu_memory_utilization=args.gpu_memory_utilization,
+                            env_vars=env_vars,
+                            log_file=args.log_file,
+                            timeout=args.timeout)
 
     if success:
         get_running_models(args.port)
