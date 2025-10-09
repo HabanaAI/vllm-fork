@@ -1806,7 +1806,7 @@ class HPUModelRunner:
         if has_kv_transfer_group():
             get_kv_transfer_group().clear_connector_metadata()
         s2= time.perf_counter()
-        if token_ids_s and num_prefills > 0:
+        # if token_ids_s and num_prefills > 0:
             # logger.info(f"libin debug execute_model prompt {os.getenv('RANK')} {token_ids_s=} step time:{s2-s1}")
         return model_runner_output
     def kv_connector_no_forward(
