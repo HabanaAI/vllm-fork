@@ -34,7 +34,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # install Habana Software and common dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
+    --mount=type=bind,source=requirements,target=requirements \
     --mount=type=bind,source=requirements-hpu.txt,target=requirements-hpu.txt \
     pip install \
     -r requirements-hpu.txt
@@ -49,7 +49,7 @@ COPY csrc csrc
 COPY setup.py setup.py
 COPY cmake cmake
 COPY CMakeLists.txt CMakeLists.txt
-COPY requirements-common.txt requirements-common.txt
+COPY requirements requirements
 COPY requirements-hpu.txt requirements-hpu.txt
 COPY pyproject.toml pyproject.toml
 
