@@ -1544,6 +1544,64 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.mm_tokens_per_image = self.model.model.num_image_token
             self.model.model.vision_buckets = VisionBuckets(self.model.model)
 
+    def _compute_ovis_interleave_indices(self, grids, hidden_stride):
+        """
+        Compute indices for interleaving visual and indicator embeddings.
+        
+        Args:
+            grids: Either a list of tensors or a single tensor containing [t, h, w] for each image
+            hidden_stride: Stride value from vit_config
+        
+        Returns:
+            visual_to_flat_indices: Maps visual embeddings to positions in flat array
+            indicator_to_flat_indices: Maps indicator embeddings to positions in flat array
+        """
+        if isinstance(grids, (list, tuple)):
+            all_grids = []
+            for g in grids:
+                if isinstance(g, torch.Tensor):
+                    g_flat = g.reshape(-1, g.shape[-1])
+                    all_grids.append(g_flat)
+            grid_thws = torch.cat(all_grids, dim=0)
+        else:
+            grid_thws = grids.reshape(-1, grids.shape[-1])
+        
+        if grid_thws.shape[-1] != 3:
+            raise ValueError(f"Expected grids to have 3 values [t,h,w] in last dimension, got shape {grid_thws.shape}")
+        
+        split_sizes = ((grid_thws[:, 1] * grid_thws[:, 2]) // (hidden_stride**2)).tolist()
+        indicator_sizes = [2 if s > 1 else s + 2 for s in split_sizes]
+        
+        vis_dest_idx = []
+        ind_dest_idx = []
+        
+        flat_pos = 0
+        vis_offset = 0
+        ind_offset = 0
+        
+        for i, (vis_count, ind_count) in enumerate(zip(split_sizes, indicator_sizes)):
+            # Start indicator
+            ind_dest_idx.append(flat_pos)
+            flat_pos += 1
+            
+            # Vision tokens
+            for j in range(vis_count):
+                vis_dest_idx.append(flat_pos)
+                flat_pos += 1
+            
+            # End indicator
+            if ind_count > 1:
+                ind_dest_idx.append(flat_pos)
+                flat_pos += 1
+            
+            vis_offset += vis_count
+            ind_offset += ind_count
+        
+        visual_to_flat = torch.tensor(vis_dest_idx, dtype=torch.long, device='cpu')
+        indicator_to_flat = torch.tensor(ind_dest_idx, dtype=torch.long, device='cpu')
+        
+        return visual_to_flat, indicator_to_flat
+
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -1909,6 +1967,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
                                                             device=self.device)
+
+        if self.is_mm_optimized and 'Ovis2_5' in str(type(self.model.model)):
+            if 'grids' in multi_modal_kwargs:
+                grids = multi_modal_kwargs['grids']
+                hidden_stride = self.get_model().config.vit_config.hidden_stride
+                
+                vis_indices, ind_indices = self._compute_ovis_interleave_indices(
+                    grids, hidden_stride
+                )
+                
+                multi_modal_kwargs['visual_to_flat_indices'] = vis_indices.to(self.device)
+                multi_modal_kwargs['indicator_to_flat_indices'] = ind_indices.to(self.device)
 
         return PreparePromptMetadata(input_tokens=input_tokens_tensor,
                                      input_positions=input_positions,

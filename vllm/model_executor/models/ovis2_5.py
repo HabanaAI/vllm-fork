@@ -543,70 +543,90 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
         return pixel_values, image_grid_thw
 
     def _process_image_input(
-            self, image_input: OvisImagePatchInputs) -> MultiModalEmbeddings:
+            self, image_input: OvisImagePatchInputs) -> dict:
         image_patches_flat = image_input["flat_data"]
         indicator_tokens = image_input["indicator_tokens"]
         grid_thws = image_input["grids"]
 
         target_dtype = self.visual_tokenizer.dtype
-
         visual_embeds, grid_thws = self.pad_multimodal_data(
             image_patches_flat.to(target_dtype), grid_thws,
             self.vision_buckets)
 
         visual_tokens = self.visual_tokenizer(visual_embeds, grid_thws)
-        visual_embeds = self.vte(visual_tokens)  # 1:1 numeric eq.
+        visual_embeds = self.vte(visual_tokens)
         indicator_embeds = self.vte(indicator_tokens)
-        padded_patches_per_image = [
-            grid[1] * grid[2] // (self.config.vit_config.hidden_stride**2)
-            for grid in grid_thws
-        ]
 
-        visual_embeds_per_image = visual_embeds.split(padded_patches_per_image,
-                                                      dim=0)
-        indicator_per_image = list(
-            map(lambda x: 2 if x > 1 else x + 2, padded_patches_per_image))
-        indicator_embeds_per_image = indicator_embeds.split(
-            indicator_per_image)
-
-        vision_embeddings = []
-        for idx, (indicator, visual) in enumerate(
-                zip(indicator_embeds_per_image, visual_embeds_per_image)):
-            vision_embeddings_per_image = []
-            visual = visual.unsqueeze(0)
-            for i in range(visual.shape[0]):
-                vision_embeddings_per_image.append(
-                    torch.cat([indicator[i:i + 1], visual[i]], dim=0))
-            vision_embeddings_per_image.append(indicator[i + 1:])
-            vision_embeddings.append(
-                torch.cat(vision_embeddings_per_image, dim=0))
-        return tuple(vision_embeddings)
+        return {
+            "visual_embeds": visual_embeds,
+            "indicator_embeds": indicator_embeds,
+            "grid_thws": grid_thws,
+        }
 
     def get_multimodal_embeddings(
-            self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
+            self, **kwargs: object) -> Optional[dict]:
         embeddings = []
+        grids = []
+
+        visual_to_flat_indices = kwargs.pop('visual_to_flat_indices', None)
+        indicator_to_flat_indices = kwargs.pop('indicator_to_flat_indices', None)
 
         # NOTE: _parse_and_validate_visual_input has side-effects and pops
         # keys from kwargs. We process images first, then videos.
         image_input = self._parse_and_validate_visual_input(False, **kwargs)
         if image_input:
-            embeddings.extend(self._process_image_input(image_input))
+            print(f"calling self._process_image_input(image_input)")
+            result = self._process_image_input(image_input)
+            embeddings.append(result)
+            grids.append(result["grid_thws"])
 
         video_input = self._parse_and_validate_visual_input(True, **kwargs)
         if video_input:
-            embeddings.extend(self._process_image_input(video_input))
+            result = self._process_image_input(video_input)
+            embeddings.append(result)
+            grids.append(result["grid_thws"])
 
-        return tuple(embeddings) if embeddings else None
+        if not embeddings:
+            return None
+
+        combined = {
+            "visual_embeds": torch.cat([e["visual_embeds"] for e in embeddings], dim=0),
+            "indicator_embeds": torch.cat([e["indicator_embeds"] for e in embeddings], dim=0),
+            "grid_thws": torch.cat(grids, dim=0),
+            "hidden_stride": self.config.vit_config.hidden_stride,
+        }
+        
+        if visual_to_flat_indices is not None:
+            combined['visual_to_flat_indices'] = visual_to_flat_indices
+        if indicator_to_flat_indices is not None:
+            combined['indicator_to_flat_indices'] = indicator_to_flat_indices
+        
+        return combined
 
     def get_input_embeddings(
         self,
         input_ids: torch.Tensor,
-        multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
+        multimodal_embeddings: Optional[dict] = None,
     ) -> torch.Tensor:
+        from vllm.model_executor.models.utils import merge_multimodal_embeddings_static
+        
         inputs_embeds = self.llm.get_input_embeddings(input_ids)
+        
         if multimodal_embeddings is not None:
-            tmp = torch.concat(multimodal_embeddings, dim=0)
-            inputs_embeds[input_ids == self.image_pad_token_id] = tmp
+            is_multimodal = (input_ids == self.image_pad_token_id)
+            is_multimodal_index = torch.where(is_multimodal)[0]
+            
+            visual_to_flat = multimodal_embeddings.get('visual_to_flat_indices')
+            indicator_to_flat = multimodal_embeddings.get('indicator_to_flat_indices')
+            
+            inputs_embeds = merge_multimodal_embeddings_static(
+                is_multimodal_index=is_multimodal_index,
+                inputs_embeds=inputs_embeds,
+                multimodal_embeddings=multimodal_embeddings,
+                visual_to_flat_indices=visual_to_flat,
+                indicator_to_flat_indices=indicator_to_flat,
+            )
+        
         return inputs_embeds
 
     def forward(
