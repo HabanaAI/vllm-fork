@@ -6,6 +6,7 @@ import math
 import os
 import time
 from contextlib import suppress
+
 from dataclasses import dataclass
 from functools import cached_property
 from queue import Queue
@@ -26,6 +27,7 @@ from habana_frameworks.mediapipe.operators.reader_nodes.reader_nodes import (
     media_ext_reader_op_impl, media_ext_reader_op_tensor_info)
 from habana_frameworks.mediapipe.plugins.iterator_pytorch import (
     MediaGenericPytorchIterator)
+
 from PIL import Image
 from transformers import AutoProcessor, BatchFeature
 from transformers.image_utils import ImageInput
@@ -111,8 +113,10 @@ class hpuMediaPipe(MediaPipe):
 
     def __init__(self, device, queue_depth, batch_size, num_threads, op_device,
                  img_height, img_width):
+
         super().__init__(device, queue_depth, batch_size, num_threads,
                          self.__class__.__name__)
+
 
         mediapipe_seed = int(time.time_ns() % (2**31 - 1))
 
@@ -220,8 +224,10 @@ def get_image_info(data):
             return {'format': img.format, 'size': img.size, 'mode': img.mode}
     except Exception as e:
         raise ValueError(
+
             f"Input image bitstream is not in supported format: {str(e)}"
         ) from e
+
 
 
 __all__ = ['Ovis2_5Processor']
