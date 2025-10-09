@@ -295,6 +295,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     is_prompt: bool
     attn_bias: Optional[torch.Tensor]
     seq_lens_tensor: Optional[torch.Tensor]
+    seq_lens_tensor_cpu: Optional[torch.Tensor]
     context_lens_tensor: Optional[torch.Tensor]
     input_positions: torch.Tensor
     seq_lens: Optional[List[int]] = None

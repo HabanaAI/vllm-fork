@@ -39,8 +39,8 @@ else
   bash ./1P.sh "$P_HOST"
 fi
 sleep 1
-echo "[SSH] Start 2D0 on 10.112.242.153 node"
+echo "[SSH] Start 2D0 on ${ROLE_IP[D0]} node"
 ssh root@${ROLE_IP[D0]} "cd $workdir; USR_DP_MASTER_IP=${ROLE_IP[D0]} bash ./2D0.sh $D0_HOST"
 sleep 1
-echo "[SSH] Start 2D1 on 10.112.242.24 node"
+echo "[SSH] Start 2D1 on ${ROLE_IP[D0]} node"
 ssh root@${ROLE_IP[D1]} "cd $workdir; USR_DP_MASTER_IP=${ROLE_IP[D0]} bash ./2D1.sh $D1_HOST"

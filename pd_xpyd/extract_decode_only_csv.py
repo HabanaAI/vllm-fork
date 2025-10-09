@@ -4,7 +4,7 @@ import argparse
 import csv
 import os
 import re
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Iterable
 
 
 HEADER = [
@@ -66,14 +66,26 @@ def parse_namespace(ns_line: str) -> Dict[str, str]:
     return kv
 
 
-def iter_2nd_round_segments(text: str):
-    """Yield slices of the log corresponding to each '2nd ROUND' section."""
-    indices = [m.start() for m in re.finditer(r"2nd ROUND", text)]
-    if not indices:
-        return
-    for i, start in enumerate(indices):
-        end = indices[i + 1] if i + 1 < len(indices) else len(text)
-        yield text[start:end]
+ROUND_LABEL_RE = re.compile(r"(?P<label>\d+(?:st|nd|rd|th)\s+ROUND)" )
+
+
+def iter_round_segments(text: str) -> List[Tuple[str, str]]:
+    """Split the text by ROUND markers and return labelled segments."""
+    matches = list(ROUND_LABEL_RE.finditer(text))
+    if not matches:
+        return []
+    segments: List[Tuple[str, str]] = []
+    for i, match in enumerate(matches):
+        start = match.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        segments.append((match.group('label'), text[start:end]))
+    return segments
+
+
+def iter_2nd_round_segments(text: str) -> Iterable[str]:
+    for label, segment in iter_round_segments(text):
+        if label.startswith('2nd'):
+            yield segment
 
 
 def extract_metrics(text: str) -> Optional[Tuple[int, float, float, float]]:
@@ -126,74 +138,102 @@ def choose_lengths(ns: Dict[str, str]) -> Tuple[Optional[int], Optional[int], st
     return in_len, out_len, dataset
 
 
-def extract_rows(text: str) -> List[List[str]]:
-    rows: List[List[str]] = []
-    found_any = False
-    for seg in iter_2nd_round_segments(text):
-        found_any = True
-        # 1) Namespace line local to this segment
-        ns_line_match = re.search(r"^Namespace\(.*\)$", seg, flags=re.M)
-        if not ns_line_match:
-            continue
-        ns = parse_namespace(ns_line_match.group(0))
-        # 2) Metrics block within this segment
-        metrics_start = seg.find("============ Serving Benchmark Result ============")
-        if metrics_start == -1:
-            continue
-        metrics = extract_metrics(seg[metrics_start:])
-        if metrics is None:
-            continue
-        succ, mean_tpot, med_tpot, p99_tpot = metrics
+def build_row(ns: Dict[str, str], metrics: Tuple[int, float, float, float]) -> Tuple[List[str], Tuple[str, ...]]:
+    succ, mean_tpot, med_tpot, p99_tpot = metrics
 
-        in_len, out_len, dataset = choose_lengths(ns)
-        req_rate = ns.get('request_rate', '')
-        max_conc = ns.get('max_concurrency', '')
-        rand_ratio = ns.get('random_range_ratio', '')
+    in_len, out_len, dataset = choose_lengths(ns)
+    req_rate = ns.get('request_rate', '')
+    max_conc = ns.get('max_concurrency', '')
+    rand_ratio = ns.get('random_range_ratio', '')
 
-        rows.append([
-            str(in_len) if in_len is not None else '',
-            str(out_len) if out_len is not None else '',
-            req_rate,
-            str(max_conc),
-            str(rand_ratio),
-            dataset,
-            str(succ),
-            f"{mean_tpot:.2f}",
-            f"{med_tpot:.2f}",
-            f"{p99_tpot:.2f}",
-        ])
-    # If no explicit 2nd ROUND markers found, try whole text as a single segment (backward compat)
-    if not found_any:
-        ns_line_match = re.search(r"^Namespace\(.*\)$", text, flags=re.M)
-        metrics_start = text.find("============ Serving Benchmark Result ============")
-        if ns_line_match and metrics_start != -1:
-            ns = parse_namespace(ns_line_match.group(0))
-            metrics = extract_metrics(text[metrics_start:])
-            if metrics:
-                succ, mean_tpot, med_tpot, p99_tpot = metrics
-                in_len, out_len, dataset = choose_lengths(ns)
-                req_rate = ns.get('request_rate', '')
-                max_conc = ns.get('max_concurrency', '')
-                rand_ratio = ns.get('random_range_ratio', '')
-                rows.append([
-                    str(in_len) if in_len is not None else '',
-                    str(out_len) if out_len is not None else '',
-                    req_rate,
-                    str(max_conc),
-                    str(rand_ratio),
-                    dataset,
-                    str(succ),
-                    f"{mean_tpot:.2f}",
-                    f"{med_tpot:.2f}",
-                    f"{p99_tpot:.2f}",
-                ])
-    return rows
+    row = [
+        str(in_len) if in_len is not None else '',
+        str(out_len) if out_len is not None else '',
+        req_rate,
+        str(max_conc),
+        str(rand_ratio),
+        dataset,
+        str(succ),
+        f"{mean_tpot:.2f}",
+        f"{med_tpot:.2f}",
+        f"{p99_tpot:.2f}",
+    ]
+    key = (row[0], row[1], row[2], row[3], row[4], row[5])
+    return row, key
+
+
+def parse_segment(seg: str) -> Optional[Tuple[List[str], Tuple[int, float, float, float], str, Tuple[str, ...]]]:
+    ns_line_match = re.search(r"^Namespace\(.*\)$", seg, flags=re.M)
+    if not ns_line_match:
+        return None
+    ns = parse_namespace(ns_line_match.group(0))
+    metrics_start = seg.find("============ Serving Benchmark Result ============")
+    if metrics_start == -1:
+        return None
+    metrics = extract_metrics(seg[metrics_start:])
+    if metrics is None:
+        return None
+    row, key = build_row(ns, metrics)
+    max_conc = ns.get('max_concurrency', '') or ''
+    return row, metrics, max_conc, key
+
+
+def _concurrency_sort_key(conc: str) -> Tuple[int, str]:
+    try:
+        return (0, f"{float(conc):020.6f}")
+    except (TypeError, ValueError):
+        return (1, conc)
+
+
+def extract_rows(text: str, best_of_rounds: bool = False) -> List[List[str]]:
+    rows_by_key: Dict[Tuple[str, ...], List[Tuple[List[str], Tuple[int, float, float, float]]]] = {}
+    conc_for_key: Dict[Tuple[str, ...], str] = {}
+    round_segments = iter_round_segments(text)
+
+    if round_segments:
+        for label, seg in round_segments:
+            parsed = parse_segment(seg)
+            if parsed is None:
+                continue
+            row, metrics, conc, key = parsed
+            if best_of_rounds:
+                rows_by_key.setdefault(key, []).append((row, metrics))
+                conc_for_key.setdefault(key, conc)
+            else:
+                if label.startswith('2nd'):
+                    rows_by_key.setdefault(key, []).append((row, metrics))
+                    conc_for_key.setdefault(key, conc)
+        if rows_by_key:
+            rows: List[List[str]] = []
+            if best_of_rounds:
+                for key in sorted(rows_by_key.keys(), key=lambda k: _concurrency_sort_key(conc_for_key.get(k, ''))):
+                    candidates = rows_by_key[key]
+                    best_row, _ = min(
+                        candidates,
+                        key=lambda item: (item[1][3], item[1][1], -item[1][0])
+                    )
+                    rows.append(best_row)
+            else:
+                for key in sorted(rows_by_key.keys(), key=lambda k: _concurrency_sort_key(conc_for_key.get(k, ''))):
+                    candidates = rows_by_key[key]
+                    for row, _ in candidates:
+                        rows.append(row)
+            return rows
+
+    # Fallback when no round markers handled above
+    parsed = parse_segment(text)
+    if not parsed:
+        return []
+    row, _, _, _ = parsed
+    return [row]
 
 
 def main():
     ap = argparse.ArgumentParser(description="Extract benchmark metrics from logs and write CSV.")
     ap.add_argument('-i', '--inputs', nargs='+', required=True, help='Input log files')
     ap.add_argument('-o', '--output', required=True, help='Output CSV file path')
+    ap.add_argument('--best-of-rounds', action='store_true',
+                    help='Select the round with the lowest P99 TPOT (tie-breaking on mean TPOT) from logs that contain multiple rounds.')
     args = ap.parse_args()
 
     rows: List[List[str]] = []
@@ -201,7 +241,7 @@ def main():
         try:
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 txt = f.read()
-            file_rows = extract_rows(txt)
+            file_rows = extract_rows(txt, best_of_rounds=args.best_of_rounds)
             if not file_rows:
                 print(f"Warning: Failed to extract metrics from {path}")
             rows.extend(file_rows)
