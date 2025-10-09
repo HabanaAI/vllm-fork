@@ -30,10 +30,20 @@ IMAGE_URLS = [
     "https://upload.wikimedia.org/wikipedia/commons/6/69/Grapevinesnail_01.jpg",
     "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Texas_invasive_Musk_Thistle_1.jpg/1920px-Texas_invasive_Musk_Thistle_1.jpg",
     "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/Huskiesatrest.jpg/2880px-Huskiesatrest.jpg",
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/6/68/Orange_tabby_cat_sitting_on_fallen_leaves-Hisashi-01A.jpg/1920px-Orange_tabby_cat_sitting_on_fallen_leaves-Hisashi-01A.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/6/68/Orange_tabby_cat_sitting_on_fallen_leaves-Hisashi-01A.jpg",
     "https://upload.wikimedia.org/wikipedia/commons/3/30/George_the_amazing_guinea_pig.jpg",
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1f/Oryctolagus_cuniculus_Rcdo.jpg/1920px-Oryctolagus_cuniculus_Rcdo.jpg",
     "https://upload.wikimedia.org/wikipedia/commons/9/98/Horse-and-pony.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/f/fa/Great_Wall_of_China_July_2006.JPG",
+    "https://upload.wikimedia.org/wikipedia/commons/a/a6/Brandenburger_Tor_abends.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/4/41/Yellowstone_River_near_Tower_Fall.JPG",
+    "https://upload.wikimedia.org/wikipedia/commons/0/0c/GoldenGateBridge-001.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/1280px-Fronalpstock_big.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/6/6e/Paris_-_Eiffelturm_und_Marsfeld2.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/5/53/Colosseum_in_Rome%2C_Italy_-_April_2007.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/6/6e/Golde33443.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/3/3c/Christ_the_Redeemer%2C_Rio_de_Janeiro.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/f/f6/Great_Sphinx_of_Giza_-_20080716a.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/d/d1/Mount_Everest_as_seen_from_Drukair2_PLW_edit.jpg",
 ]
 
 
@@ -73,12 +83,19 @@ def parse_args():
     parser.add_argument('--max-model-len',
                         '-ml',
                         type=int,
-                        default=8192,
+                        default=10240,
                         help='Max-Model-Len.')
+    parser.add_argument('--iter',
+                        type=int,
+                        default=1,
+                        help='iteration')
+
+    parser.add_argument("--enforce-eager", action="store_true")
+
     return parser.parse_args()
 
 
-def make_model(model_name, max_model_len, tp_size, max_num_seqs, limit_mm_per_prompt):
+def make_model(model_name, max_model_len, tp_size, max_num_seqs, limit_mm_per_prompt, enforce_eager):
     engine_args = EngineArgs(
     model=model_name,
     max_model_len=max_model_len,
@@ -86,8 +103,10 @@ def make_model(model_name, max_model_len, tp_size, max_num_seqs, limit_mm_per_pr
     max_num_seqs=max_num_seqs,
     tensor_parallel_size=tp_size,
     #gpu_memory_utilization=0.9,
-    enforce_eager=False,
-        limit_mm_per_prompt={"image": limit_mm_per_prompt},
+    enforce_eager=enforce_eager,
+    limit_mm_per_prompt={"image": limit_mm_per_prompt},
+    gpu_memory_utilization=0.7,
+    trust_remote_code=True,
     )
     engine_args = asdict(engine_args)
     llm = LLM(**engine_args)
@@ -110,18 +129,19 @@ def create_inp_from_batchconfig(processor, batch):
                 },
             ],
         }]
-        final_prompt = processor.apply_chat_template(messages,tokenize=False,add_generation_prompt=True)
+        final_prompt = processor.tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True)
         requests.append({"prompt":final_prompt,"multi_modal_data":{"image":[fetch_image(IMAGE_URLS[urlid]) for urlid in prompt.get('images', [])]}})
+        print("request: ", requests)
     return requests
 
 
-def run_generate(llm, processor, batch):
-    requests = create_inp_from_batchconfig(processor, batch)
+def run_generate(llm, processor, requests, i):
     sampling_params = SamplingParams(temperature=0.0,
-                                     max_tokens=8192)
+                                     max_tokens=500) #8192)
 
     outputs = llm.generate(requests,
-        sampling_params=sampling_params
+        sampling_params=sampling_params,
+        use_tqdm=False
     )
     print("-" * 50)
     for o in outputs:
@@ -137,12 +157,23 @@ def main(args: Namespace):
 
     limit_mm_per_prompt = max(max([len(prompt.get("images", [])) for prompt in batch]) for batch in config)
     max_num_seqs = max(sum([len(prompt.get("images", [])) for prompt in batch]) for batch in config)  # TODO: this one not sure if this is what it means?
+    print(f"Make the model: {limit_mm_per_prompt=},{max_num_seqs=}, {args.enforce_eager=}")
 
-    llm, processor = make_model(args.model_name, args.max_model_len, args.tensor_parallel_size, max_num_seqs=max_num_seqs, limit_mm_per_prompt=limit_mm_per_prompt)
-    for batchidx, batch in enumerate(config):
-        run_generate(llm, processor, batch)
-        print(f'Done batch {batchidx}, of bs={len(batch)}. config: {batch}')
+    llm, processor = make_model(args.model_name, args.max_model_len, 
+        args.tensor_parallel_size, max_num_seqs=max_num_seqs,
+        limit_mm_per_prompt=limit_mm_per_prompt, enforce_eager=args.enforce_eager)
 
+    import time
+    for i in range(args.iter):
+        time_s=time.time()
+
+        for batchidx, batch in enumerate(config):
+            requests = create_inp_from_batchconfig(processor, batch)
+            time_u=time.time()
+            run_generate(llm, processor, requests, i)
+            print(f'Done batch {batchidx}, of bs={len(batch)}. config: {batch}, time_taken:{time.time()-time_u}')
+
+    print(f"Total Time iter[{i}] ", time.time()-time_s)
 
 if __name__ == "__main__":
     args = parse_args()
