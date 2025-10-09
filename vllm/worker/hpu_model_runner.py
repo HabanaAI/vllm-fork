@@ -1369,7 +1369,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                        align_worker=False):
         real_batch_size = len(seq_group_metadata_list)
         ctx = seq_group_metadata_list[0].computed_block_nums
-        ctx = 0 if ctx is None else sum(ctx)
+        ctx = 0 if ctx is None else len(ctx)
         batch_size_padded = real_batch_size
         if is_prompt:
             first_key = next(iter(seq_group_metadata_list[0].seq_data))
@@ -2877,9 +2877,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 output_len = 0
                 block_tables = None
                 if ctx:
-                    block_tables = {
-                        group_id: [_PAD_BLOCK_ID] * ctx * self.block_size
-                    }
+                    seq_block_nums = math.ceil(seq_len / self.block_size)
+                    block_tables = {group_id: [_PAD_BLOCK_ID] * seq_block_nums}
                     computed_block_nums = ([1] * ctx)
         else:
             input_len = seq_len - 1
