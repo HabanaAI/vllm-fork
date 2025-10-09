@@ -212,7 +212,7 @@ async def _handle_completions(api: str, request: Request):
         p = send_request_to_service(prefill_client_info, api,
                                                  req_data, request_id)
         s2 = time.perf_counter()
-        print(f'libin proxy send to prefill {s2-s1}')
+        #print(f'libin proxy send to prefill {s2-s1}')
         sys.stdout.flush()
         response = await p
         s3 = time.perf_counter()
@@ -238,7 +238,7 @@ async def _handle_completions(api: str, request: Request):
 
                 if is_first is False:
                     s4 = time.perf_counter()
-                    print(f'libin debug proxy receive decode 1 total:{s4-s1}| prefill:{s3-s1}| in-between:{s6-s3}|decode:{s4-s6}| {s6=} {s4=}')
+                    #print(f'libin debug proxy receive decode 1 total:{s4-s1}| prefill:{s3-s1}| in-between:{s6-s3}|decode:{s4-s6}| {s6=} {s4=}')
                     sys.stdout.flush()
                     is_first = True
                 yield chunk
