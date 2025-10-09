@@ -398,7 +398,6 @@ class HpuModelAdapter(torch.nn.Module):
                         self.model.visual_tokenizer,
                         disable_tensor_cache=False)
 
-
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
         self._rotary_prepare_cos_sin = self._get_prepare_cos_sin()
