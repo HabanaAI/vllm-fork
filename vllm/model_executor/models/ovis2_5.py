@@ -448,7 +448,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
             if not isinstance(indicator_tokens, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of indicator_tokens. "
                                  f"Got type: {type(indicator_tokens)}")
-
+            import remote_pdb;remote_pdb.set_trace()
             return OvisImagePatchInputs(
                 type="image_patches",
                 flat_data=flatten_bn(flatten_bn(pixel_values), concat=True),
@@ -509,11 +509,12 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
 
     def pad_multimodal_data(self, pixel_values, image_grid_thw,
                             vision_buckets):
+        import remote_pdb;remote_pdb.set_trace()
         desired_number_of_pixels = vision_buckets.get_multimodal_bucket(
             pixel_values.shape[0])
         padding_len = desired_number_of_pixels - pixel_values.shape[0]
         if padding_len <= 0:
-            return pixel_values, image_grid_thw
+            return pixel_values, image_grid_thw.to(pixel_values.device)
 
         logger_msg = "Padding current number pixel " \
             + str(pixel_values.shape[0]) \
@@ -526,7 +527,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
         pad_h, pad_w = self.find_padding(h_orig, w_orig,
                                          desired_number_of_pixels)
         if pad_h == 0 and pad_w == 0:
-            return pixel_values, image_grid_thw
+            return pixel_values, image_grid_thw.to(pixel_values.device)
 
         constant_value = -100
         pixel_values = torch.cat([
@@ -538,9 +539,8 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
         image_grid_thw = torch.tensor([[1, h_orig + pad_h, w_orig + pad_w]],
                                       device=image_grid_thw.device,
                                       dtype=image_grid_thw.dtype)
-
         assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
-        return pixel_values, image_grid_thw
+        return pixel_values, image_grid_thw.to(pixel_values.device)
 
     def _process_image_input(
             self, image_input: OvisImagePatchInputs) -> MultiModalEmbeddings:

@@ -539,6 +539,7 @@ class Ovis2_5Processor(ProcessorMixin):
             beta = math.sqrt(min_pixels / (height * width))
             h_bar = math.ceil(height * beta / factor) * factor
             w_bar = math.ceil(width * beta / factor) * factor
+
         return h_bar, w_bar
 
     def get_token_value(self, tok):
@@ -669,7 +670,7 @@ class Ovis2_5Processor(ProcessorMixin):
 
             # grids/placeholder
             grid_t = 1
-            grids = torch.tensor([[grid_t, Ty, Tx]] * B, device=flatten_patches.device)
+            grids = torch.tensor([[grid_t, Ty, Tx]] * B, device='cpu')
             visual_placeholders = [
                 self.construct_visual_placeholders([grid_t, Ty, Tx], is_video=False)
                 for _ in range(B)
