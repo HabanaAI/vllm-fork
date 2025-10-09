@@ -1,42 +1,38 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+import atexit
+import io
 import math
+import os
+import time
+from dataclasses import dataclass
 from functools import cached_property
+from queue import Queue
 from typing import Optional, Union
 
 import numpy as np
 import PIL
 import torch
+from habana_frameworks.mediapipe import fn
+# Handle MediaPipe pipe_manager destructor
+from habana_frameworks.mediapipe.backend.cal import (cpp_pipe_manager_list,
+                                                     pipe_manager)
+from habana_frameworks.mediapipe.media_types import dtype as dt
+from habana_frameworks.mediapipe.media_types import imgtype as it
+from habana_frameworks.mediapipe.media_types import readerOutType as ro
+from habana_frameworks.mediapipe.mediapipe import MediaPipe
+from habana_frameworks.mediapipe.operators.reader_nodes.reader_nodes import (
+    media_ext_reader_op_impl, media_ext_reader_op_tensor_info)
+from habana_frameworks.mediapipe.plugins.iterator_pytorch import (
+    MediaGenericPytorchIterator)
 from transformers import AutoProcessor, BatchFeature
 from transformers.image_utils import ImageInput
 from transformers.processing_utils import (ProcessingKwargs, ProcessorMixin,
                                            Unpack)
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 
-from habana_frameworks.mediapipe import fn
-from habana_frameworks.mediapipe.mediapipe import MediaPipe
-from habana_frameworks.mediapipe.media_types import dtype as dt
-from habana_frameworks.mediapipe.media_types import imgtype as it
-from habana_frameworks.mediapipe.media_types import readerOutType as ro
-from habana_frameworks.mediapipe.operators.reader_nodes.reader_nodes import (
-    media_ext_reader_op_impl, media_ext_reader_op_tensor_info
-)
-from habana_frameworks.mediapipe.plugins.iterator_pytorch import (
-    MediaGenericPytorchIterator
-)
-# Handle MediaPipe pipe_manager destructor
-from habana_frameworks.mediapipe.backend.cal import (
-    pipe_manager, cpp_pipe_manager_list
-)
-
-from queue import Queue
-import os
-import io
-import time
-import atexit
-from dataclasses import dataclass
-
 from vllm.logger import init_logger
+
 logger = init_logger(__name__)
 
 
@@ -55,6 +51,7 @@ def _patched_close(self):
         self._pm_.close()
         self._pm_ = None
 
+
 pipe_manager.close = _patched_close
 
 # Queue shared between external reader and mediapipe call
@@ -62,11 +59,13 @@ shared_q = Queue()
 
 
 class MediaPytorchIterator(MediaGenericPytorchIterator):
+
     def __init__(self, mediapipe):
         super().__init__(mediapipe=mediapipe, device="hpu", fw_type="PYT_FW")
 
 
 class external_reader(media_ext_reader_op_impl):
+
     def __init__(self, params, fw_params):
         self.batch_size = fw_params.batch_size
         self.max_file = ""
@@ -85,9 +84,7 @@ class external_reader(media_ext_reader_op_impl):
             rem = len(img_list[i]) % 64
             pad = (64 - rem) % 64
             if pad:
-                img_list[i] = np.pad(img_list[i],
-                                    (0, pad),
-                                    'constant')
+                img_list[i] = np.pad(img_list[i], (0, pad), 'constant')
         return img_list
 
     def get_media_output_type(self):
@@ -105,17 +102,12 @@ class external_reader(media_ext_reader_op_impl):
 
 
 class hpuMediaPipe(MediaPipe):
-    def __init__(self, device, queue_depth, batch_size,
-                 num_threads, op_device,
+
+    def __init__(self, device, queue_depth, batch_size, num_threads, op_device,
                  img_height, img_width):
-        super(
-            hpuMediaPipe,
-            self).__init__(
-            device,
-            queue_depth,
-            batch_size,
-            num_threads,
-            self.__class__.__name__)
+        super(hpuMediaPipe,
+              self).__init__(device, queue_depth, batch_size, num_threads,
+                             self.__class__.__name__)
 
         mediapipe_seed = int(time.time_ns() % (2**31 - 1))
 
@@ -123,27 +115,29 @@ class hpuMediaPipe(MediaPipe):
                                          num_outputs=1,
                                          seed=mediapipe_seed,
                                          device=op_device)
-        self.decode = fn.ImageDecoder(
-            device="hpu", output_format=it.RGB_I, resize=[img_width, img_height])
+        self.decode = fn.ImageDecoder(device="hpu",
+                                      output_format=it.RGB_I,
+                                      resize=[img_width, img_height])
 
-        self.mean_node = fn.MediaConst(
-            data=np.array([127.5, 127.5, 127.5], dtype=dt.FLOAT32),
-            shape=[1, 1, 3],
-            dtype=dt.FLOAT32
-        )
+        self.mean_node = fn.MediaConst(data=np.array([127.5, 127.5, 127.5],
+                                                     dtype=dt.FLOAT32),
+                                       shape=[1, 1, 3],
+                                       dtype=dt.FLOAT32)
 
-        self.std_node = fn.MediaConst(
-            data=np.array([1/127.5, 1/127.5, 1/127.5], dtype=dt.FLOAT32),
-            shape=[1, 1, 3],
-            dtype=dt.FLOAT32
-        )
+        self.std_node = fn.MediaConst(data=np.array(
+            [1 / 127.5, 1 / 127.5, 1 / 127.5], dtype=dt.FLOAT32),
+                                      shape=[1, 1, 3],
+                                      dtype=dt.FLOAT32)
 
-        self.cmn = fn.CropMirrorNorm(crop_w=img_width, crop_h=img_height, dtype=dt.FLOAT32, device="hpu")
+        self.cmn = fn.CropMirrorNorm(crop_w=img_width,
+                                     crop_h=img_height,
+                                     dtype=dt.FLOAT32,
+                                     device="hpu")
 
         self.transpose = fn.Transpose(
             device="hpu",
             tensorDim=4,
-            permutation=[1, 2, 0, 3] #NCHW
+            permutation=[1, 2, 0, 3]  #NCHW
         )
 
     def definegraph(self):
@@ -162,17 +156,18 @@ class hpuMediaPipe(MediaPipe):
 # -----------------------------------------------------------------------------
 @dataclass
 class _PipeState:
-    pipe:   hpuMediaPipe | None = None
-    it:     MediaGenericPytorchIterator | None = None
-    bsz:    int | None = None
-    H:      int | None = None
-    W:      int | None = None
+    pipe: hpuMediaPipe | None = None
+    it: MediaGenericPytorchIterator | None = None
+    bsz: int | None = None
+    H: int | None = None
+    W: int | None = None
 
 
 class MediaPipeTiler:
     """Owns and reuses MediaPipe pipes/iterators for main path"""
+
     def __init__(self) -> None:
-        self._main  = _PipeState()
+        self._main = _PipeState()
 
     def _rebuild(self, st: _PipeState, *, bsz: int, H: int, W: int) -> None:
         if st.pipe is not None:
@@ -182,9 +177,12 @@ class MediaPipeTiler:
                 pass
         pipe = hpuMediaPipe("legacy", 0, bsz, 1, "cpu", H, W)
         pipe.build()
-        st.pipe, st.it, st.bsz, st.H, st.W = pipe, iter(MediaPytorchIterator(pipe)), bsz, H, W
+        st.pipe, st.it, st.bsz, st.H, st.W = pipe, iter(
+            MediaPytorchIterator(pipe)), bsz, H, W
 
-    def ensure_main(self, *, bsz: int, H: int, W: int) -> tuple[hpuMediaPipe, MediaGenericPytorchIterator]:
+    def ensure_main(
+            self, *, bsz: int, H: int,
+            W: int) -> tuple[hpuMediaPipe, MediaGenericPytorchIterator]:
         st = self._main
         if st.pipe is None or st.bsz != bsz or st.H != H or st.W != W:
             self._rebuild(st, bsz=bsz, H=H, W=W)
@@ -211,17 +209,15 @@ class MediaPipeTiler:
 _MP = MediaPipeTiler()
 atexit.register(_MP.close_all)
 
+
 def get_image_info(data):
     # Get image info using PIL without decoding
     try:
         with Image.open(io.BytesIO(data)) as img:
-            return {
-                'format': img.format,
-                'size': img.size,
-                'mode': img.mode
-            }
+            return {'format': img.format, 'size': img.size, 'mode': img.mode}
     except Exception as e:
-        raise ValueError(f"Input image bitstream is not in supported format: {str(e)}")
+        raise ValueError(
+            f"Input image bitstream is not in supported format: {str(e)}")
 
 
 __all__ = ['Ovis2_5Processor']
@@ -610,8 +606,10 @@ class Ovis2_5Processor(ProcessorMixin):
         min_pixels = min(max_pixels if max_pixels is not None else MAX_PIXELS,
                          min_pixels if min_pixels is not None else MIN_PIXELS)
 
-        use_hpu_mp = (os.getenv("VLLM_USE_MEDIA_PIPELINE", "false").lower() in ("1", "true", "yes"))
-        is_bytes_batch = isinstance(images, list) and images and isinstance(images[0], (bytes, bytearray))
+        use_hpu_mp = (os.getenv("VLLM_USE_MEDIA_PIPELINE", "false").lower()
+                      in ("1", "true", "yes"))
+        is_bytes_batch = isinstance(images, list) and images and isinstance(
+            images[0], (bytes, bytearray))
 
         if use_hpu_mp and is_bytes_batch:
             queue_depth = 0
@@ -622,16 +620,22 @@ class Ovis2_5Processor(ProcessorMixin):
                 width, height = _probe.size
             # Ovis policy: factor = patch_size * hidden_stride
             resized_height, resized_width = self.smart_resize(
-                height, width,
+                height,
+                width,
                 factor=self.patch_size * self.hidden_stride,
-                min_pixels=min_pixels, max_pixels=max_pixels,
+                min_pixels=min_pixels,
+                max_pixels=max_pixels,
             )
             batch_size = len(images)
 
             # if batch, H, W is changed, create new one
-            main_pipe, main_iter = _MP.ensure_main(bsz=batch_size, H=resized_height, W=resized_width)
+            main_pipe, main_iter = _MP.ensure_main(bsz=batch_size,
+                                                   H=resized_height,
+                                                   W=resized_width)
 
-            img_list = np.empty(shape=[batch_size, ], dtype=object)
+            img_list = np.empty(shape=[
+                batch_size,
+            ], dtype=object)
             for i in range(batch_size):
                 img_list[i] = np.frombuffer(images[i], dtype=np.uint8)
 
@@ -640,7 +644,9 @@ class Ovis2_5Processor(ProcessorMixin):
                 processed_images = next(main_iter)[0]  # (B, 3, H, W) on hpu
             except StopIteration:
                 _MP.reset_iter()
-                _, main_iter = _MP.ensure_main(bsz=batch_size, H=resized_height, W=resized_width)
+                _, main_iter = _MP.ensure_main(bsz=batch_size,
+                                               H=resized_height,
+                                               W=resized_width)
                 processed_images = next(main_iter)[0]
             finally:
                 shared_q.task_done()
@@ -665,13 +671,16 @@ class Ovis2_5Processor(ProcessorMixin):
             tiles = x.permute(0, 2, 5, 3, 6, 1, 4, 7).contiguous()
 
             # (B*Ty*Tx, C*ps*ps)
-            flatten_patches = tiles.reshape(B * Ty * Tx, C * ps * ps).contiguous()
+            flatten_patches = tiles.reshape(B * Ty * Tx,
+                                            C * ps * ps).contiguous()
 
             # grids/placeholder
             grid_t = 1
-            grids = torch.tensor([[grid_t, Ty, Tx]] * B, device=flatten_patches.device)
+            grids = torch.tensor([[grid_t, Ty, Tx]] * B,
+                                 device=flatten_patches.device)
             visual_placeholders = [
-                self.construct_visual_placeholders([grid_t, Ty, Tx], is_video=False)
+                self.construct_visual_placeholders([grid_t, Ty, Tx],
+                                                   is_video=False)
                 for _ in range(B)
             ]
 
