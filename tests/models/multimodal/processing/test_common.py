@@ -342,6 +342,7 @@ def _test_processing_correctness_one(
     "Qwen/Qwen2.5-Omni-3B",
     "Qwen/Qwen3-VL-4B-Instruct",
     "Qwen/Qwen3-VL-30B-A3B-Instruct",
+    "Qwen/Qwen3-Omni-30B-A3B-Instruct",
     "Skywork/Skywork-R1V-38B",
     "fixie-ai/ultravox-v0_5-llama-3_2-1b",
     "openai/whisper-large-v3",
