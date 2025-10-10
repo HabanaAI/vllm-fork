@@ -669,7 +669,7 @@ class Ovis2_5Processor(ProcessorMixin):
 
             # grids/placeholder
             grid_t = 1
-            grids = torch.tensor([[grid_t, Ty, Tx]] * B, device=flatten_patches.device)
+            grids = torch.tensor([[grid_t, Ty, Tx]] * B, device='cpu')
             visual_placeholders = [
                 self.construct_visual_placeholders([grid_t, Ty, Tx], is_video=False)
                 for _ in range(B)
