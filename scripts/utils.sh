@@ -7,8 +7,9 @@ original_env=( $(env) )
 # HPU specific constants
 DEVICE_NAME=$(hl-smi -Q name -f csv | tail -n 1)
 BLOCK_SIZE=128
-PREFERED_BATCHED_TOKENS=8192
-PREFERED_NUM_SEQS=128
+PREFERED_BATCHED_TOKENS=2048
+PREFERED_PREFILL_BS=1
+PREFERED_DECODING_BS=128
 PREFERED_SEQ_LEN_TO_CAPTURE=8192
 DATA_TYPE="bfloat16"
 
@@ -98,8 +99,12 @@ set_length(){
     if [ "$max_num_prefill_seqs" == "" ]; then
         # Ceiling input_min to a multiple of BLOCK_SIZE
         input_min_ceil=$( ceil $input_min $BLOCK_SIZE )
-        max_num_prefill_seqs=$(( $max_num_batched_tokens / $input_min_ceil ))
+        max_num_prefill_seqs=$(( $PREFERED_BATCHED_TOKENS / $input_min_ceil ))
         max_num_prefill_seqs=$( max $max_num_prefill_seqs 1 )
+    fi
+    if [ "$max_num_prefill_seqs" -gt "$max_num_seqs" ]; then
+        max_num_prefill_seqs=$max_num_seqs
+        echo "Warning: max_num_prefill_seqs is set to max_num_seqs: $max_num_seqs"
     fi
 
     max_model_len=$(( $input_max + $output_max ))
@@ -272,13 +277,7 @@ set_bucketing(){
 
     prompt_bs_step=1
     prompt_bs_min=1
-    prompt_bs_max=$(( $PREFERED_BATCHED_TOKENS / $(ceil $input_min $block_size) ))
-    prompt_bs_max=$( ceil $prompt_bs_max $prompt_bs_step )
-    prompt_bs_max=$( min $prompt_bs_max $max_num_seqs )
-    if [ -n "$max_num_prefill_seqs" ]; then
-        prompt_bs_max=$( min $prompt_bs_max $max_num_prefill_seqs )
-    fi
-    prompt_bs_max=$( max $prompt_bs_max 1 )
+    prompt_bs_max=$max_num_prefill_seqs
     export VLLM_PROMPT_BS_BUCKET_MIN=${VLLM_PROMPT_BS_BUCKET_MIN:-$prompt_bs_min}
     export VLLM_PROMPT_BS_BUCKET_STEP=${VLLM_PROMPT_BS_BUCKET_STEP:-$prompt_bs_step}
     export VLLM_PROMPT_BS_BUCKET_MAX=${VLLM_PROMPT_BS_BUCKET_MAX:-$prompt_bs_max}
