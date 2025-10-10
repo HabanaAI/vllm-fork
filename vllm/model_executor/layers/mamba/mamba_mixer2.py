@@ -288,8 +288,9 @@ class MambaMixer2(CustomOp):
                 n_groups, self.tp_size)
 
         self.conv_dim = intermediate_size + 2 * self.n_groups * ssm_state_size
+        self.conv_kernel_size = conv_kernel_size
         self.conv1d = ColumnParallelLinear(
-            input_size=conv_kernel_size,
+            input_size=self.conv_kernel_size,
             output_size=self.conv_dim,
             bias=use_conv_bias,
             quant_config=None,
@@ -414,10 +415,176 @@ class MambaMixer2(CustomOp):
     def forward_native(
         self,
         hidden_states: torch.Tensor,
-        conv_state: torch.Tensor,
-        ssm_state: torch.Tensor,
-    ):
-        pass
+        mamba_cache_params: Optional[MambaCacheParams],
+        mamba2_metadata: Mamba2Metadata,
+        mup_vector: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        from vllm.forward_context import get_forward_context
+        from vllm.attention.backends.abstract import AttentionMetadata
+
+        attn_metadata: AttentionMetadata = get_forward_context().attn_metadata
+
+        # NOTE: NEED TO FIX I'm exiting profile run earlier, need further look into
+        if not hasattr(attn_metadata, 'num_prefills'):
+            batch_size, seq_len, _ = hidden_states.shape
+            dummy = torch.zeros((batch_size, seq_len, self.intermediate_size),
+                                dtype=hidden_states.dtype, device=hidden_states.device)
+            dummy = self.norm(dummy, torch.zeros_like(dummy))
+            out, _ = self.out_proj(dummy)
+            return out
+
+        num_prefills = attn_metadata.num_prefills
+        num_decodes = attn_metadata.num_decode_tokens
+        num_prefill_tokens = attn_metadata.num_prefill_tokens
+        has_prefill = num_prefills > 0
+        has_decode = num_decodes > 0
+
+        if mamba_cache_params is None:
+            batch_size = num_prefills + num_decodes
+            dummy_conv = torch.zeros((batch_size, self.conv_dim // self.tp_size, self.conv_kernel_size - 1),
+                                     dtype=hidden_states.dtype, device=hidden_states.device)
+            dummy_ssm = torch.zeros((batch_size, self.intermediate_size // self.tp_size, self.ssm_state_size),
+                                    dtype=hidden_states.dtype, device=hidden_states.device)
+            dummy_idx = torch.arange(batch_size, dtype=torch.int32, device=hidden_states.device)
+            mamba_cache_params = MambaCacheParams(dummy_conv, dummy_ssm, dummy_idx)
+
+        groups_time_state_size = self.n_groups * self.ssm_state_size
+        projected_states, _ = self.in_proj(hidden_states)
+        if mup_vector is not None:
+            projected_states = projected_states * mup_vector
+
+        gate, hidden_states_B_C, dt = torch.split(
+            projected_states,
+            [self.intermediate_size // self.tp_size,
+             self.conv_dim // self.tp_size,
+             self.num_heads // self.tp_size],
+            dim=-1,
+        )
+
+        conv_weight = self.conv1d.weight.view(self.conv1d.weight.size(0), self.conv1d.weight.size(2))
+        conv_bias = self.conv1d.bias
+
+        # I'm just splitting prefill and decode
+        if has_prefill and has_decode:
+            h_p, h_d = hidden_states_B_C.split([num_prefill_tokens, num_decodes], dim=0)
+            dt_p, dt_d = dt.split([num_prefill_tokens, num_decodes], dim=0)
+            idx_p = mamba_cache_params.state_indices_tensor[:num_prefills]
+            idx_d = mamba_cache_params.state_indices_tensor[num_prefills:]
+        elif has_prefill:
+            h_p, h_d = hidden_states_B_C, None
+            dt_p, dt_d = dt, None
+            idx_p = mamba_cache_params.state_indices_tensor[:num_prefills]
+            idx_d = None
+        else:
+            h_p = h_d = None
+            dt_p = None
+            dt_d = dt
+            idx_d = mamba_cache_params.state_indices_tensor
+
+        def split_xbc(x):
+            return torch.split(x, [self.intermediate_size // self.tp_size,
+                                   groups_time_state_size // self.tp_size,
+                                   groups_time_state_size // self.tp_size], dim=-1)
+
+        outputs = []
+
+        # === PREFILL ===
+        if has_prefill:
+            xbc_t = h_p.transpose(0, 1).unsqueeze(0)  # [1, D, L]
+            conv_out = torch.nn.functional.conv1d(
+                xbc_t, conv_weight.unsqueeze(1), conv_bias,
+                padding=self.conv_kernel_size - 1,
+                groups=self.conv_dim // self.tp_size
+            )
+            conv_out = conv_out[:, :, :num_prefill_tokens].squeeze(0).transpose(0, 1)  # [L, D]
+            if self.activation == "silu":
+                conv_out = torch.nn.functional.silu(conv_out)
+
+            if hasattr(attn_metadata, 'query_start_loc') and attn_metadata.query_start_loc is not None:
+                for i in range(num_prefills):
+                    start = attn_metadata.query_start_loc[i]
+                    end = attn_metadata.query_start_loc[i+1]
+                    if end - start >= self.conv_kernel_size - 1:
+                        cache = h_p[end-(self.conv_kernel_size-1):end].transpose(0,1)
+                    else:
+                        cache = torch.nn.functional.pad(h_p[start:end].transpose(0,1), 
+                                                       (self.conv_kernel_size-1 - (end-start), 0))
+                    mamba_cache_params.conv_state[idx_p[i]] = cache
+            else:
+                if num_prefill_tokens >= self.conv_kernel_size - 1 and len(idx_p) > 0:
+                    mamba_cache_params.conv_state[idx_p[0]] = h_p[-(self.conv_kernel_size-1):].transpose(0,1)
+
+            x_p, B_p, C_p = split_xbc(conv_out)
+            dt_p = torch.nn.functional.softplus(dt_p + self.dt_bias)
+
+            # SSM: x is [L, 512]
+            A = -torch.exp(self.A.float())  # [48]
+            current_state = torch.zeros(self.intermediate_size // self.tp_size, self.ssm_state_size,
+                                        dtype=x_p.dtype, device=x_p.device)
+            y_list = []
+            for t in range(num_prefill_tokens):
+                x_t = x_p[t]  # [512]
+                B_t = B_p[t]  # [128]
+                C_t = C_p[t]  # [128]
+                dt_t = dt_p[t]  # [48]
+
+                B_exp = B_t.repeat(self.intermediate_size // self.tp_size // self.ssm_state_size, 1)
+                C_exp = C_t.repeat(self.intermediate_size // self.tp_size // self.ssm_state_size, 1)
+
+                dt_val = dt_t.mean()
+                A_bar = torch.exp(dt_val * A[0])
+
+                current_state = A_bar * current_state + B_exp * x_t.unsqueeze(-1)
+                y_t = (C_exp * current_state).sum(dim=-1) + self.D.mean() * x_t
+                y_list.append(y_t)
+
+            if len(idx_p) > 0:
+                mamba_cache_params.ssm_state[idx_p[0]] = current_state
+
+            y_p = torch.stack(y_list, dim=0)
+            outputs.append(y_p)
+
+        # === DECODE ===
+        if has_decode:
+            y_list = []
+            for i in range(num_decodes):
+                idx = idx_d[i].item()
+                conv_state = mamba_cache_params.conv_state[idx]
+                new_input = h_d[i].unsqueeze(-1)  # [D, 1]
+                updated = torch.cat([conv_state[:, 1:], new_input], dim=-1)
+                mamba_cache_params.conv_state[idx] = updated
+
+                conv_out = (updated * conv_weight.unsqueeze(-1)).sum(dim=-1)
+                if conv_bias is not None:
+                    conv_out = conv_out + conv_bias
+                if self.activation == "silu":
+                    conv_out = torch.nn.functional.silu(conv_out)
+
+                x_i, B_i, C_i = split_xbc(conv_out.unsqueeze(0))
+                x_i = x_i.squeeze(0)
+                B_i = B_i.squeeze(0)
+                C_i = C_i.squeeze(0)
+                dt_i = torch.nn.functional.softplus(dt_d[i] + self.dt_bias)
+
+                # SSM update
+                ssm_state = mamba_cache_params.ssm_state[idx]
+                B_exp = B_i.repeat(self.intermediate_size // self.tp_size // self.ssm_state_size, 1)
+                C_exp = C_i.repeat(self.intermediate_size // self.tp_size // self.ssm_state_size, 1)
+                dt_val = dt_i.mean()
+                A_bar = torch.exp(dt_val * A[0])
+
+                new_state = A_bar * ssm_state + B_exp * x_i.unsqueeze(-1)
+                mamba_cache_params.ssm_state[idx] = new_state
+                y_i = (C_exp * new_state).sum(dim=-1) + self.D.mean() * x_i
+                y_list.append(y_i)
+
+            y_d = torch.stack(y_list, dim=0)
+            outputs.append(y_d)
+
+        hidden_states = torch.cat(outputs, dim=0) if len(outputs) > 1 else outputs[0]
+        hidden_states = self.norm(hidden_states, gate[:hidden_states.shape[0]])
+        out, _ = self.out_proj(hidden_states)
+        return out
 
     def forward_cuda(
         self,

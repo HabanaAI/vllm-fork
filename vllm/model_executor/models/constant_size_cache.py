@@ -46,7 +46,7 @@ class ConstantSizeCache(ABC):
 
             state_indices_tensor = torch.as_tensor(state_indices,
                                                    dtype=torch.int32,
-                                                   device="cuda")
+                                                   device="hpu")
             cache_tensors = self.cache
         else:
             # CUDA graph capturing runs
@@ -76,7 +76,7 @@ class ConstantSizeCache(ABC):
         state_indices.extend([PAD_SLOT_ID] * cuda_graph_pad_len)
 
         input_state_indices_buffer.copy_(
-            torch.as_tensor(state_indices, dtype=torch.int32, device="cuda"))
+            torch.as_tensor(state_indices, dtype=torch.int32, device="hpu"))
 
     def get_seqlen_agnostic_capture_inputs(self, batch_size: int):
         """
@@ -86,7 +86,7 @@ class ConstantSizeCache(ABC):
         """
         state_indices_tensor = torch.as_tensor([PAD_SLOT_ID] * batch_size,
                                                dtype=torch.int32,
-                                               device="cuda")
+                                               device="hpu")
         return (self.cache, state_indices_tensor)
 
     def _assign_seq_id_to_cache_index(self, cur_rid: str, seq_id: int,

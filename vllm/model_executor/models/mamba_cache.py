@@ -30,8 +30,8 @@ class MambaCacheManager(ConstantSizeCache):
 
         # Determine max batch size to set size of MambaCache
         max_batch_size = vllm_config.scheduler_config.max_num_seqs
-        if not vllm_config.model_config.enforce_eager:
-            max_batch_size = vllm_config.pad_for_cudagraph(max_batch_size)
+        # if not vllm_config.model_config.enforce_eager:
+        #     max_batch_size = vllm_config.pad_for_cudagraph(max_batch_size)
 
         # Initialize parent class
         super().__init__(max_batch_size)
@@ -39,11 +39,11 @@ class MambaCacheManager(ConstantSizeCache):
         conv_state = torch.empty(size=(num_mamba_layers, max_batch_size) +
                                  conv_state_shape,
                                  dtype=dtype,
-                                 device="cuda")
+                                 device="hpu")
         temporal_state = torch.empty(size=(num_mamba_layers, max_batch_size) +
                                      temporal_state_shape,
                                      dtype=dtype,
-                                     device="cuda")
+                                     device="hpu")
 
         self._mamba_cache = (conv_state, temporal_state)
 
@@ -73,4 +73,4 @@ class MambaCacheManager(ConstantSizeCache):
         """
         return self._mamba_cache, torch.as_tensor([PAD_SLOT_ID] * batch_size,
                                                   dtype=torch.int32,
-                                                  device="cuda")
+                                                  device="hpu")

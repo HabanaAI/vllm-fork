@@ -98,8 +98,26 @@ class GraniteMoeHybridMambaDecoderLayer(nn.Module):
     ):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
-        hidden_states = self.mamba(hidden_states, mamba_cache_params,
-                                   mamba2_metadata)
+        if mamba2_metadata is not None:
+            hidden_states = self.mamba(
+                hidden_states,
+                mamba_cache_params=mamba_cache_params,
+                mamba2_metadata=mamba2_metadata
+            )
+        else:
+            dummy_metadata = Mamba2Metadata(
+                has_initial_states=None,
+                prep_initial_states=False,
+                chunk_size=self.config.mamba_chunk_size,
+                seq_idx=None,
+                chunk_indices=None,
+                chunk_offsets=None,
+            )
+            hidden_states = self.mamba(
+                hidden_states,
+                mamba_cache_params=mamba_cache_params,
+                mamba2_metadata=dummy_metadata
+            )
         hidden_states = residual + hidden_states * self.residual_multiplier
 
         residual = hidden_states
@@ -338,10 +356,13 @@ class GraniteMoeHybridModel(nn.Module):
     ) -> torch.Tensor:
 
         attn_metadata = get_forward_context().attn_metadata
-        mamba2_metadata = prepare_mamba2_metadata(
-            chunk_size=self.config.mamba_chunk_size,
-            attn_metadata=attn_metadata,
-        )
+        if hasattr(attn_metadata, 'num_prefills'):
+            mamba2_metadata = prepare_mamba2_metadata(
+                chunk_size=self.config.mamba_chunk_size,
+                attn_metadata=attn_metadata,
+            )
+        else:
+            mamba2_metadata = None
 
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
@@ -364,8 +385,10 @@ class GraniteMoeHybridModel(nn.Module):
 
             layer_mamba_cache_params = None
             if isinstance(layer, GraniteMoeHybridMambaDecoderLayer):
-                layer_mamba_cache_params = mamba_cache_params.at_layer_idx(
-                    i - num_attn)
+                if mamba_cache_params is not None:
+                    layer_mamba_cache_params = mamba_cache_params.at_layer_idx(i - num_attn)
+                else:
+                    layer_mamba_cache_params = None  # Profile run: skip cache
 
             hidden_states, residual = layer(
                 positions=positions,
@@ -519,14 +542,18 @@ class GraniteMoeHybridForCausalLM(nn.Module, HasInnerState, SupportsLoRA,
                 intermediate_tensors: Optional[IntermediateTensors] = None,
                 inputs_embeds: Optional[torch.Tensor] = None,
                 **kwargs):
-        if self.mamba_cache is None:
-            num_mamba_layers = self.model_config.get_num_layers_by_block_type(
-                self.vllm_config.parallel_config, LayerBlockType.mamba)
-            self.mamba_cache = MambaCacheManager(
-                self.vllm_config, self.model_config.dtype, num_mamba_layers,
-                *self._get_mamba_cache_shape())
+        if "request_ids_to_seq_ids" in kwargs:
+            if self.mamba_cache is None:
+                num_mamba_layers = self.model_config.get_num_layers_by_block_type(
+                    self.vllm_config.parallel_config, LayerBlockType.mamba)
+                self.mamba_cache = MambaCacheManager(
+                    self.vllm_config, self.model_config.dtype, num_mamba_layers,
+                    *self._get_mamba_cache_shape())
 
-        mamba_cache_params = self.mamba_cache.current_run_tensors(**kwargs)
+            mamba_cache_params = self.mamba_cache.current_run_tensors(**kwargs)
+        else:
+            # Profile run or synthetic run: use dummy cache or skip
+            mamba_cache_params = None
         hidden_states = self.model(input_ids, positions, mamba_cache_params,
                                    intermediate_tensors, inputs_embeds)
 
