@@ -209,6 +209,9 @@ class ImageProcessorItems(ProcessorBatchItems[HfImageItem]):
 
         if isinstance(image, PILImage.Image):
             return ImageSize(*image.size)
+        if isinstance(image, (bytes, bytearray)):
+            with PILImage.open(io.BytesIO(image)) as img:
+                return ImageSize(*img.size)
         if isinstance(image, (np.ndarray, torch.Tensor)):
             _, h, w = image.shape
             return ImageSize(w, h)
