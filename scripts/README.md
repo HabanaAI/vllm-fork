@@ -106,7 +106,7 @@ Options:
 -p  Max number of the prefill sequences, int, default=1
     Used to control the max batch size for prefill to balance the TTFT and throughput.
     The default value of 1 is used to optimize the TTFT.
-    Set to 2048/input_min to optimize the throughput for short prompts.
+    Set to '' to optimize the throughput for short prompts.
 -o  Output range, str, format='output_min,output_max', default='4,2048'
     Make sure the range cover all the possible lengths from the benchmark/client.
 -b  max-num-seqs for vLLM, int, default=128
@@ -313,7 +313,7 @@ options:
 -p  Max number of the prefill sequences, int, default=1
     Used to control the max batch size for prefill to balance the TTFT and throughput.
     The default value of 1 is used to optimize the TTFT.
-    Set to 2048/input_min to optimize the throughput for short prompts.
+    Set to '' to optimize the throughput for short prompts.
 -o  Output length, int, default=512
 -b  max-num-seqs for vLLM, int, default=128
     Used to control the max batch size for decoding phase.

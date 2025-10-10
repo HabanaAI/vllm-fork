@@ -29,7 +29,7 @@ Help() {
     echo "-p  Max number of the prefill sequences, int, default=${PREFERED_PREFILL_BS}"
     echo "    Used to control the max batch size for prefill to balance the TTFT and throughput."
     echo "    The default value of 1 is used to optimize the TTFT."
-    echo "    Set to ${PREFERED_BATCHED_TOKENS}/input_min to optimize the throughput for short prompts."
+    echo "    Set to '' to optimize the throughput for short prompts."
     echo "-o  Output range, str, format='output_min,output_max', default='4,2048'"
     echo "    Make sure the range cover all the possible lengths from the benchmark/client."
     echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_DECODING_BS}"
@@ -138,7 +138,7 @@ dtype=${dtype:-"bfloat16"}
 quant_config=${quant_config:-""}
 input_min=${input_min:-"4"}
 input_max=${input_max:-"1024"}
-max_num_prefill_seqs=${max_num_prefill_seqs:-${PREFERED_PREFILL_BS}}
+max_num_prefill_seqs=${max_num_prefill_seqs-${PREFERED_PREFILL_BS}}
 output_min=${output_min:-"4"}
 output_max=${output_max:-"2048"}
 max_num_seqs=${max_num_seqs:-$PREFERED_DECODING_BS}

@@ -27,7 +27,7 @@ Help() {
     echo "-p  Max number of the prefill sequences, int, default=${PREFERED_PREFILL_BS}"
     echo "    Used to control the max batch size for prefill to balance the TTFT and throughput."
     echo "    The default value of 1 is used to optimize the TTFT."
-    echo "    Set to ${PREFERED_BATCHED_TOKENS}/input_min to optimize the throughput for short prompts."
+    echo "    Set to '' to optimize the throughput for short prompts."
     echo "-o  Output length, int, default=512"
     echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_DECODING_BS}"
     echo "    Used to control the max batch size for decoding phase."
@@ -135,7 +135,7 @@ module_ids=${module_ids:-"None"}
 dtype=${dtype:-"bfloat16"}
 quant_config=${quant_config:-""}
 input_len=${input_len:-"1024"}
-max_num_prefill_seqs=${max_num_prefill_seqs:-${PREFERED_PREFILL_BS}}
+max_num_prefill_seqs=${max_num_prefill_seqs-${PREFERED_PREFILL_BS}}
 output_len=${output_len:-"512"}
 max_num_seqs=${max_num_seqs:-${PREFERED_DECODING_BS}}
 range_ratio=${range_ratio:-"0.0"}
