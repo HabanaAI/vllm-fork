@@ -16,5 +16,5 @@
             "mlp\\.gate\\b"
         ]
     },
-    "dump_stats_path": "/home/yiliu7/workspace/inc-fork/3rd-party/vllm-fork/scripts/gpt_oss_20b_post/inc_output"
+    "dump_stats_path": "./gpt_oss_20b_post/inc_output"
 }
