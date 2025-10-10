@@ -1288,7 +1288,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                        align_worker=False):
         real_batch_size = len(seq_group_metadata_list)
         ctx = seq_group_metadata_list[0].computed_block_nums
-        ctx = 0 if ctx is None else sum(ctx)
+        # ctx can be None, [], or [int,...]
+        if ctx is None:
+            ctx = 0
+        elif len(ctx) > 0:
+            ctx = max(ctx)
+        else:
+            ctx = 0
         batch_size_padded = real_batch_size
         if is_prompt:
             first_key = next(iter(seq_group_metadata_list[0].seq_data))
