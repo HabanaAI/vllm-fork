@@ -1291,8 +1291,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # ctx can be None, [], or [int,...]
         if ctx is None:
             ctx = 0
+        elif len(ctx) > 0:
+            ctx = max(ctx)
         else:
-            ctx = max(ctx) if len(ctx) > 0 else 0
+            ctx = 0
         batch_size_padded = real_batch_size
         if is_prompt:
             first_key = next(iter(seq_group_metadata_list[0].seq_data))
