@@ -1279,18 +1279,52 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 )
                 self.model = self.lora_manager.create_lora_manager(self.model)
 
+            def move_tensors_in_module_to_hpu(module):
+                for attr_name in dir(module):
+                    if attr_name.startswith('__'):
+                        continue
+                    attr_value = getattr(module, attr_name)
+                    if isinstance(attr_value, torch.Tensor):
+                        attr_value = attr_value.to("hpu")
+                        setattr(module, attr_name, attr_value)
+                    elif isinstance(attr_value, (list, tuple)):
+                        new_list = []
+                        changed = False
+                        for item in attr_value:
+                            if isinstance(item, torch.Tensor):
+                                item = item.to("hpu")
+                                changed = True
+                            new_list.append(item)
+                        if changed:
+                            if isinstance(attr_value, list):
+                                setattr(module, attr_name, new_list)
+                            else:
+                                setattr(module, attr_name, tuple(new_list))
+                    elif isinstance(attr_value, dict):
+                        new_dict = {}
+                        changed = False
+                        for k, v in attr_value.items():
+                            if isinstance(v, torch.Tensor):
+                                v = v.to("hpu")
+                                changed = True
+                            new_dict[k] = v
+                        if changed:
+                            setattr(module, attr_name, new_dict)
+
             def move_model_to_hpu(model):
                 import vllm_hpu_extension.ops as hpu_ops
                 model = model.to("hpu")
+                move_tensors_in_module_to_hpu(model)
                 torch.hpu.synchronize()
 
-                # handle the PatchedMoeFP8Matmul
                 for _, module in model.named_modules():
+                    # handle the PatchedMoeFP8Matmul
                     if isinstance(module, FusedMoE) \
                         and module.quant_config is not None \
                         and module.quant_config.get_name() != 'inc':
                         module = hpu_ops.fp8_channel_moe_prepare_weights(
                             module)
+                    move_tensors_in_module_to_hpu(module)
                 torch.hpu.synchronize()
                 return model
 
