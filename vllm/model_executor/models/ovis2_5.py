@@ -62,6 +62,23 @@ def _ovis2_5_field_config():
                 video_indicator_tokens=MultiModalFieldConfig.batched("video"),
                 video_grids=MultiModalFieldConfig.batched("video"))
 
+class UserBundle1(nn.Module):
+    def __init__(
+        self,
+        config: PretrainedConfig,
+        head_dim: int,
+    ):
+        super().__init__()
+        self.config = config
+        self.l = ReplicatedLinear(
+                self.config.hidden_size * self.config.hidden_stride**2,
+                head_dim,
+                bias=False,
+                return_bias=False,
+            )
+        self.n = torch.nn.LayerNorm(head_dim)
+    def forward(self, x):
+        return self.n(self.l(x))
 
 class VisualTokenizer(torch.nn.Module):
     """
@@ -84,6 +101,9 @@ class VisualTokenizer(torch.nn.Module):
         )
         # reserved tokens for INDICATOR_IDS
         head_dim = visual_vocab_size - len(INDICATOR_IDS)
+        self.layer1a__htext_user_bundle_1 = UserBundle1(config, head_dim)
+        #self.head = self.layer1a__htext_user_bundle_1
+        '''
         self.head = torch.nn.Sequential(
             ReplicatedLinear(
                 self.config.hidden_size * self.config.hidden_stride**2,
@@ -91,6 +111,7 @@ class VisualTokenizer(torch.nn.Module):
                 bias=False,
                 return_bias=False,
             ), torch.nn.LayerNorm(head_dim))
+        '''
 
     def _init_backbone(
         self,
@@ -131,7 +152,7 @@ class VisualTokenizer(torch.nn.Module):
 
     def forward(self, pixel_values, grid_thws) -> torch.Tensor:
         features = self.encode(pixel_values, grid_thws)
-        logits = self.head(features)
+        logits = self.layer1a__htext_user_bundle_1(features)
         tokens = self.tokenize(logits)
         # tokens' shape is [#Token, VocabSize-4],
         # so padding with [#Token, 4], after which,
@@ -542,7 +563,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
         indicator_tokens = image_input["indicator_tokens"]
         grid_thws = image_input["grids"]
 
-        target_dtype = self.visual_tokenizer.dtype
+        target_dtype = grid_thws.dtype #self.visual_tokenizer.dtype
 
         visual_embeds, grid_thws = self.pad_multimodal_data(
             image_patches_flat.to(target_dtype), grid_thws,
@@ -643,8 +664,14 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
 
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
+        from vllm.model_executor.models.utils import WeightsMapper, AutoWeightsLoader  
+      
+        hf_to_vllm_mapper = WeightsMapper(orig_to_new_substr={  
+            "visual_tokenizer.head.0.": "visual_tokenizer.layer1a__htext_user_bundle_1.l.",  
+            "visual_tokenizer.head.1.": "visual_tokenizer.layer1a__htext_user_bundle_1.n.",  
+        })  
         loader = AutoWeightsLoader(self)
-        return loader.load_weights(weights)
+        return loader.load_weights(weights, mapper=hf_to_vllm_mapper)
 
     def get_language_model(self) -> torch.nn.Module:
         return self.llm
