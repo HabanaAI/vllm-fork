@@ -816,7 +816,7 @@ def gaudi_weight_wrapper(weight_loader):
     return wrapper
 
 
-def with_thread_limits(div_omp: int = 4, div_torch: int = 8):
+def with_thread_limits():
     """
     Decorator to temporarily set OMP_NUM_THREADS and PyTorch threads,
     and restore them after the function call.
@@ -834,17 +834,28 @@ def with_thread_limits(div_omp: int = 4, div_torch: int = 8):
                     and envs.VLLM_HPU_CONVERT_TO_FP8UZ):
                 return func(*args, **kwargs)
 
+            world_size = 1
+            if torch.distributed.is_initialized():
+                world_size = torch.distributed.get_world_size()
+            world_size = min(world_size, 8)
+
+            div_omp = world_size
+            div_torch = world_size
+
             # Save original settings
             old_omp = os.environ.get("OMP_NUM_THREADS", None)
             old_torch = torch.get_num_threads()
-            num_cores = os.cpu_count() or 1
+            import psutil
+            num_cores = len(psutil.Process().cpu_affinity() or [0])
 
             # Set new limits
             os.environ["OMP_NUM_THREADS"] = str(max(1, num_cores // div_omp))
             torch.set_num_threads(max(1, num_cores // div_torch))
             logger.warning_once(
-                "Setting OMP_NUM_THREADS to %s and torch.set_num_threads to %s",
-                os.environ["OMP_NUM_THREADS"], torch.get_num_threads())
+                "Setting OMP_NUM_THREADS to %s and torch.set_num_threads to %s "
+                "for %s available CPU cores and world size %s",
+                os.environ["OMP_NUM_THREADS"], torch.get_num_threads(),
+                num_cores, world_size)
             try:
                 # Call the actual function
                 return func(*args, **kwargs)
