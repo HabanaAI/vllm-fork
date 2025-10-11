@@ -103,8 +103,10 @@ Options:
     The environment variable 'QUANT_CONFIG' will override this option.
 -i  Input range, str, format='input_min,input_max', default='4,1024'
     Make sure the range cover all the possible lengths from the benchmark/client.
--p  Max number of prefill sequences, int, default=2048/input_min
-    Used to control the max batch size for prefill to optimize the TTFT.
+-p  Max number of the prefill sequences, int, default=1
+    Used to control the max batch size for prefill to balance the TTFT and throughput.
+    The default value of 1 is used to optimize the TTFT.
+    Set to '' to optimize the throughput for short prompts.
 -o  Output range, str, format='output_min,output_max', default='4,2048'
     Make sure the range cover all the possible lengths from the benchmark/client.
 -b  max-num-seqs for vLLM, int, default=128
@@ -308,7 +310,10 @@ options:
     default=./quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'
     The environment variable 'QUANT_CONFIG' will override this option.
 -i  Input length, int, default=1024
--p  Max number of prefill sequences, int, default=2048/input_min
+-p  Max number of the prefill sequences, int, default=1
+    Used to control the max batch size for prefill to balance the TTFT and throughput.
+    The default value of 1 is used to optimize the TTFT.
+    Set to '' to optimize the throughput for short prompts.
 -o  Output length, int, default=512
 -b  max-num-seqs for vLLM, int, default=128
     Used to control the max batch size for decoding phase.
