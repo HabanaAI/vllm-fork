@@ -62,6 +62,7 @@ cpupower idle-set -d 3
 ### 安装vLLM-fork
 
 请按照vLLM-fork标准方式安装vLLM 1.22.0 版本。
+具体步骤，请参考 scripts/README.md 进行。
 
 ## 服务启动
 
