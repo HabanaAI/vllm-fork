@@ -804,12 +804,12 @@ def gaudi_weight_wrapper(weight_loader):
         # so we can detect it by dtype
         loaded_weight = args[1]
         if loaded_weight.dtype == torch.float8_e4m3fn:
-            loaded_weight.data = (loaded_weight.data.float() *
-                                  fp8_e4m3fnuz_max / fp8_e4m3fn_max).to(
-                                      torch.float8_e4m3fn)
+            scale = fp8_e4m3fnuz_max / fp8_e4m3fn_max
+            loaded_weight.data = (loaded_weight.data.float() * scale).to(
+                torch.float8_e4m3fn)
         else:
-            loaded_weight.data = (loaded_weight.data * fp8_e4m3fn_max /
-                                  fp8_e4m3fnuz_max)
+            scale = fp8_e4m3fn_max / fp8_e4m3fnuz_max
+            loaded_weight.data = (loaded_weight.data * scale)
         args = (args[0], loaded_weight) + args[2:]
         weight_loader(*args, **kwargs)
 
