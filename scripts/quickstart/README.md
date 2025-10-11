@@ -206,7 +206,7 @@ huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scr
 For DeepSeek-V3.1, please use the command below to calibrate the model. After the command is done, the DeepSeek-V3.1 measurement files are generated in the folder "scripts/nc_workspace_measure_kvcache".
 ```bash
 cd vllm-fork
-bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
+bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2 --nprompts 5000
 ```
 
 #### 2. Configure environment variables. (Optional)
@@ -443,7 +443,7 @@ cp -r ./scripts/measure_kvcache/ds-r1-0528-g2-tp16 ./scripts/nc_workspace_measur
 For DeepSeek-V3.1, please use the command below to calibrate the model. After the command is done, the DeepSeek-V3.1 measurement files are generated in the folder "vllm-fork/scripts/nc_workspace_measure_kvcache". After the measure files are generated, you may copy them to the folder vllm-fork/scripts/nc_workspace_measure_kvcache" of other worker nodes.
 ```bash
 cd vllm-fork
-bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
+bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2 --wd 16 --nprompts 5000
 ```
 
 ##### 2. Configure environment variables.
