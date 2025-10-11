@@ -93,6 +93,12 @@ HPU_VLLM_SPECDECODE_DUMMY_TOKEN = -2
 _SAMPLING_EPS = 1e-5
 
 
+class AsyncD2HMode(IntEnum):
+    SYNC = 0
+    NON_BLOCKING = 1
+    ASYNC = 2
+
+
 class PhaseType(Enum):
     PREFILL = 'prefill'
     PREFIX_PREFILL = 'prefix_prefill'
@@ -801,6 +807,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # PD
         self.kv_conf = self.vllm_config.kv_transfer_config
+
+        self.fetch_kv_use_async_d2h = AsyncD2HMode(
+            int(os.environ.get("VLLM_FETCH_KV_USE_ASYNC_D2H", "0")))
+        logger.info(f"fetch_kv_use_async_d2h: {self.fetch_kv_use_async_d2h}")
 
     def _set_gc_threshold(self) -> None:
         """
@@ -3112,12 +3122,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         )
 
                     def fetch_kv_to_host(model, model_input, kv_caches,
-                                         hidden_states):
-                        input_tokens_tensor_cpu = model_input.input_tokens.to(
-                            "cpu"
-                        )  # shape: [batch_size, seq_len_padding_to_128]
-                        torch.hpu.synchronize(
-                        )  # sync here may hurt performance.
+                                         hidden_states, async_d2h):
+                        if async_d2h in (AsyncD2HMode.NON_BLOCKING,
+                                         AsyncD2HMode.ASYNC):
+                            input_tokens_tensor_cpu = model_input.input_tokens.to(
+                                "cpu", non_blocking=True
+                            )
+                        else:
+                            input_tokens_tensor_cpu = model_input.input_tokens.to("cpu")
+                            torch.hpu.synchronize()
+
                         seq_lens = model_input.attn_metadata.seq_lens
                         start_layer = model.model.start_layer
                         end_layer = model.model.end_layer
@@ -3150,22 +3164,37 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     key_cache.index_select(
                                         0, current_slot_mapping).unsqueeze(0))
                             keys = torch.cat(keys, dim=0)
-                            kv_cache_to_sent = keys.cpu()
-                            current_hidden_states = hidden_states[
-                                idx].unsqueeze(0).cpu()
-                            # ==== graph should end here ======
-                            htorch.core.mark_step()
-                            torch.hpu.synchronize()
+                            if async_d2h in (AsyncD2HMode.NON_BLOCKING,
+                                             AsyncD2HMode.ASYNC):
+                                kv_cache_to_sent = keys.to('cpu', non_blocking=True)
+                                current_hidden_states = hidden_states[
+                                    idx].unsqueeze(0).to('cpu', non_blocking=True)
+                            else:
+                                kv_cache_to_sent = keys.cpu()
+                                current_hidden_states = hidden_states[
+                                    idx].unsqueeze(0).cpu()
+                                htorch.core.mark_step()
+                                torch.hpu.synchronize()
                             kv_caches_send_list.append(kv_cache_to_sent)
                             hidden_states_list.append(current_hidden_states)
                             input_tokens_list.append(current_tokens_cpu)
 
+                        if async_d2h == AsyncD2HMode.ASYNC:
+                            event = htorch.hpu.Event()
+                            event.record()
+                        elif async_d2h == AsyncD2HMode.NON_BLOCKING:
+                            torch.hpu.synchronize()
+                            event = None
+                        else:
+                            event = None
                         return (input_tokens_list, kv_caches_send_list,
-                                hidden_states_list)
+                                hidden_states_list, event)
 
                     def send_kv(input_tokens_list, kv_caches_send_list,
-                                hidden_states_list):
+                                hidden_states_list, event):
                         cur_time = time.time()
+                        if self.fetch_kv_use_async_d2h == AsyncD2HMode.ASYNC and event is not None:
+                            event.synchronize()
                         get_kv_transfer_group(
                         ).send_kv_caches_and_hidden_states_cpu(
                             input_tokens_list, kv_caches_send_list,
@@ -3176,17 +3205,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     def async_send_kv_caches(hidden_states):
                         (input_tokens_list,
                          kv_caches_send_list,
-                         hidden_states_list) = \
+                         hidden_states_list,
+                         event) = \
                             fetch_kv_to_host(self.get_model(),
                                              model_input,
                                              kv_caches,
                                              hidden_states,
-                                             )
+                                             self.fetch_kv_use_async_d2h)
                         self.pd_executor_pool.submit(
                             send_kv,
                             input_tokens_list,
                             kv_caches_send_list,
                             hidden_states_list,
+                            event
                         )
 
                     if self.use_async_kv_transfer_in_pd:
