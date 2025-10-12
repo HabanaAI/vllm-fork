@@ -809,7 +809,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.kv_conf = self.vllm_config.kv_transfer_config
 
         self.fetch_kv_use_async_d2h = AsyncD2HMode(
-            int(os.environ.get("VLLM_FETCH_KV_USE_ASYNC_D2H", "0")))
+            envs.VLLM_FETCH_KV_USE_ASYNC_D2H)
         logger.info(f"fetch_kv_use_async_d2h: {self.fetch_kv_use_async_d2h}")
 
     def _set_gc_threshold(self) -> None:
