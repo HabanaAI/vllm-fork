@@ -568,8 +568,10 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
         embeddings = []
         grids = []
 
-        visual_to_flat_indices = kwargs.pop('visual_to_flat_indices', None)
-        indicator_to_flat_indices = kwargs.pop('indicator_to_flat_indices', None)
+        vis_src_idx = kwargs.pop('vis_src_idx', None)
+        vis_dest_idx = kwargs.pop('vis_dest_idx', None)
+        ind_src_idx = kwargs.pop('ind_src_idx', None)
+        ind_dest_idx = kwargs.pop('ind_dest_idx', None)
 
         # NOTE: _parse_and_validate_visual_input has side-effects and pops
         # keys from kwargs. We process images first, then videos.
@@ -596,10 +598,14 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
             "hidden_stride": self.config.vit_config.hidden_stride,
         }
         
-        if visual_to_flat_indices is not None:
-            combined['visual_to_flat_indices'] = visual_to_flat_indices
-        if indicator_to_flat_indices is not None:
-            combined['indicator_to_flat_indices'] = indicator_to_flat_indices
+        if vis_src_idx is not None:
+            combined['vis_src_idx'] = vis_src_idx
+        if vis_dest_idx is not None:
+            combined['vis_dest_idx'] = vis_dest_idx
+        if ind_src_idx is not None:
+            combined['ind_src_idx'] = ind_src_idx
+        if ind_dest_idx is not None:
+            combined['ind_dest_idx'] = ind_dest_idx
         
         return combined
 
@@ -616,15 +622,19 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
             is_multimodal = (input_ids == self.image_pad_token_id)
             is_multimodal_index = torch.where(is_multimodal)[0]
             
-            visual_to_flat = multimodal_embeddings.get('visual_to_flat_indices')
-            indicator_to_flat = multimodal_embeddings.get('indicator_to_flat_indices')
+            vis_src_idx = multimodal_embeddings.get('vis_src_idx')
+            vis_dest_idx = multimodal_embeddings.get('vis_dest_idx')
+            ind_src_idx = multimodal_embeddings.get('ind_src_idx')
+            ind_dest_idx = multimodal_embeddings.get('ind_dest_idx')
             
             inputs_embeds = merge_multimodal_embeddings_static(
                 is_multimodal_index=is_multimodal_index,
                 inputs_embeds=inputs_embeds,
                 multimodal_embeddings=multimodal_embeddings,
-                visual_to_flat_indices=visual_to_flat,
-                indicator_to_flat_indices=indicator_to_flat,
+                visual_src_indices=vis_src_idx,
+                visual_dest_indices=vis_dest_idx,
+                indicator_src_indices=ind_src_idx,
+                indicator_dest_indices=ind_dest_idx,
             )
         
         return inputs_embeds

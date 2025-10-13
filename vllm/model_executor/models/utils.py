@@ -436,19 +436,34 @@ def merge_multimodal_embeddings_static(
     is_multimodal_index: torch.Tensor,
     inputs_embeds: torch.Tensor,
     multimodal_embeddings: Union[NestedTensors, dict],
-    visual_to_flat_indices: Optional[torch.Tensor] = None,
-    indicator_to_flat_indices: Optional[torch.Tensor] = None,
+    visual_src_indices: Optional[torch.Tensor] = None,
+    visual_dest_indices: Optional[torch.Tensor] = None,
+    indicator_src_indices: Optional[torch.Tensor] = None,
+    indicator_dest_indices: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     assert current_platform.is_hpu(), ("Support HPU only")
+    
     if isinstance(multimodal_embeddings, dict):
         visual = multimodal_embeddings["visual_embeds"]
         indicator = multimodal_embeddings["indicator_embeds"]
-        total_tokens = len(is_multimodal_index)
-        flat_mm = torch.empty((total_tokens, visual.shape[1]), 
+        
+        # Use shape-based size (safe in lazy mode!)
+        total_mm_tokens = visual.shape[0] + indicator.shape[0]
+        
+        flat_mm = torch.empty((total_mm_tokens, visual.shape[1]), 
                               dtype=visual.dtype, device=visual.device)
         
-        flat_mm.index_copy_(0, visual_to_flat_indices, visual)
-        flat_mm.index_copy_(0, indicator_to_flat_indices, indicator)
+        if all(x is not None for x in [visual_src_indices, visual_dest_indices, 
+                                       indicator_src_indices, indicator_dest_indices]):
+            # Select from source, place at destination
+            selected_visual = visual.index_select(0, visual_src_indices)
+            flat_mm.index_copy_(0, visual_dest_indices, selected_visual)
+            
+            selected_indicator = indicator.index_select(0, indicator_src_indices)
+            flat_mm.index_copy_(0, indicator_dest_indices, selected_indicator)
+        else:
+            # Fallback
+            flat_mm = torch.cat([visual, indicator], dim=0)
         
         flattened = flat_mm
     else:

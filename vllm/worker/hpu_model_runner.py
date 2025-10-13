@@ -1547,15 +1547,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _compute_ovis_interleave_indices(self, grids, hidden_stride):
         """
         Compute indices for interleaving visual and indicator embeddings.
-        
-        Args:
-            grids: Either a list of tensors or a single tensor containing [t, h, w] for each image
-            hidden_stride: Stride value from vit_config
+        This runs only during warmup, so .item()/.tolist() is OK here.
         
         Returns:
-            visual_to_flat_indices: Maps visual embeddings to positions in flat array
-            indicator_to_flat_indices: Maps indicator embeddings to positions in flat array
+            visual_src_idx: Source positions in visual tensor
+            visual_dest_idx: Destination positions in flat tensor
+            indicator_src_idx: Source positions in indicator tensor
+            indicator_dest_idx: Destination positions in flat tensor
         """
+        # Handle list of tensors (common case from MultiModalKwargs.batch)
         if isinstance(grids, (list, tuple)):
             all_grids = []
             for g in grids:
@@ -1569,10 +1569,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if grid_thws.shape[-1] != 3:
             raise ValueError(f"Expected grids to have 3 values [t,h,w] in last dimension, got shape {grid_thws.shape}")
         
+        # Convert to list (OK during warmup)
         split_sizes = ((grid_thws[:, 1] * grid_thws[:, 2]) // (hidden_stride**2)).tolist()
         indicator_sizes = [2 if s > 1 else s + 2 for s in split_sizes]
         
+        # Build BOTH source and destination indices
+        vis_src_idx = []
         vis_dest_idx = []
+        ind_src_idx = []
         ind_dest_idx = []
         
         flat_pos = 0
@@ -1581,26 +1585,32 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         
         for i, (vis_count, ind_count) in enumerate(zip(split_sizes, indicator_sizes)):
             # Start indicator
-            ind_dest_idx.append(flat_pos)
+            ind_src_idx.append(ind_offset)      # ← Source: where in indicator tensor
+            ind_dest_idx.append(flat_pos)       # ← Dest: where in flat tensor
             flat_pos += 1
             
             # Vision tokens
             for j in range(vis_count):
-                vis_dest_idx.append(flat_pos)
+                vis_src_idx.append(vis_offset + j)  # ← Source
+                vis_dest_idx.append(flat_pos)        # ← Dest
                 flat_pos += 1
             
-            # End indicator
+            # End indicator (if exists)
             if ind_count > 1:
-                ind_dest_idx.append(flat_pos)
+                ind_src_idx.append(ind_offset + 1)  # ← Source: next indicator
+                ind_dest_idx.append(flat_pos)       # ← Dest
                 flat_pos += 1
             
             vis_offset += vis_count
             ind_offset += ind_count
         
-        visual_to_flat = torch.tensor(vis_dest_idx, dtype=torch.long, device='cpu')
-        indicator_to_flat = torch.tensor(ind_dest_idx, dtype=torch.long, device='cpu')
-        
-        return visual_to_flat, indicator_to_flat
+        # Convert ALL to tensors
+        return (
+            torch.tensor(vis_src_idx, dtype=torch.long, device='cpu'),
+            torch.tensor(vis_dest_idx, dtype=torch.long, device='cpu'),
+            torch.tensor(ind_src_idx, dtype=torch.long, device='cpu'),
+            torch.tensor(ind_dest_idx, dtype=torch.long, device='cpu'),
+        )
 
     def _prepare_prompt(
         self,
@@ -1973,12 +1983,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 grids = multi_modal_kwargs['grids']
                 hidden_stride = self.get_model().config.vit_config.hidden_stride
                 
-                vis_indices, ind_indices = self._compute_ovis_interleave_indices(
+                vis_src_idx, vis_dest_idx, ind_src_idx, ind_dest_idx = self._compute_ovis_interleave_indices(
                     grids, hidden_stride
                 )
-                
-                multi_modal_kwargs['visual_to_flat_indices'] = vis_indices.to(self.device)
-                multi_modal_kwargs['indicator_to_flat_indices'] = ind_indices.to(self.device)
+
+                multi_modal_kwargs['vis_src_idx'] = vis_src_idx.to(self.device)
+                multi_modal_kwargs['vis_dest_idx'] = vis_dest_idx.to(self.device)
+                multi_modal_kwargs['ind_src_idx'] = ind_src_idx.to(self.device)
+                multi_modal_kwargs['ind_dest_idx'] = ind_dest_idx.to(self.device)
 
         return PreparePromptMetadata(input_tokens=input_tokens_tensor,
                                      input_positions=input_positions,
