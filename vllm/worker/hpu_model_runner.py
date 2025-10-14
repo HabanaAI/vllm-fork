@@ -897,7 +897,7 @@ TModelInputForHPU = TypeVar('TModelInputForHPU', bound="ModelInputForHPU")
 
 
 def FindMambaIndexForPrefill(
-    mamba_dict: Dict[int, int],
+    mamba_dict: Dict[any, any],
     seq_id: int,
     max_concurrency: int,
 ):
@@ -913,7 +913,7 @@ def FindMambaIndexForPrefill(
 
 
 def FindMambaIndexForDecode(
-    mamba_dict: Dict[int, int],
+    mamba_dict: Dict[any, any],
     seq_list: List[int],
 ):
     diff = list(set(mamba_dict.keys()) - set(seq_list))
@@ -1074,7 +1074,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.device = self.device_config.device
         self.enforce_eager = self.model_config.enforce_eager
         self.max_num_seqs = self.scheduler_config.max_num_seqs
-        self.mamba_cache_table = Dict[int, int]
+        self.mamba_cache_table = Dict[any, any]
         self.max_num_prefill_seqs = \
             self.scheduler_config.max_num_prefill_seqs \
             if self.scheduler_config.max_num_prefill_seqs is not None \
@@ -2081,7 +2081,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _prepare_decode(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-        total_seq_ids: List[int],
+        total_seq_ids=None,
         output=None,
         align_worker=False,
     ) -> PrepareDecodeMetadata:
@@ -3137,7 +3137,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             inputs.attn_metadata.mamba_cache_prefill_indices = \
                 mamba_cache_prefill_indices
         else:
-            mamba_cache_decode_indices = mamba_cache_indices.to( # type: ignore
+            mamba_cache_decode_indices = mamba_cache_indices.to(  # type: ignore
                 self.device, non_blocking=True)
             inputs.attn_metadata.mamba_cache_decode_indices = \
                 mamba_cache_decode_indices

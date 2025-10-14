@@ -10,25 +10,20 @@ from vllm import LLM, SamplingParams
 
 # Parse the command-line arguments.
 parser = argparse.ArgumentParser()
-parser.add_argument("--model",
-                    type=str,
-                    default="Qwen/Qwen3-Next-80B-A3B-Instruct",
-                    help="The model path.")
-parser.add_argument("--tp-size",
-                    type=int,
-                    default=4,
-                    help="The number of threads.")
-parser.add_argument("--output-tokens",
-                    type=int,
-                    default=512,
-                    help="The number of output tokens.")
-parser.add_argument("--max-model-length",
-                    type=int,
-                    default=16384,
-                    help="Max model length.")
-parser.add_argument("--enable-ep",
-                    action='store_true',
-                    help="Enable EP for MOE models")
+parser.add_argument(
+    "--model",
+    type=str,
+    default="Qwen/Qwen3-Next-80B-A3B-Instruct",
+    help="The model path.",
+)
+parser.add_argument("--tp-size", type=int, default=4, help="The number of threads.")
+parser.add_argument(
+    "--output-tokens", type=int, default=512, help="The number of output tokens."
+)
+parser.add_argument(
+    "--max-model-length", type=int, default=16384, help="Max model length."
+)
+parser.add_argument("--enable-ep", action="store_true", help="Enable EP for MOE models")
 args = parser.parse_args()
 
 os.environ["VLLM_SKIP_WARMUP"] = "true"
@@ -63,7 +58,7 @@ if __name__ == "__main__":
             model=model,
             tokenizer=model,
             tensor_parallel_size=args.tp_size,
-            distributed_executor_backend='mp',
+            distributed_executor_backend="mp",
             trust_remote_code=True,
             max_model_len=args.max_model_length,
             enable_expert_parallel=args.enable_ep,
