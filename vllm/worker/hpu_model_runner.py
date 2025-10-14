@@ -36,7 +36,8 @@ from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler,
                                          HabanaProfilerCounterHelper,
                                          format_bytes)
-from vllm_hpu_extension.runtime import finalize_config, get_config
+from vllm_hpu_extension.runtime import (clear_config, finalize_config,
+                                        get_config)
 
 import vllm.envs as envs
 from vllm.attention import AttentionMetadata, get_attn_backend
@@ -4129,6 +4130,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         return SamplerOutput(sampler_outputs)
 
     def __del__(self):
+        clear_config()
         self.shutdown_inc()
 
     def _patch_prev_output(self):
