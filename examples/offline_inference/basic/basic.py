@@ -4,6 +4,8 @@
 import argparse
 import os
 
+os.environ["PT_HPU_LAZY_MODE"] = "1"
+
 from vllm import LLM, SamplingParams
 
 # Parse the command-line arguments.
@@ -29,7 +31,6 @@ parser.add_argument("--enable-ep",
                     help="Enable EP for MOE models")
 args = parser.parse_args()
 
-os.environ["PT_HPU_LAZY_MODE"] = "1"
 os.environ["VLLM_SKIP_WARMUP"] = "true"
 os.environ["HABANA_VISIBLE_DEVICES"] = "ALL"
 os.environ["PT_HPU_ENABLE_LAZY_COLLECTIVES"] = "true"
