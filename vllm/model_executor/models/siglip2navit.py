@@ -16,6 +16,7 @@ from transformers.modeling_outputs import BaseModelOutputWithNoAttention
 from vllm.platforms import _Backend, current_platform
 
 from .vision import get_vit_attn_backend
+from vllm.model_executor.layers.rotary_embedding import _apply_rotary_emb_torch
 
 is_hpu = current_platform.is_hpu()
 
@@ -144,26 +145,26 @@ def rotate_half(x, interleaved=False):
                          two=2)
 
 
-def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
-    """
-    x: (batch_size, seqlen, nheads, headdim)
-    cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
-    """
-    ro_dim = cos.shape[-1] * 2
-    assert ro_dim <= x.shape[-1]
-    cos = repeat(
-        cos,
-        "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
-    sin = repeat(
-        sin,
-        "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
-    return torch.cat(
-        [
-            x[..., :ro_dim] * cos +
-            rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]
-        ],
-        dim=-1,
-    )
+# def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
+#     """
+#     x: (batch_size, seqlen, nheads, headdim)
+#     cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
+#     """
+#     ro_dim = cos.shape[-1] * 2
+#     assert ro_dim <= x.shape[-1]
+#     cos = repeat(
+#         cos,
+#         "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+#     sin = repeat(
+#         sin,
+#         "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+#     return torch.cat(
+#         [
+#             x[..., :ro_dim] * cos +
+#             rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]
+#         ],
+#         dim=-1,
+#     )
 
 
 def apply_rotary_pos_emb(
@@ -179,11 +180,11 @@ def apply_rotary_pos_emb(
         from flash_attn.layers.rotary import apply_rotary_emb
         apply_rotary_emb_func = apply_rotary_emb
     else:
-        apply_rotary_emb_func = apply_rotary_emb_torch
+        apply_rotary_emb_func = _apply_rotary_emb_torch
     q_embed = apply_rotary_emb_func(q.float(), cos.float(),
-                                    sin.float()).type_as(q)
+                                    sin.float(), False).type_as(q)
     k_embed = apply_rotary_emb_func(k.float(), cos.float(),
-                                    sin.float()).type_as(k)
+                                    sin.float(), False).type_as(k)
     return q_embed, k_embed
 
 
