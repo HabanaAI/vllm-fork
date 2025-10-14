@@ -2770,7 +2770,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_tables = None
                 if ctx:
                     block_tables = {
-                        group_id: [_PAD_BLOCK_ID] * ctx * self.block_size
+                        group_id:
+                        [_PAD_BLOCK_ID] * (seq_len // self.block_size)
                     }
                     computed_block_nums = ([1] * ctx)
         else:
