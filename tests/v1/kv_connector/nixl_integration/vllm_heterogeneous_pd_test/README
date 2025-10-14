@@ -1,0 +1,16 @@
+Please modify hosts, ports and card ids as needed.
+# On A100 sc09super16-nvd
+docker compose -f docker-compose_sp16_vllm_perf_pd.yml up -d
+docker cp run_prefill_gpu.sh skavulya_vllm_nixl_pd:/tmp
+docker exec  -d skavulya_vllm_nixl_pd  bash /tmp/run_prefill_gpu.sh
+ 
+# On G2  sc09super17-klb2
+docker compose -f docker-compose_wyn06_vllm_perf_pd.yml up -d
+docker cp run_decoder_hpu.sh skavulya_vllm_nixl_pd:/tmp
+docker cp run_toy_proxy.sh skavulya_vllm_nixl_pd:/tmp
+docker exec -d skavulya_vllm_nixl_pd  bash /tmp/run_decoder_hpu.sh
+docker exec -d skavulya_vllm_nixl_pd  bash /tmp/run_toy_proxy.sh
+ 
+# Test query on G2
+bash test_query.sh
+
