@@ -26,11 +26,13 @@ Help() {
     echo "    The environment variable 'QUANT_CONFIG' will override this option."
     echo "-i  Input range, str, format='input_min,input_max', default='4,1024'"
     echo "    Make sure the range cover all the possible lengths from the benchmark/client."
-    echo "-p  Max number of prefill sequences, int, default=${PREFERED_BATCHED_TOKENS}/input_min"
-    echo "    Used to control the max batch size for prefill to optimize the TTFT."
+    echo "-p  Max number of the prefill sequences, int, default=${PREFERED_PREFILL_BS}"
+    echo "    Used to control the max batch size for prefill to balance the TTFT and throughput."
+    echo "    The default value of 1 is used to optimize the TTFT."
+    echo "    Set to '' to optimize the throughput for short prompts."
     echo "-o  Output range, str, format='output_min,output_max', default='4,2048'"
     echo "    Make sure the range cover all the possible lengths from the benchmark/client."
-    echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_NUM_SEQS}"
+    echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_DECODING_BS}"
     echo "    Used to control the max batch size for decoding phase."
     echo "    It is recommended to set this value according to the 'Maximum concurrency'"
     echo "    reported by a test run."
@@ -136,10 +138,10 @@ dtype=${dtype:-"bfloat16"}
 quant_config=${quant_config:-""}
 input_min=${input_min:-"4"}
 input_max=${input_max:-"1024"}
-max_num_prefill_seqs=${max_num_prefill_seqs:-""}
+max_num_prefill_seqs=${max_num_prefill_seqs-${PREFERED_PREFILL_BS}}
 output_min=${output_min:-"4"}
 output_max=${output_max:-"2048"}
-max_num_seqs=${max_num_seqs:-$PREFERED_NUM_SEQS}
+max_num_seqs=${max_num_seqs:-$PREFERED_DECODING_BS}
 max_seq_len_to_capture=${max_seq_len_to_capture:-$PREFERED_SEQ_LEN_TO_CAPTURE}
 gpu_memory_utilization=${gpu_memory_utilization:-"0.9"}
 extra_params=(${extra_params[@]:-})
