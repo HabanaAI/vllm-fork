@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from vllm import LLM, SamplingParams
-
 import argparse
 import os
+
+from vllm import LLM, SamplingParams
 
 # Parse the command-line arguments.
 parser = argparse.ArgumentParser()
@@ -44,9 +44,9 @@ if __name__ == "__main__":
         "The future of AI is",
     ]
     # Create a sampling params object.
-    sampling_params = SamplingParams(temperature=0.8,
-                                     top_p=0.95,
-                                     max_tokens=args.output_tokens)
+    sampling_params = SamplingParams(
+        temperature=0.8, top_p=0.95, max_tokens=args.output_tokens
+    )
     model = args.model
     if args.tp_size == 1:
         llm = LLM(

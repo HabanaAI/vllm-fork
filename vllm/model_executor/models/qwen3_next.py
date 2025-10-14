@@ -597,7 +597,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 self.conv1d.weight.contiguous().float(),
                 bias=None,
                 padding=self.conv_kernel_size - 1,
-                groups=(self.conv_dim//self.tp_size))
+                groups=(self.conv_dim // self.tp_size))
             mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
             mixed_qkv_non_spec = \
                 mixed_qkv_non_spec[:, :, :seq_len].transpose(1, 2)
@@ -623,14 +623,11 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             ],
             dim=-1,
         )
-        query_non_spec = query.reshape(query.shape[0],
-                                       query.shape[1], -1,
+        query_non_spec = query.reshape(query.shape[0], query.shape[1], -1,
                                        self.head_k_dim)
-        key_non_spec = key.reshape(key.shape[0],
-                                   key.shape[1], -1,
+        key_non_spec = key.reshape(key.shape[0], key.shape[1], -1,
                                    self.head_k_dim)
-        value_non_spec = value.reshape(value.shape[0],
-                                       value.shape[1], -1,
+        value_non_spec = value.reshape(value.shape[0], value.shape[1], -1,
                                        self.head_v_dim)
 
         beta = b.sigmoid()
