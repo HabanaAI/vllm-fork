@@ -128,7 +128,7 @@ jobs:
         TEST_COMMAND: ${{ matrix.tests.command }}
     steps:
         - name: Get Job ID
-          uses: actions/github-script@v7
+          uses: actions/github-script@v8
           id: fetch_job_id
           with:
             script: |
@@ -195,7 +195,7 @@ jobs:
              echo "url=$url" >> $GITHUB_OUTPUT
 
         - name: Create Commit Status(Pending)
-          uses: actions/github-script@v7
+          uses: actions/github-script@v8
           env:
             GIT_SHA: ${{ needs.read_codeowners.outputs.pr_sha }}
             TARGET_URL: ${{ steps.job_url.outputs.url }}
@@ -274,7 +274,7 @@ jobs:
             fi
             exit $test_status
         - name: Create Commit Status(Failure)
-          uses: actions/github-script@v7
+          uses: actions/github-script@v8
           if: failure()
           env:
             GIT_SHA: ${{ needs.read_codeowners.outputs.pr_sha }}
@@ -292,7 +292,7 @@ jobs:
                 context: `Test / ${process.env.JOB_NAME}`
               });                
         - name: Create Commit Status(Success)
-          uses: actions/github-script@v7
+          uses: actions/github-script@v8
           if: success()
           env:
             GIT_SHA: ${{ needs.read_codeowners.outputs.pr_sha }}
@@ -331,7 +331,7 @@ jobs:
               exit 1
             fi
         - name: Create Commit Status(Success)
-          uses: actions/github-script@v7
+          uses: actions/github-script@v8
           if: success()
           env:
             GIT_SHA: ${{ needs.read_codeowners.outputs.pr_sha }}
@@ -346,7 +346,7 @@ jobs:
                 context: 'Summarize Test Results'
               });
         - name: Create Commit Status(Failure)
-          uses: actions/github-script@v7
+          uses: actions/github-script@v8
           if: failure()
           env:
             GIT_SHA: ${{ needs.read_codeowners.outputs.pr_sha }}
