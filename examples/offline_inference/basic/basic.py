@@ -32,7 +32,6 @@ os.environ["PT_HPU_ENABLE_LAZY_COLLECTIVES"] = "true"
 os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
 
 if __name__ == "__main__":
-
     # Sample prompts.
     prompts = [
         "Hello, my name is",
