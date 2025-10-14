@@ -1,0 +1,23 @@
+services:
+
+ skavulya_vllm_nixl_pd:
+    image:  amr-idc-registry.infra-host.com/asv-content/vllm-debug-ttft-permute-perf:1.23.0-10092025
+    #image: amr-idc-registry.infra-host.com/asv-content/vllm-v1-ucx-hpu:1.21.1-latest
+    container_name: skavulya_vllm_nixl_pd
+    runtime: habana
+    network_mode: host
+    ipc: host
+    privileged: yes
+    environment:
+  #        - HABANA_VISIBLE_DEVICES=3,4
+        - VLLM_LOGGING_LEVEL=DEBUG
+    volumes:
+        - /mnt/weka:/mnt/weka
+        - /home/skavulya:/skavulya
+        - /etc/localtime:/etc/localtime:ro
+
+    working_dir: /tmp
+    command: >
+        bash -c "
+          sleep 365d;
+        "

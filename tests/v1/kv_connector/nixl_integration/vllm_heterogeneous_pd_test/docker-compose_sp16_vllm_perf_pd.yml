@@ -1,0 +1,27 @@
+services:
+
+ skavulya_vllm_nixl_pd:
+    image:  amr-idc-registry.infra-host.com/asv-content/vllm-v1-ucx-gpu:25.01-py3
+    container_name: skavulya_vllm_nixl_pd
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    privileged: yes
+    environment:
+#        - NVIDIA_VISIBLE_DEVICES=0,1
+        - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+        - /mnt/weka:/mnt/weka
+        - /etc/localtime:/etc/localtime:ro
+        - /home/skavulya:/skavulya
+
+    shm_size: 16g
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+    working_dir: /tmp
+    command: >
+        bash -c "
+          sleep 365d;
+        "
