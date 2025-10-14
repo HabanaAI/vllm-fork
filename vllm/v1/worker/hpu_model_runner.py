@@ -2565,13 +2565,38 @@ def copy_kv_blocks(
         key_cache = src_kv_caches[layer_name][0]
         value_cache = src_kv_caches[layer_name][1]
 
-        if direction == "d2h" and use_hpu_buffer:
-            hpu_buffer[i][0]=key_cache.index_select_(0,  src_slot_mapping)
-            hpu_buffer[i][1]=value_cache.index_select_(0,  src_slot_mapping)
-        else:
-            #import remote_pdb;remote_pdb.set_trace()      
-            dst_kv_caches[layer_name][0].index_put_((dst_slot_mapping,), key_cache.index_select(0, src_slot_mapping).to(target_device))
-            dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))                                      
+
+        block_factor, n_kv_heads, remote_block_size, head_dim = 8, 8, 16, 128
+        if len(src_block_ids) == src_block_ids[-1]-src_block_ids[0] + 1: # simple check if the indices are c
+ontiguous
+            block_idx = src_block_ids[0]
+            num_blocks = len(src_block_ids)
+            dst_kv_caches[layer_name][0][block_idx*block_size: (num_blocks+block_idx)*block_size] = key_cach
+e[block_idx*block_size: (num_blocks+block_idx)*block_size].reshape(num_blocks*block_factor, n_kv_heads, remot
+e_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(num_blocks*block_size,n_kv_heads,head_dim)
+            dst_kv_caches[layer_name][1][block_idx*block_size: (num_blocks+block_idx)*block_size] = value_ca
+che[block_idx*block_size: (num_blocks+block_idx)*block_size].reshape(num_blocks*block_factor, n_kv_heads, rem
+ote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(num_blocks*block_size,n_kv_heads,head_dim)
+            continue
+        for block_idx in src_block_ids:
+            #print('buke addr before:', dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*blo
+ck_size].data_ptr())
+            dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*block_size] = key_cache[block_i
+dx*block_size: (1+block_idx)*block_size].reshape(block_factor, n_kv_heads, remote_block_size, head_dim).permu
+te(0,2,1,3).contiguous().reshape(block_size,n_kv_heads,head_dim).to("hpu")
+            dst_kv_caches[layer_name][1][block_idx*block_size: (1+block_idx)*block_size] = value_cache[block
+_idx*block_size: (1+block_idx)*block_size].reshape(block_factor, n_kv_heads, remote_block_size, head_dim).per
+mute(0,2,1,3).contiguous().reshape(block_size,n_kv_heads,head_dim).to("hpu")
+            #print('buke addr after:', dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*bloc
+k_size].data_ptr())
+        if False:
+            if direction == "d2h" and use_hpu_buffer:
+                hpu_buffer[i][0]=key_cache.index_select_(0,  src_slot_mapping)
+                hpu_buffer[i][1]=value_cache.index_select_(0,  src_slot_mapping)
+            else:
+                #import remote_pdb;remote_pdb.set_trace()      
+                dst_kv_caches[layer_name][0].index_put_((dst_slot_mapping,), key_cache.index_select(0, src_slot_mapping).to(target_device))
+                dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))                                      
         i = i+1
         
         #dst_kv_caches[layer_name][0][dst_slot_mapping] = key_cache[src_slot_mapping].to(target_device)
