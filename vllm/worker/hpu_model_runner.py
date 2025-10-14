@@ -1547,6 +1547,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
+    # fla is short for Flat Linear Attention
     def _is_fla_model(self):
         return hasattr(self.model_config.hf_config, "linear_conv_kernel_dim")
 
@@ -1659,7 +1660,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-        total_seq_ids: List[int] = None,
         align_worker=False,
     ) -> PreparePromptMetadata:
         input_tokens: List[List[int]] = []
@@ -2598,7 +2598,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             slot_mapping,
             lora_ids,
             token_types,
-        ) = self._prepare_prompt(prefill_reqs, total_seq_ids=seq_ids)
+        ) = self._prepare_prompt(prefill_reqs)
         (
             decode_input_tokens,
             decode_input_positions,
@@ -3080,7 +3080,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_pt_profiler_run=False,
             img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
             is_lora_profile_run=True,
-            is_dummy_run=True,
         )
 
         return
