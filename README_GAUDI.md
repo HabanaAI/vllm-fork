@@ -2,6 +2,9 @@
 
 This README provides instructions on how to run vLLM with Intel Gaudi devices.
 
+> [!CAUTION]
+> Starting from v1.23.0, the vLLM fork will reach end-of-life (EOL) and be deprecated in v1.24.0, remaining functional only for legacy use cases until then. At the same time, the vllm-gaudi plugin will be production-ready in v1.23.0 and will become the default by v1.24.0. This plugin integrates Intel Gaudi with vLLM for optimized LLM inference and is intended for future deployments. We strongly suggest preparing a migration path toward the plugin version: https://github.com/vllm-project/vllm-gaudi.
+
 # Requirements and Installation
 
 To set up the execution environment, please follow the instructions in the [Gaudi Installation Guide](https://docs.habana.ai/en/latest/Installation_Guide/index.html).
