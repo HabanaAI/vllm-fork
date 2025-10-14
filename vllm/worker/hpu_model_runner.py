@@ -98,7 +98,7 @@ class DefaultVisionBuckets:
     def __init__(self):
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == "":
-           multimodal_buckets = self._get_default_buckets()
+            multimodal_buckets = self._get_default_buckets()
         else:
             multimodal_buckets = [int(i) for i in envvar.split(',')]
         self.multimodal_buckets = self._process_buckets(multimodal_buckets)
