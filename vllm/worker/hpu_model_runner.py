@@ -1074,7 +1074,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.device = self.device_config.device
         self.enforce_eager = self.model_config.enforce_eager
         self.max_num_seqs = self.scheduler_config.max_num_seqs
-        self.mamba_cache_table = {}
+        self.mamba_cache_table = Dict[int, int]
         self.max_num_prefill_seqs = \
             self.scheduler_config.max_num_prefill_seqs \
             if self.scheduler_config.max_num_prefill_seqs is not None \
@@ -2026,7 +2026,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self._is_fla_model():
             conv_state_indices = self.move_to_device(conv_state_indices)
         else:
-            conv_state_indices = None
+            conv_state_indices = None  # type: ignore
 
         if mamba_cache_prefill_indices is not None:
             mamba_cache_prefill_indices = self.move_to_device(
@@ -2081,7 +2081,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _prepare_decode(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-        total_seq_ids: List[int] = None,
+        total_seq_ids: List[int],
         output=None,
         align_worker=False,
     ) -> PrepareDecodeMetadata:
@@ -2385,9 +2385,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             mamba_decode_indices = FindMambaIndexForDecode(
                 self.mamba_cache_table, total_seq_ids)
             if len(mamba_decode_indices) > 0:
-                if len(mamba_decode_indices) < input_tokens.size(0):
-                    padding_len = input_tokens.size(0) - len(
-                        mamba_decode_indices)
+                decode_bs = input_tokens.size(0)  # type: ignore
+                if len(mamba_decode_indices) < decode_bs:
+                    padding_len = decode_bs - len(mamba_decode_indices)
                     mamba_decode_indices = mamba_decode_indices + \
                         list(range(max(mamba_decode_indices) + 1, \
                         max(mamba_decode_indices) + 1 + padding_len))
@@ -3137,8 +3137,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             inputs.attn_metadata.mamba_cache_prefill_indices = \
                 mamba_cache_prefill_indices
         else:
-            mamba_cache_decode_indices = \
-                mamba_cache_indices.to(self.device, non_blocking=True)
+            mamba_cache_decode_indices = mamba_cache_indices.to( # type: ignore
+                self.device, non_blocking=True)
             inputs.attn_metadata.mamba_cache_decode_indices = \
                 mamba_cache_decode_indices
 
