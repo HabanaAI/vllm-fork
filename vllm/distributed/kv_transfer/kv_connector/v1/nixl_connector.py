@@ -526,6 +526,8 @@ class NixlConnectorWorker:
             raise RuntimeError(
                 f"{self.device_type} with {self.kv_buffer_device} kv_buffer "
                 "is not supported.")
+        if self.kv_buffer_device == "cpu" and self.is_hetero:
+            self.remote_nixl_memory_type = "VRAM"
 
         # Note: host xfer buffer ops when use_host_buffer is True
         self.copy_blocks: Optional[CopyBlocksOp] = None
@@ -1057,7 +1059,7 @@ class NixlConnectorWorker:
         logger.debug(f'buke {self.slot_size_bytes=}|{tp_ratio=}|{self.block_len=}|{nixl_agent_meta.block_len=}|{self.tp_rank=}|{self._use_flashinfer=}')
         # Register with NIXL.
         descs = self.nixl_wrapper.get_xfer_descs(blocks_data,
-                                                 self.nixl_memory_type)
+                                                 self.remote_nixl_memory_type)
         #print('buke register remote:', len(blocks_data), blocks_data[:10],blocks_data[-1],self.nixl_memory_type)
         self.dst_xfer_side_handles[
             engine_id] = self.nixl_wrapper.prep_xfer_dlist(
@@ -1113,7 +1115,7 @@ class NixlConnectorWorker:
                 "Rank %s, get_finished: %s requests done sending "
                 "and %s requests done recving", self.tp_rank,
                 len(done_sending), len(done_recving))
-        if self.is_hetero:
+        if self.is_hetero and self.kv_buffer_device == "hpu":
             #import remote_pdb; remote_pdb.set_trace()
             t1 = time.perf_counter()
             remote_block_size = self.block_size // self.block_factor
