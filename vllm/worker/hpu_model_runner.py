@@ -130,8 +130,7 @@ class VisionBuckets:
         self.graphed_buckets = set()
 
         self.skip_warmup = 1 if os.environ.get(
-            'VLLM_SKIP_WARMUP', 'false').lower() in ['true', '1'
-                                                             ] else 0
+            'VLLM_SKIP_WARMUP', 'false').lower() in ['true', '1'] else 0
 
     def _process_buckets(self, buckets):
         if not self.is_batch_based:
