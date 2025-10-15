@@ -25,13 +25,29 @@ total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
 VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / block_size))
 VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len_aligned * bs / block_size + block_step))
  
-model="meta-llama/Llama-4-Maverick-17B-128E-Instruct"
-tokenizer="meta-llama/Llama-4-Maverick-17B-128E-Instruct"
+model="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct"
+tokenizer="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct"
 model_name="Maverick"
  
 mkdir -p benchmark_logs
+#export VLLM_SKIP_WARMUP=True
 
-QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json" \
+RECIPE_FLAG="visionbf16_kvfp8"
+
+if [[ "$RECIPE_FLAG" == "meta" ]]; then
+  echo "INFO: Flag is 'meta'. Using meta recipe without FP8 KV cache. Meta's recipe (Vision and text is working but no fp8 kv cache)"
+  export QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3_meta_recipe.json"
+  KV_CACHE_ARGS=""
+elif [[ "$RECIPE_FLAG" == "high_perf" ]]; then
+  echo "INFO: Flag is 'high_perf'. Using default recipe with FP8 KV cache. Current high performance code"
+  export QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json"
+  KV_CACHE_ARGS="--kv-cache-dtype fp8_inc"
+elif [[ "$RECIPE_FLAG" == "visionbf16_kvfp8" ]]; then
+  echo "INFO: Flag is 'visionbf16_kvfp8'. Using default recipe with FP8 KV cache with vision BF16."
+  export QUANT_CONFIG="./vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3_vision_enabled_kvfp8_recipe.json"
+  KV_CACHE_ARGS="--kv-cache-dtype fp8_inc"
+fi
+
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
@@ -61,14 +77,16 @@ vllm serve ${model} \
     --block-size ${block_size} \
     --weights-load-device cpu \
     --use-v2-block-manager \
-    --kv-cache-dtype fp8_inc \
+    ${KV_CACHE_ARGS} \
     --gpu_memory_utilization ${gpu_utils} \
     --quantization inc \
     --enable-expert-parallel \
     --override-generation-config='{"attn_temperature_tuning": true}' \
     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
+
 pid=$(($!-1))
- 
+echo "vLLM server started with PID: $pid"
+
 until [[ "$n" -ge 1000 ]] || [[ $ready == true ]]; do
     n=$((n+1))
     if grep -q "Started server process" benchmark_logs/${log_name}_serving.log; then
