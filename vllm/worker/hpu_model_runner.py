@@ -398,7 +398,7 @@ class HpuModelAdapter(torch.nn.Module):
                         self.model.mlp1, disable_tensor_cache=True)
                 if hasattr(self.model, 'vte'):
                     self.model.vte = htorch.hpu.wrap_in_hpu_graph(
-                        self.model.vte, disable_tensor_cache=False)
+                        self.model.vte, disable_tensor_cache=True)
                 if hasattr(self.model, 'visual_tokenizer'):
                     self.model.visual_tokenizer = htorch.hpu.wrap_in_hpu_graph(
                         self.model.visual_tokenizer,
