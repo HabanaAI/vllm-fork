@@ -65,6 +65,8 @@ logger = init_logger(__name__)
 _TYPE_CACHE: dict[str, dict[str, Any]] = {}
 
 hpu_buffer = None
+is_hetero = os.getenv('PT_HPU_ENABLE_RESTORE_KV_LAYOUT', '0') == '1'
+block_factor = int(os.getenv('PT_HPU_BLOCK_SIZE_FACTOR', '1'))
 @dataclass
 class PromptDecodeInfo:
     prompt_req_ids: list[str]
@@ -268,7 +270,7 @@ class HpuModelAdapter(torch.nn.Module):
     def _get_rotary_embedding_module(self, model: torch.nn.Module):
         """
         Dynamically get the RotaryEmbedding layer in the model.
-        This function will recursively search through the module 
+        This function will recursively search through the module
         hierarchy to find and return a RotaryEmbedding layer.
         If no such layer is found, it returns None.
         """
@@ -2467,7 +2469,7 @@ class HPUModelRunner:
             global hpu_buffer
             #if hpu_buffer is None:
             #    _, num_kv_heads, head_size = kv_cache_shape
-            #    shape =[len(kv_caches), 2, 8192  , num_kv_heads, head_size] 
+            #    shape =[len(kv_caches), 2, 8192  , num_kv_heads, head_size]
             #    hpu_buffer = torch.empty(shape, dtype=kv_cache_spec.dtype, device=self.device)
 
         htorch.hpu.synchronize()
@@ -2521,7 +2523,7 @@ def _make_src_and_dst_indices(
     #convert to slot mapping
     src_slot_mapping = np.concat([np.arange(start=s*block_size, stop=(s+1)*block_size) for s in src_block_ids])
     dst_slot_mapping = np.concat([np.arange(start=d*block_size, stop=(d+1)*block_size) for d in dst_block_ids])
-    
+
     src_slot_mapping = torch.tensor(src_slot_mapping,
                                device=src_device,
                                dtype=torch.int64)
@@ -2559,53 +2561,44 @@ def copy_kv_blocks(
     target_device = dst_device.type
 
     i = 0
-    global hpu_buffer
+    global hpu_buffer, is_hetero, block_factor
     use_hpu_buffer = False # (len(src_slot_mapping) == hpu_buffer[0][0].size(0)) and (hpu_buffer is not None)
     for layer_name in src_kv_caches:
         key_cache = src_kv_caches[layer_name][0]
         value_cache = src_kv_caches[layer_name][1]
 
-
-        block_factor, n_kv_heads, remote_block_size, head_dim = 8, 8, 16, 128
-        if len(src_block_ids) == src_block_ids[-1]-src_block_ids[0] + 1: # simple check if the indices are c
-ontiguous
-            block_idx = src_block_ids[0]
-            num_blocks = len(src_block_ids)
-            dst_kv_caches[layer_name][0][block_idx*block_size: (num_blocks+block_idx)*block_size] = key_cach
-e[block_idx*block_size: (num_blocks+block_idx)*block_size].reshape(num_blocks*block_factor, n_kv_heads, remot
-e_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(num_blocks*block_size,n_kv_heads,head_dim)
-            dst_kv_caches[layer_name][1][block_idx*block_size: (num_blocks+block_idx)*block_size] = value_ca
-che[block_idx*block_size: (num_blocks+block_idx)*block_size].reshape(num_blocks*block_factor, n_kv_heads, rem
-ote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(num_blocks*block_size,n_kv_heads,head_dim)
-            continue
-        for block_idx in src_block_ids:
-            #print('buke addr before:', dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*blo
-ck_size].data_ptr())
-            dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*block_size] = key_cache[block_i
-dx*block_size: (1+block_idx)*block_size].reshape(block_factor, n_kv_heads, remote_block_size, head_dim).permu
-te(0,2,1,3).contiguous().reshape(block_size,n_kv_heads,head_dim).to("hpu")
-            dst_kv_caches[layer_name][1][block_idx*block_size: (1+block_idx)*block_size] = value_cache[block
-_idx*block_size: (1+block_idx)*block_size].reshape(block_factor, n_kv_heads, remote_block_size, head_dim).per
-mute(0,2,1,3).contiguous().reshape(block_size,n_kv_heads,head_dim).to("hpu")
-            #print('buke addr after:', dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*bloc
-k_size].data_ptr())
-        if False:
+        if is_hetero:
+            assert direction == "h2d", "hetero only supports h2d for now"
+            n_kv_heads, head_dim = key_cache.shape[-2:]
+            remote_block_size = block_size//block_factor
+            # block_factor, n_kv_heads, remote_block_size, head_dim = 8, 8, 16, 128
+            if len(src_block_ids) == src_block_ids[-1]-src_block_ids[0] + 1: # simple check if the indices are contiguous
+                block_idx = src_block_ids[0]
+                num_blocks = len(src_block_ids)
+                dst_kv_caches[layer_name][0][block_idx*block_size: (num_blocks+block_idx)*block_size] = key_cache[block_idx*block_size: (num_blocks+block_idx)*block_size].reshape(num_blocks*block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(num_blocks*block_size,n_kv_heads,head_dim)
+                dst_kv_caches[layer_name][1][block_idx*block_size: (num_blocks+block_idx)*block_size] = value_cache[block_idx*block_size: (num_blocks+block_idx)*block_size].reshape(num_blocks*block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(num_blocks*block_size,n_kv_heads,head_dim)
+                continue
+            for block_idx in src_block_ids:
+                #print('buke addr before:', dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*block_size].data_ptr())
+                dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*block_size] = key_cache[block_idx*block_size: (1+block_idx)*block_size].reshape(block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(block_size,n_kv_heads,head_dim).to("hpu")
+                dst_kv_caches[layer_name][1][block_idx*block_size: (1+block_idx)*block_size] = value_cache[block_idx*block_size: (1+block_idx)*block_size].reshape(block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(block_size,n_kv_heads,head_dim).to("hpu")
+                #print('buke addr after:', dst_kv_caches[layer_name][0][block_idx*block_size: (1+block_idx)*block_size].data_ptr())
+        else:
             if direction == "d2h" and use_hpu_buffer:
                 hpu_buffer[i][0]=key_cache.index_select_(0,  src_slot_mapping)
                 hpu_buffer[i][1]=value_cache.index_select_(0,  src_slot_mapping)
             else:
-                #import remote_pdb;remote_pdb.set_trace()      
+                #import remote_pdb;remote_pdb.set_trace()
                 dst_kv_caches[layer_name][0].index_put_((dst_slot_mapping,), key_cache.index_select(0, src_slot_mapping).to(target_device))
-                dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))                                      
+                dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))
         i = i+1
-        
+
         #dst_kv_caches[layer_name][0][dst_slot_mapping] = key_cache[src_slot_mapping].to(target_device)
         #dst_kv_caches[layer_name][1][dst_slot_mapping] = value_cache[src_slot_mapping].to(target_device)
     #if use_hpu_buffer:
         #tmp = hpu_buffer.to('cpu')
         #dst_kv_caches = hpu_buffer.to('cpu')
-        
-        
+
     torch.hpu.synchronize()
-    
+
     logger.info(f"copy_kv_blocks: copy takes {time.perf_counter() - start}|{direction=}|{os.getpid()=}|{block_size=}|{len(src_block_ids)=}|{len(dst_block_ids)=}| {len(src_kv_caches)=} | ")
