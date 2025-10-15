@@ -528,6 +528,8 @@ class NixlConnectorWorker:
                 "is not supported.")
         if self.kv_buffer_device == "cpu" and self.is_hetero:
             self.remote_nixl_memory_type = "VRAM"
+        else:
+            self.remote_nixl_memory_type = self.nixl_memory_type
 
         # Note: host xfer buffer ops when use_host_buffer is True
         self.copy_blocks: Optional[CopyBlocksOp] = None
