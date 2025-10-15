@@ -548,8 +548,11 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
             image_patches_flat.to(target_dtype), grid_thws,
             self.vision_buckets)
 
+        visual_embeds = visual_embeds.contiguous().clone()
+        grid_thws = grid_thws.contiguous().clone()
         visual_tokens = self.visual_tokenizer(visual_embeds, grid_thws)
         visual_embeds = self.vte(visual_tokens)  # 1:1 numeric eq.
+        indicator_tokens = indicator_tokens.contiguous().clone()
         indicator_embeds = self.vte(indicator_tokens)
         padded_patches_per_image = [
             grid[1] * grid[2] // (self.config.vit_config.hidden_stride**2)
