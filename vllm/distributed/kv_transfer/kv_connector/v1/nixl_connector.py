@@ -1129,11 +1129,10 @@ class NixlConnectorWorker:
                 for k, v in self.device_kv_caches.values():
                     local_block_ids = meta.local_block_ids
                     #print(f'buke {local_block_ids=}|{k.shape=}')
-                    assert len(local_block_ids) == local_block_ids[-1]-local_block_ids[0] + 1 # simple check if the indices are contiguous
-                    block_idx = local_block_ids[0]
-                    num_blocks = len(local_block_ids)
-                    k[block_idx*self.block_size: (num_blocks+block_idx)*self.block_size] = k[block_idx*self.block_size: (num_blocks+block_idx)*self.block_size].reshape(num_blocks*self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(num_blocks*self.block_size,n_kv_heads,head_dim)
-                    v[block_idx*self.block_size: (num_blocks+block_idx)*self.block_size] = v[block_idx*self.block_size: (num_blocks+block_idx)*self.block_size].reshape(num_blocks*self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(num_blocks*self.block_size,n_kv_heads,head_dim)
+                    for block_idx in local_block_ids:
+                        #import remote_pdb; remote_pdb.set_trace()
+                        k[block_idx*self.block_size: (1+block_idx)*self.block_size] = k[block_idx*self.block_size: (1+block_idx)*self.block_size].reshape(self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(self.block_size,n_kv_heads,head_dim)
+                        v[block_idx*self.block_size: (1+block_idx)*self.block_size] = v[block_idx*self.block_size: (1+block_idx)*self.block_size].reshape(self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(self.block_size,n_kv_heads,head_dim)
                 #import remote_pdb; remote_pdb.set_trace()
                 t2 = time.perf_counter()
                 tt = t2-t1
