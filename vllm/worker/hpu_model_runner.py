@@ -1845,8 +1845,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 (max_prompt_len if seq_group_metadata.sampling_params and
                  seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
-        if any(context_lens):
-            assert not self.scheduler_config.chunked_prefill_enabled
+        if self.scheduler_config.chunked_prefill_enabled:
+            # We have non-zero context len values but not prefix catching
+            prefix_block_list_tensor = None
+        elif any(context_lens):
             # prefix caching
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
@@ -2944,6 +2946,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.vllm_config.compilation_config.static_forward_context,
             [kv_caches] * self.parallel_config.pipeline_parallel_size)
         max_seq_len = self.bucketing_manager.get_max_prompt_shape()
+        if self.scheduler_config.chunked_prefill_enabled:
+            max_seq_len = min(max_seq_len, self.max_num_batched_tokens, self.max_seq_len_to_capture)
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
