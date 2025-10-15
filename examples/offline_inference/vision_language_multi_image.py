@@ -439,7 +439,7 @@ def load_ovis(question: str, image_urls: list[str]) -> ModelRequestData:
         max_model_len=8192,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="half",
+        dtype="bfloat16",
         limit_mm_per_prompt={"image": len(image_urls)},
     )
 
@@ -469,7 +469,7 @@ def load_ovis2_5(question: str, image_urls: list[str]) -> ModelRequestData:
         max_model_len=8192,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="half",
+        dtype="bfloat16",
         limit_mm_per_prompt={"image": len(image_urls)},
     )
 
@@ -478,7 +478,9 @@ def load_ovis2_5(question: str, image_urls: list[str]) -> ModelRequestData:
     )
     messages = [{"role": "user", "content": f"{placeholders}\n{question}"}]
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        "AIDC-AI/Ovis2-1B", trust_remote_code=True
+    )
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
