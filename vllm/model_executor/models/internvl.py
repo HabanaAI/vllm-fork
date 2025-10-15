@@ -1491,6 +1491,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                 end_idx = start_idx + i
                 batch_sliced_pixel_values = \
                         pixel_values[start_idx:end_idx, ...]
+                batch_sliced_pixel_values = batch_sliced_pixel_values.contiguous().clone()
                 if is_lazy:
                     vit_embeds_minibatch = \
                         self.vision_model(
