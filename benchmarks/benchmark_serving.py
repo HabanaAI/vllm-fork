@@ -71,6 +71,7 @@ from benchmark_dataset import (
     ShareGPTDataset,
     SonnetDataset,
     VisionArenaDataset,
+    MTOBDataset,
 )
 from benchmark_utils import convert_to_pytorch_benchmark_format, write_to_json
 
@@ -173,7 +174,8 @@ def calculate_metrics(
     for i in range(len(outputs)):
         if outputs[i].success:
             output_len = outputs[i].output_tokens
-
+            # print(f">>>>>>> len(output): {output_len}")
+            # print(f">>>>>>> outputs[i].generated_text: {outputs[i].generated_text}")
             if not output_len:
                 # We use the tokenizer to count the number of output tokens
                 # for some serving backends instead of looking at
@@ -662,7 +664,28 @@ def main(args: argparse.Namespace):
                 tokenizer=tokenizer,
                 return_prompt_formatted=True,
             )
-
+    elif args.dataset_name == "mtob":
+        dataset = MTOBDataset()
+        # For the "sonnet" dataset, formatting depends on the backend.
+        if args.backend == "openai-chat":
+            input_requests = dataset.sample(
+                num_requests=args.num_prompts,
+                input_len=args.mtob_input_len,
+                output_len=args.mtob_output_len,
+                tokenizer=tokenizer,
+                return_prompt_formatted=False,
+            )
+        else:
+            assert tokenizer.chat_template or tokenizer.default_chat_template, (
+                "Tokenizer/model must have chat template for MTOB dataset."
+            )
+            input_requests = dataset.sample(
+                num_requests=args.num_prompts,
+                input_len=args.mtob_input_len,
+                output_len=args.mtob_output_len,
+                tokenizer=tokenizer,
+                return_prompt_formatted=True,
+            )
     elif args.dataset_name == "hf":
         # all following datasets are implemented from the
         # HuggingFaceDataset base class
@@ -780,7 +803,6 @@ def main(args: argparse.Namespace):
     # Avoid GC processing "static" data - reduce pause times.
     gc.collect()
     gc.freeze()
-
     benchmark_result = asyncio.run(
         benchmark(
             backend=backend,
@@ -904,7 +926,7 @@ if __name__ == "__main__":
         "--dataset-name",
         type=str,
         default="sharegpt",
-        choices=["sharegpt", "burstgpt", "sonnet", "random", "hf", "custom"],
+        choices=["sharegpt", "burstgpt", "sonnet", "random", "hf", "custom","mtob"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument(
@@ -1150,6 +1172,20 @@ if __name__ == "__main__":
             "context length sampled from [input_len * (1 - range_ratio), "
             "input_len * (1 + range_ratio)]."
         ),
+    )
+
+    mtob_group = parser.add_argument_group("mtob dataset options")
+    mtob_group.add_argument(
+        "--mtob-input-len",
+        type=int,
+        default=1024,
+        help="Number of input tokens per request, used only for mtob dataset.",
+    )
+    mtob_group.add_argument(
+        "--mtob-output-len",
+        type=int,
+        default=128,
+        help="Number of output tokens per request, used only for mtob dataset.",
     )
 
     hf_group = parser.add_argument_group("hf dataset options")
