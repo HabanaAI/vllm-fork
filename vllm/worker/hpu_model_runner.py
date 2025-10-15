@@ -3960,6 +3960,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
+                        # Clone inputs_embeds early to prevent cache miss failure
+                        if 'InternVLChatModel' in str(type(self.model.model)):
+                            if "inputs_embeds" in execute_model_kwargs:
+                                orig = execute_model_kwargs["inputs_embeds"]
+                                execute_model_kwargs["inputs_embeds"] = orig.contiguous().clone()
+                            if sampling_metadata.selected_token_indices is not None:
+                                sampling_metadata.selected_token_indices = sampling_metadata.selected_token_indices.clone()
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
