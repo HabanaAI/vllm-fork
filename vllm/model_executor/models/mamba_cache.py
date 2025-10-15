@@ -25,25 +25,28 @@ class MambaCacheParams:
 class MambaCacheManager(ConstantSizeCache):
 
     def __init__(self, vllm_config: VllmConfig, dtype: torch.dtype,
-                 num_mamba_layers: int, conv_state_shape: tuple[int, int],
+                 device: torch.device, num_mamba_layers: int,
+                 conv_state_shape: tuple[int, int],
                  temporal_state_shape: tuple[int, int]):
 
         # Determine max batch size to set size of MambaCache
-        max_batch_size = vllm_config.scheduler_config.max_num_seqs
-        if not vllm_config.model_config.enforce_eager:
-            max_batch_size = vllm_config.pad_for_cudagraph(max_batch_size)
+        self.max_batch_size = vllm_config.scheduler_config.max_num_seqs
 
         # Initialize parent class
-        super().__init__(max_batch_size)
+        super().__init__(self.max_batch_size)
 
-        conv_state = torch.empty(size=(num_mamba_layers, max_batch_size) +
-                                 conv_state_shape,
-                                 dtype=dtype,
-                                 device="cuda")
-        temporal_state = torch.empty(size=(num_mamba_layers, max_batch_size) +
-                                     temporal_state_shape,
-                                     dtype=dtype,
-                                     device="cuda")
+        self.device = device
+
+        conv_state = torch.empty(
+            size=(num_mamba_layers, self.max_batch_size * 2 + 1) +
+            conv_state_shape,
+            dtype=dtype,
+            device=self.device)
+        temporal_state = torch.empty(
+            size=(num_mamba_layers, self.max_batch_size * 2 + 1) +
+            temporal_state_shape,
+            dtype=dtype,
+            device=self.device)
 
         self._mamba_cache = (conv_state, temporal_state)
 
@@ -65,12 +68,13 @@ class MambaCacheManager(ConstantSizeCache):
         return MambaCacheParams(cache_tensors[0], cache_tensors[1],
                                 state_indices_tensor)
 
-    def get_seqlen_agnostic_capture_inputs(self, batch_size: int):
+    def get_seqlen_agnostic_capture_inputs(self):
         """
         Provide the CUDA graph capture runs with a buffer in adjusted size.
         The buffer is used to maintain the Mamba Cache during the CUDA graph
         replay runs.
         """
-        return self._mamba_cache, torch.as_tensor([PAD_SLOT_ID] * batch_size,
+        return self._mamba_cache, torch.as_tensor([PAD_SLOT_ID] *
+                                                  self.max_batch_size,
                                                   dtype=torch.int32,
-                                                  device="cuda")
+                                                  device=self.device)
