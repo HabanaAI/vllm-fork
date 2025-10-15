@@ -30,7 +30,7 @@ Set up the container with the latest Intel Gaudi Software Suite release using th
 ### Ubuntu
 
 ```
-$ docker build -f Dockerfile.hpu -t vllm-hpu-env  .
+$ docker build -f docker/Dockerfile.hpu -t vllm-hpu-env  .
 $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --rm vllm-hpu-env
 ```
 
@@ -48,7 +48,7 @@ See [this repo](https://github.com/HabanaAI/Setup_and_Install/tree/main/dockerfi
 Additionally, the path to the Docker image must be updated in the Dockerfile.hpu.ubi file.
 
 ```
-$ docker build -f Dockerfile.hpu.ubi -t vllm-hpu-env  .
+$ docker build -f docker/Dockerfile.hpu.ubi -t vllm-hpu-env  .
 $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --rm vllm-hpu-env
 ```
 
