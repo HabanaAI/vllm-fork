@@ -99,6 +99,7 @@ if TYPE_CHECKING:
     VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
     VLLM_SKIP_PREFILL_SAMPLING: bool = False
     VLLM_ABORT_REQUEST_KV_CACHE_MISS: bool = True
+    VLLM_FETCH_KV_USE_ASYNC_D2H: int = 0
 
 
 def get_default_cache_root():
@@ -644,6 +645,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: bool(int(os.getenv("VLLM_SKIP_PREFILL_SAMPLING", "0"))),
     "VLLM_ABORT_REQUEST_KV_CACHE_MISS":
     lambda: bool(int(os.getenv("VLLM_ABORT_REQUEST_KV_CACHE_MISS", "1"))),
+
+    # Controls the async device-to-host mode used when fetching KV caches.
+    # 0: Sync copy, 1: Non-blocking copy, 2: Async copy with event
+    "VLLM_FETCH_KV_USE_ASYNC_D2H":
+    lambda: int(os.getenv("VLLM_FETCH_KV_USE_ASYNC_D2H", "0")),
 }
 
 # end-env-vars-definition
