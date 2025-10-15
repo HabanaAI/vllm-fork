@@ -13,10 +13,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--model",
     type=str,
-    default="Qwen/Qwen3-Next-80B-A3B-Instruct",
+    default="facebook/opt-125m",
     help="The model path.",
 )
-parser.add_argument("--tp-size", type=int, default=4, help="The number of threads.")
+parser.add_argument("--tp-size", type=int, default=2, help="The number of threads.")
 parser.add_argument(
     "--output-tokens", type=int, default=512, help="The number of output tokens."
 )
