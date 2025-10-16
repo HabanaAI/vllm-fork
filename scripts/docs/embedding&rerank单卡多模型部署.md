@@ -1,6 +1,6 @@
-# Embedding/Rrank多模型单HPU卡 vLLM推理部署指南
+# Embedding/Rrank多模型单Gaudi卡vLLM推理部署指南
 
-从aice 1.22.0 开始，vllm可以提供在单HPU上运行多模型推理服务。
+从aice 1.22.0 开始，vllm可以提供在单Gaudi上运行多模型推理服务。
 针对Embedding和rerank类场景，本文档提供了基于 vLLM-fork 的多模型推理服务的完整部署指南，包括系统配置、服务启动、客户端配置和调优参数。
 
 ## 已验证模型

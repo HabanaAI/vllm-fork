@@ -26,10 +26,12 @@ git checkout release-2.5.4
 假设host 目录/mnt/disk1 包含 vllm-fork 和MinerU 代码，并选用0号卡部署
 
 ```
-docker run -it --name minerU-server --runtime=habana -e HABANA_VISIBLE_DEVICES=0 \ 
+
+docker run -it --name minerU-server --runtime=habana -e HABANA_VISIBLE_DEVICES=0 \
            -e OMPI_MCA_btl_vader_single_copy_mechanism=none -v /mnt/disk1:/data  \
-           --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace \ 
+           --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace \
            vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:1.21.3-57
+
 ```
 
 ### 3. 安装vllm 和minerU
@@ -45,6 +47,26 @@ pip install .[core] -i https://mirrors.aliyun.com/pypi/simple
 ```
 
 ## 环境配置
+
+### 0. 下载模型和更新minerU.json
+
+选取modelscope或者huggingface下载模型，以下以modelscope为例
+
+```bash
+mineru-models-download -s modelscope -m vlm
+```
+
+更新mineru.json,请参考
+https://github.com/opendatalab/MinerU/blob/master/mineru.template.json
+
+需要更新的配置为models-dir，这个可以指定到模型目录，如果不指定会使用modelscope默认/root/.cache/modelscope
+
+```json
+    "models-dir": {
+        "pipeline": "",
+        "vlm": ""
+    },
+```
 
 ### 1. 环境变量
 
