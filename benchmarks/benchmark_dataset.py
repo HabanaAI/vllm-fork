@@ -1180,20 +1180,10 @@ class MTOBDataset(BenchmarkDataset):
         self,
         **kwargs,
     ) -> None:
-        self.book_path='/root/mtob/resources/grammar_book_for_claude_long.txt'
-        # self.book_chunk_size=512
-        # self.book_type="full_long"
-        self.direction="ke"
-        # self.split="test"
-        # self.model_type='openai'
-        # self.model_name='ibm-granite/granite-3.1-8b-instruct'
-        # self.output_dir=f"/root/vllm-fork/llama4-scripts/outputs/{self.direction}/"
-        # self.output_file=f'results_{self.split}_{self.model_type}_{self.model_name.split("/")[-1]}_book_type_{self.book_type}.json'
-        # self.output_path=self.output_dir + self.output_file
-        # self.wordlist_path = "/root/mtob/resources/wordlist.json"
-        # self.train_examples_file = f'/root/mtob/splits/train_examples.json'
-        self.test_examples_file = f'/root/mtob/splits/test_examples_{self.direction}.json'
-        # self.num_reference_passages = 2
+        self.dataset_root: str = '/root/mtob'
+        self.book_path: str = f'{self.dataset_root}/resources/grammar_book_for_claude_long.txt'
+        self.direction: str = "ke"
+        self.test_examples_file: str = f'{self.dataset_root}/splits/test_examples_{self.direction}.json'
         self.load_data()
 
     def load_data(self) -> None:
