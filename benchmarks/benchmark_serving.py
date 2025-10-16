@@ -665,7 +665,7 @@ def main(args: argparse.Namespace):
                 return_prompt_formatted=True,
             )
     elif args.dataset_name == "mtob":
-        dataset = MTOBDataset()
+        dataset = MTOBDataset(dataset_root=args.dataset_path)
         # For the "sonnet" dataset, formatting depends on the backend.
         if args.backend == "openai-chat":
             input_requests = dataset.sample(
