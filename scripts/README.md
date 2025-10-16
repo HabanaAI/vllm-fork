@@ -252,6 +252,12 @@ bash calibrate_model.sh \
      -t 8 -x 4 -u
 ```
 
+> [!TIP]
+> **For models with fp8 weights**: Gaudi2 supports `fp8_e4m3fnuz` instead of the `fp8_e4m3fn`, so far the fp8_e4m3fn weights will be loaded to the host memory first and be converted to `fp8_e4m3fnuz` before be moved to the HPU. The conversion is done with CPU and could be time consuming. Another option is to convert the `fp8_e4m3fn` weights offline with the script [convert_weights_for_gaudi2.py](https://github.com/HabanaAI/vllm-hpu-extension/blob/aice/v1.22.0/scripts/convert_weights_for_gaudi2.py) and set the environment variable `VLLM_HPU_CONVERT_TO_FP8UZ=false` for the benchmark and calibration sessions.
+
+> [!WARNING]
+> Do not set `VLLM_HPU_CONVERT_TO_FP8UZ=false` when using the original `fp8_e4m3fn` weights, and **do not forget** to set `VLLM_HPU_CONVERT_TO_FP8UZ=false` when using the converted `fp8_e4m3fnuz` weights.
+
 #### 3. Make the Quantization folder
 Create a quantization folder at the same level as start_gaudi_vllm_server.sh.
 
