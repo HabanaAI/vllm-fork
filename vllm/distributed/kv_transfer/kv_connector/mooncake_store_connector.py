@@ -254,7 +254,9 @@ class MooncakeStoreConnector(KVConnectorBase):
             self.kv_store.put_tensor(store_kvcache_key,
                                      kv_caches_send_list[idx])
             self.kv_store.put_tensor(store_hidden_key, hidden_states_list[idx])
-        logger.info("[rank %d][tp size %d]: KV send DONE. send %d, takes %f s", self.rank, self.tp_size,
+        logger.info("[rank %d][tp size %d]:KV send DONE. send %d, takes %f s",
+                    self.rank,
+                    self.tp_size,
                     len(input_tokens_list),
                     time.time() - start_time)
 
