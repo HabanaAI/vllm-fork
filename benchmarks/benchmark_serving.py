@@ -174,8 +174,8 @@ def calculate_metrics(
     for i in range(len(outputs)):
         if outputs[i].success:
             output_len = outputs[i].output_tokens
-            # print(f">>>>>>> len(output): {output_len}")
-            # print(f">>>>>>> outputs[i].generated_text: {outputs[i].generated_text}")
+            print(f">>>>>>> len(output): {output_len}")
+            print(f">>>>>>> outputs[i].generated_text: {outputs[i].generated_text}")
             if not output_len:
                 # We use the tokenizer to count the number of output tokens
                 # for some serving backends instead of looking at
