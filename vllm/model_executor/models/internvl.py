@@ -1518,8 +1518,11 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
             for mb_idx, i in enumerate(batch_breakdown):
                 end_idx = start_idx + i
-                batch_sliced_pixel_values = \
-                        pixel_values[start_idx:end_idx, ...]
+                indices = torch.arange(start_idx,
+                                       end_idx).to(pixel_values.device)
+                batch_sliced_pixel_values = torch.index_select(pixel_values,
+                                                               dim=0,
+                                                               index=indices)
                 if is_lazy:
                     vit_embeds_minibatch = \
                         self.vision_model(
