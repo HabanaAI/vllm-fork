@@ -32,7 +32,7 @@ model_name="Maverick"
 mkdir -p benchmark_logs
 #export VLLM_SKIP_WARMUP=True
 
-RECIPE_FLAG="visionbf16_kvfp8"
+RECIPE_FLAG="high_perf"
 
 if [[ "$RECIPE_FLAG" == "meta" ]]; then
   echo "INFO: Flag is 'meta'. Using meta recipe without FP8 KV cache. Meta's recipe (Vision and text is working but no fp8 kv cache)"
