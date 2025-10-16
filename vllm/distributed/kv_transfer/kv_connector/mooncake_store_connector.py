@@ -241,20 +241,20 @@ class MooncakeStoreConnector(KVConnectorBase):
         hidden_states_list: List[torch.Tensor],
     ) -> None:
         start_time = time.time()
-        if self.rank != 0:
+        if self.rank % self.tp_size != 0:
             # only the first rank will send kv cache
             return
         assert len(input_tokens_list) == len(kv_caches_send_list)
         assert len(input_tokens_list) == len(hidden_states_list)
         for idx, input_tokens in enumerate(input_tokens_list):
             store_key_prefix = self.tensor_hash(input_tokens)
-            store_kvcache_key = f"{store_key_prefix}_{self.rank}"
-            store_hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
+            store_kvcache_key = f"{store_key_prefix}_{self.rank % self.tp_size}"
+            store_hidden_key = f"{store_key_prefix}_hidden_{self.rank % self.tp_size}"
 
             self.kv_store.put_tensor(store_kvcache_key,
                                      kv_caches_send_list[idx])
             self.kv_store.put_tensor(store_hidden_key, hidden_states_list[idx])
-        logger.info("[rank %d]: KV send DONE. send %d, takes %f s", self.rank,
+        logger.info("[rank %d][tp size %d]: KV send DONE. send %d, takes %f s", self.rank, self.tp_size,
                     len(input_tokens_list),
                     time.time() - start_time)
 
@@ -266,7 +266,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
     ) -> None:
-        if self.rank != 0:
+        if self.rank % self.tp_size != 0:
             # only the first rank will send kv cache
             return
         start_time = time.time()
@@ -312,12 +312,12 @@ class MooncakeStoreConnector(KVConnectorBase):
             keys = torch.cat(keys, dim=0)
             kvcache_to_sent = keys.cpu()
             logger.debug("kv cache reshape time: %s", time.time() - start_time)
-            store_kvcache_key = f"{store_key_prefix}_{self.rank}"
+            store_kvcache_key = f"{store_key_prefix}_{self.rank % self.tp_size}"
             self.kv_store.put_tensor(store_kvcache_key, kvcache_to_sent)
 
             logger.debug("put kv cache key: %s", store_kvcache_key)
 
-            hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
+            hidden_key = f"{store_key_prefix}_hidden_{self.rank % self.tp_size}"
             self.kv_store.put_tensor(
                 hidden_key,
                 hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
