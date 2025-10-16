@@ -124,7 +124,7 @@ class VisionBuckets:
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
                     multimodal_buckets = [
-                        1600, 3136, 4096, 6400, 7744, 9216, 12544
+                        784, 1600, 3136, 4096, 6400, 7744, 9216, 12544
                     ]
             else:
                 multimodal_buckets = [int(i) for i in envvar.split(',')]
@@ -160,9 +160,14 @@ class Singleton(type):
 
 
 def is_mm_optimized(model):
-    return 'Gemma3ForConditionalGeneration' in str(type(model.model)) \
-        if hasattr(model, 'model') else \
-        'Gemma3ForConditionalGeneration' in str(type(model))
+    mm_models = [
+        'Gemma3ForConditionalGeneration', 'InternVLChatModel', 'Ovis2_5'
+    ]
+
+    return any(m in str(type(model.model)) for m in mm_models) \
+        if hasattr(model, 'model') \
+        else any(m in str(type(model)) for m in mm_models)
+
 
 
 def pad_flat_tensor(tensor, desired_size):
@@ -380,6 +385,20 @@ class HpuModelAdapter(torch.nn.Module):
                             htorch.hpu.wrap_in_hpu_graph( \
                             self.model.multi_modal_projector, \
                             disable_tensor_cache=True)
+
+                if hasattr(self.model, 'vision_model'):
+                    self.model.vision_model = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.vision_model, disable_tensor_cache=True)
+                if hasattr(self.model, 'mlp1'):
+                    self.model.mlp1 = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.mlp1, disable_tensor_cache=True)
+                if hasattr(self.model, 'vte'):
+                    self.model.vte = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.vte, disable_tensor_cache=False)
+                if hasattr(self.model, 'visual_tokenizer'):
+                    self.model.visual_tokenizer = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.visual_tokenizer,
+                        disable_tensor_cache=False)
 
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
@@ -2707,6 +2726,30 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_data = {
                 "pixel_values": pixel_values,
                 "image_grid_thw": image_grid_thw,
+            }
+        elif "Ovis2_5" in str(type(self.model.model)):
+            vit_cfg = self.model.model.config.vit_config
+            self.image_token_id = getattr(self.model.model.config,
+                                          "image_token_id", -200)
+            image_w = 98
+            image_h = int(img_args / image_w)
+            num_image_tokens = int(image_h * image_w //
+                                   (vit_cfg.hidden_stride**2))
+            image_grid_thw = torch.tensor([[1, image_h, image_w]],
+                                          dtype=torch.int64)
+
+            pixel_values = torch.randn(1,
+                                       image_grid_thw[0].prod(),
+                                       vit_cfg.num_channels *
+                                       vit_cfg.temporal_patch_size *
+                                       vit_cfg.patch_size * vit_cfg.patch_size,
+                                       dtype=torch.float32).to('hpu')
+            indicator_tokens = torch.tensor([65532, 65533],
+                                            device='hpu').unsqueeze(0)
+            multi_modal_data = {
+                "pixel_values": pixel_values,
+                "indicator_tokens": indicator_tokens,
+                "grids": [image_grid_thw],
             }
         else:
             s = self.model.model.config.vision_config.image_size
