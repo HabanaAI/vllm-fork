@@ -522,7 +522,7 @@ class DotsVisionTransformer(PreTrainedModel):
         head_dim = config.embed_dim // config.num_attention_heads
         self.rotary_pos_emb = VisionRotaryEmbedding(head_dim // 2)
         self.attn_backend = get_vit_attn_backend(
-            head_size=head_dim, dtype=torch.get_default_dtype())
+            dtype=torch.get_default_dtype())
         #       if self.attn_backend != _Backend.FLASH_ATTN and \
         #           check_upstream_fa_availability(torch.get_default_dtype()):
         #           self.attn_backend = _Backend.FLASH_ATTN
