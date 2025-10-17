@@ -253,8 +253,10 @@ class DotsVisionAttention(nn.Module):
         self._split_last = dist_utils.split_tensor_along_last_dim
 
         # Select attention backend
-        self.attn_backend = get_vit_attn_backend(self.head_dim,
-                                                 torch.get_default_dtype())
+        #       self.attn_backend = get_vit_attn_backend(self.head_dim,
+        #                           torch.get_default_dtype())
+        self.attn_backend = get_vit_attn_backend()
+
         self.use_upstream_fa = False
         #       if self.attn_backend != _Backend.FLASH_ATTN and \
         #           check_upstream_fa_availability(torch.get_default_dtype()):
@@ -521,8 +523,9 @@ class DotsVisionTransformer(PreTrainedModel):
 
         head_dim = config.embed_dim // config.num_attention_heads
         self.rotary_pos_emb = VisionRotaryEmbedding(head_dim // 2)
-        self.attn_backend = get_vit_attn_backend(
-            dtype=torch.get_default_dtype())
+        #       self.attn_backend = get_vit_attn_backend(
+        #           head_size=head_dim, dtype=torch.get_default_dtype())
+        self.attn_backend = get_vit_attn_backend()
         #       if self.attn_backend != _Backend.FLASH_ATTN and \
         #           check_upstream_fa_availability(torch.get_default_dtype()):
         #           self.attn_backend = _Backend.FLASH_ATTN
