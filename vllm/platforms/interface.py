@@ -45,6 +45,7 @@ class _Backend(enum.Enum):
     ROCM_FLASH = enum.auto()
     ROCM_AITER_MLA = enum.auto()  # Supported by V1
     ROCM_AITER_MLA_VLLM_V1 = enum.auto()
+    ROCM_AITER_FA = enum.auto()
     TORCH_SDPA = enum.auto()
     FLASHINFER = enum.auto()
     FLASHINFER_VLLM_V1 = enum.auto()
