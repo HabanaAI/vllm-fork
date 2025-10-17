@@ -150,6 +150,23 @@ def run_deepseek_vl2(questions: list[str], modality: str) -> ModelRequestData:
     )
 
 
+# Dots-OCR
+def run_dots_ocr(questions: list[str], modality: str) -> ModelRequestData:
+    assert modality == "image"
+
+    prompts = [f"<|img|><|imgpad|><|endofimg|>{question}" for question in questions]
+    engine_args = EngineArgs(
+        model="rednote-hilab/dots.ocr",
+        limit_mm_per_prompt={modality: 1},
+        trust_remote_code=True,
+    )
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
+
+
 # Florence2
 def run_florence2(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
@@ -1115,6 +1132,7 @@ model_example_map = {
     "blip-2": run_blip2,
     "chameleon": run_chameleon,
     "deepseek_vl_v2": run_deepseek_vl2,
+    "dots_ocr": run_dots_ocr,
     "florence2": run_florence2,
     "fuyu": run_fuyu,
     "gemma3": run_gemma3,
