@@ -10,7 +10,7 @@ from torch.nn import LayerNorm
 from transformers.modeling_utils import PreTrainedModel
 from transformers.models.qwen2_vl import Qwen2VLProcessor
 
-from vllm.attention.layer import check_upstream_fa_availability
+#from vllm.attention.layer import check_upstream_fa_availability
 from vllm.config import VllmConfig
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -256,10 +256,10 @@ class DotsVisionAttention(nn.Module):
         self.attn_backend = get_vit_attn_backend(self.head_dim,
                                                  torch.get_default_dtype())
         self.use_upstream_fa = False
-        if self.attn_backend != _Backend.FLASH_ATTN and \
-                check_upstream_fa_availability(torch.get_default_dtype()):
-            self.attn_backend = _Backend.FLASH_ATTN
-            self.use_upstream_fa = True
+        #       if self.attn_backend != _Backend.FLASH_ATTN and \
+        #           check_upstream_fa_availability(torch.get_default_dtype()):
+        #           self.attn_backend = _Backend.FLASH_ATTN
+        #           self.use_upstream_fa = True
         if self.attn_backend not in {
                 _Backend.FLASH_ATTN, _Backend.TORCH_SDPA, _Backend.XFORMERS,
                 _Backend.ROCM_AITER_FA
@@ -523,9 +523,9 @@ class DotsVisionTransformer(PreTrainedModel):
         self.rotary_pos_emb = VisionRotaryEmbedding(head_dim // 2)
         self.attn_backend = get_vit_attn_backend(
             head_size=head_dim, dtype=torch.get_default_dtype())
-        if self.attn_backend != _Backend.FLASH_ATTN and \
-                check_upstream_fa_availability(torch.get_default_dtype()):
-            self.attn_backend = _Backend.FLASH_ATTN
+        #       if self.attn_backend != _Backend.FLASH_ATTN and \
+        #           check_upstream_fa_availability(torch.get_default_dtype()):
+        #           self.attn_backend = _Backend.FLASH_ATTN
 
         # Keep blocks for compatibility with other vision towers
         num_layers = (config.num_hidden_layers if num_hidden_layers_override
