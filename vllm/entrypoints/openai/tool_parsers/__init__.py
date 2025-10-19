@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from .abstract_tool_parser import ToolParser, ToolParserManager
+from .deepseekv31_tool_parser import DeepSeekV31ToolParser
 from .granite_20b_fc_tool_parser import Granite20bFCToolParser
 from .granite_tool_parser import GraniteToolParser
 from .hermes_tool_parser import Hermes2ProToolParser
@@ -14,5 +15,5 @@ __all__ = [
     "ToolParser", "ToolParserManager", "Granite20bFCToolParser",
     "GraniteToolParser", "Hermes2ProToolParser", "MistralToolParser",
     "Internlm2ToolParser", "Llama3JsonToolParser", "JambaToolParser",
-    "PythonicToolParser"
+    "PythonicToolParser","DeepSeekV31ToolParser",
 ]
