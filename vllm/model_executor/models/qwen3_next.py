@@ -434,7 +434,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             })
 
         mamba_cache_bs = vllm_config.scheduler_config.max_num_seqs + \
-            max(8, vllm_config.scheduler_config.max_num_seqs)
+            max(8, vllm_config.scheduler_config.max_num_seqs) + 1
         conv_state_shape = (
             mamba_cache_bs,
             self.conv_kernel_size - 1,

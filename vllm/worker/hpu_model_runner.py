@@ -1695,7 +1695,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_id = seq_ids[0]
 
             if self._is_fla_model():
-                mamba_cache_bs = self.max_num_seqs + max(8, self.max_num_seqs)
+                mamba_cache_bs = self.max_num_seqs + \
+                    max(8, self.max_num_seqs) + 1
                 mamba_prefill_index = FindMambaIndexForPrefill(
                     self.mamba_cache_table, seq_id, mamba_cache_bs)
                 mamba_prefill_indices.append(mamba_prefill_index)
