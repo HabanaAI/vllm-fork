@@ -5,8 +5,7 @@ pip install colorlog
 
 echo "2. setting up mooncake mooncake-transfer-engine private build............."
 #Mooncake
-wget https://github.com/hlin99/Mooncake/releases/download/private_buildv3/mooncake_transfer_engine-0.3.5-cp310-cp310-manylinux_2_17_x86_64.whl
-pip install mooncake_transfer_engine-0.3.5-cp310-cp310-manylinux_2_17_x86_64.whl --force-reinstall
+pip install mooncake-transfer-engine==0.3.6
 
 echo "3. setting up RDMA for mooncake ..................."
 #RDMA
