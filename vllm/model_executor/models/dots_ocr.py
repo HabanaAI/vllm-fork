@@ -385,12 +385,14 @@ class DotsSwiGLUFFN(nn.Module):
             prefix=f"{prefix}.fc13",
             # disable_tp=True
         )
-        self.fc2 = RowParallelLinear(hidden_features,
-                                     in_features,
-                                     bias=bias,
-                                     quant_config=quant_config,
-                                     prefix=f"{prefix}.fc2",
-                                     disable_tp=True)
+        self.fc2 = RowParallelLinear(
+            hidden_features,
+            in_features,
+            bias=bias,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc2",
+            # disable_tp=True
+        )
         self.act_fn = SiluAndMul()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
