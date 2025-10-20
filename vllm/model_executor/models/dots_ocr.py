@@ -193,11 +193,13 @@ class PatchMerger(nn.Module):
             print("no norm in patch merger")
 
         self.mlp = nn.Sequential(
-            ColumnParallelLinear(self.hidden_size,
-                                 self.hidden_size,
-                                 bias=True,
-                                 return_bias=False,
-                                 disable_tp=True),
+            ColumnParallelLinear(
+                self.hidden_size,
+                self.hidden_size,
+                bias=True,
+                return_bias=False,
+                # disable_tp=True
+            ),
             nn.GELU(),
             RowParallelLinear(self.hidden_size,
                               dim,
