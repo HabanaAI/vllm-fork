@@ -201,11 +201,13 @@ class PatchMerger(nn.Module):
                 # disable_tp=True
             ),
             nn.GELU(),
-            RowParallelLinear(self.hidden_size,
-                              dim,
-                              bias=True,
-                              return_bias=False,
-                              disable_tp=True),
+            RowParallelLinear(
+                self.hidden_size,
+                dim,
+                bias=True,
+                return_bias=False,
+                # disable_tp=True
+            ),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
