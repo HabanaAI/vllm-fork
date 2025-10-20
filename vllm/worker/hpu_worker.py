@@ -249,6 +249,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             'VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL', '0') != '0'
         log_cpu_fallbacks = os.environ.get('VLLM_HPU_LOG_STEP_CPU_FALLBACKS',
                                            '0') != '0' or log_cpu_fallbacks_all
+
+        # Empty the Mamba cache table when all the requests are clear
+        if execute_model_req is None:
+            self.model_runner.mamba_cache_table.clear()
+
         if (log_graph_compilation or log_cpu_fallbacks) and \
             execute_model_req is not None:
             from habana_frameworks.torch.hpu.metrics import metric_localcontext
