@@ -247,11 +247,20 @@ def uses_mrope(config: PretrainedConfig) -> bool:
     return _uses_mrope(config) or thinker_uses_mrope(config)
 
 
+def is_thinker(config: PretrainedConfig) -> bool:
+    model_type = getattr(config, "model_type", None)
+    if model_type is None:
+        return False
+
+    return "thinker" in model_type
+
+
 def thinker_uses_mrope(config: PretrainedConfig) -> bool:
     """Detect if the model contains a thinker config and it uses M-ROPE."""
-    thinker_text_config = getattr(config, "text_config", None)
-    if thinker_text_config is not None:
-        return uses_mrope(thinker_text_config)
+    if is_thinker(config):
+        thinker_text_config = getattr(config, "text_config", None)
+        if thinker_text_config is not None:
+            return uses_mrope(thinker_text_config)
 
     thinker_config = getattr(config, "thinker_config", None)
     if thinker_config is None:
