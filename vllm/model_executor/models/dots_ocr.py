@@ -377,12 +377,14 @@ class DotsSwiGLUFFN(nn.Module):
         bias = config.use_bias
 
         # Referenced aimv2.py AIMv2SwiGLUFFN
-        self.fc13 = MergedColumnParallelLinear(in_features,
-                                               [hidden_features] * 2,
-                                               bias=bias,
-                                               quant_config=quant_config,
-                                               prefix=f"{prefix}.fc13",
-                                               disable_tp=True)
+        self.fc13 = MergedColumnParallelLinear(
+            in_features,
+            [hidden_features] * 2,
+            bias=bias,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc13",
+            # disable_tp=True
+        )
         self.fc2 = RowParallelLinear(hidden_features,
                                      in_features,
                                      bias=bias,
