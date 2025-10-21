@@ -129,9 +129,9 @@ def torch_chunk_gated_delta_rule(
     attn = attn + torch.eye(chunk_size, dtype=attn.dtype, device=attn.device)
     value = attn @ v_beta
     k_cumdecay = attn @ (k_beta * g.exp().unsqueeze(-1))
-    last_recurrent_state = (torch.zeros(batch_size, num_heads,
-                                        k_head_dim, v_head_dim).to(value) if
-                            initial_state is None else initial_state.to(value))
+    last_recurrent_state = (torch.zeros(batch_size, num_heads, k_head_dim,
+                                        v_head_dim).to(value) if initial_state
+                            is None else initial_state.to(value))
     core_attn_out = torch.zeros_like(value)
     mask = torch.triu(torch.ones(chunk_size,
                                  chunk_size,
