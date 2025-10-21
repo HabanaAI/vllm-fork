@@ -1388,6 +1388,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
 
+                def show_scale(model):
+                    for name, param in model.named_parameters():
+                        if "scale" in name and "layers.1" in name:
+                            logger.info(
+                                f"{name}: shape={param.shape}, dtype={param.dtype}, range = [{param.min().item()}, {param.max().item()}]"
+                            )
+                show_scale(self.model)
             self._maybe_init_alibi_biases()
             hidden_layer_markstep_interval = int(
                 os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
