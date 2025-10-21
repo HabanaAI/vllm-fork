@@ -19,10 +19,10 @@ For setups using an L3 switch, the `gaudinet.json` file must be mapped as descri
 
 - Python 3.10
 - Intel Gaudi 2 and 3 AI accelerators
-- Intel Gaudi software version 1.22.0 and above
+- Intel Gaudi software version 1.23.0 and above
 
 ## Running vLLM on Gaudi with Docker Compose
-Starting with the 1.22 release, we are introducing ready-to-run container images that bundle vLLM and Gaudi software. Please follow the [instruction](https://github.com/HabanaAI/vllm-fork/tree/v0.9.0.1%2BGaudi-1.22.0/.cd) to quickly launch vLLM on Gaudi using a prebuilt Docker image and Docker Compose, with options for custom parameters and benchmarking.
+Starting with the 1.22 release, we are introducing ready-to-run container images that bundle vLLM and Gaudi software. Please follow the [instruction](https://github.com/HabanaAI/vllm-fork/tree/v0.9.0.1%2BGaudi-1.23.0/.cd) to quickly launch vLLM on Gaudi using a prebuilt Docker image and Docker Compose, with options for custom parameters and benchmarking.
 
 ## Quick Start Using Dockerfile
 Set up the container with the latest Intel Gaudi Software Suite release using the Dockerfile.
@@ -44,6 +44,7 @@ Make sure you have ``habanalabs-container-runtime`` package installed and that `
 > [!NOTE]
 > Prerequisite:
 Starting from the 1.22.x Intel Gaudi software version, the RHEL Docker image must be created manually before running the command.
+See [this repo](https://github.com/HabanaAI/Setup_and_Install/tree/main/dockerfiles#build-docker) for more details how to build it.
 Additionally, the path to the Docker image must be updated in the Dockerfile.hpu.ubi file.
 
 ```
@@ -73,8 +74,8 @@ Refer to the [Intel Gaudi documentation](https://docs.habana.ai/en/latest/Instal
 Use the following commands to run a Docker image. Make sure to update the versions below as listed in the [Support Matrix](https://docs.habana.ai/en/latest/Support_Matrix/Support_Matrix.html):
 
 ```{.console}
-$ docker pull vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/pytorch-installer-2.7.1:latest
-$ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/pytorch-installer-2.7.1:latest
+$ docker pull vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+$ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
 ```
 
 ### Build and Install vLLM
@@ -88,7 +89,7 @@ vLLM releases are being performed periodically to align with Intel® Gaudi® sof
 ```{.console}
 $ git clone https://github.com/HabanaAI/vllm-fork.git
 $ cd vllm-fork
-$ git checkout v0.9.0.1+Gaudi-1.22.0
+$ git checkout v0.9.0.1+Gaudi-1.23.0
 $ pip install -r requirements-hpu.txt
 $ python setup.py develop
 ```
