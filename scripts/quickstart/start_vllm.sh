@@ -15,7 +15,7 @@ Help() {
     echo "u  URL of the server, str, default=0.0.0.0"
     echo "p  Port number for the server, int, default=8688"
     echo "l  max_model_len for vllm, int, default=16384, maximal value for single node: 32768"
-    echo "b  max_num_seqs for vllm, int, default=128"
+    echo "b  max_num_seqs for vllm, int, default=64"
     echo "c  Cache HPU recipe to the specified path, str, default=None"
     echo "s  Skip warmup or not, bool, default=false"
     echo "q  Enable INC fp8 quantization, go to README.md for details."

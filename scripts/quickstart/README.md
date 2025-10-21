@@ -297,16 +297,17 @@ w  Weights of the model, could be model id in huggingface or local path
 u  URL of the server, str, default=0.0.0.0
 p  Port number for the server, int, default=8688
 l  max_model_len for vllm, int, default=16384, maximal value for single node: 32768
-b  max_num_seqs for vllm, int, default=128
+b  max_num_seqs for vllm, int, default=64
 c  Cache HPU recipe to the specified path, str, default=None
 s  Skip warmup or not, bool, default=false
 q  Enable inc fp8 quantization
+m  Max number of the prefill sequences, int, default=1 to optimize TTFT
 h  Help info
 ```
 
 ### Launch vLLM Serving with TP=8
 ```bash
-bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -q -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
+bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -q -u 0.0.0.0 -p 8688 -l 16384 -c /data/warmup_cache
 ```
 Note: for DeepSeek-V3.1, please remove the parameters "--enable-reasoning --reasoning-parser deepseek_r1" in the file "start_vllm.sh" if the client uses non-thinking mode. 
 
