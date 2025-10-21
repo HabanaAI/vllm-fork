@@ -18,6 +18,8 @@ from array import array
 from contextlib import suppress
 from enum import Enum, IntEnum
 
+import numpy as np
+
 if os.getenv("QUANT_CONFIG", None) is not None:
     from neural_compressor.torch.quantization import finalize_calibration
 else:
@@ -2770,19 +2772,42 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             vit_cfg = self.model.model.config.vit_config
             self.image_token_id = getattr(self.model.model.config,
                                           "image_token_id", -200)
-            image_w = 98
-            image_h = int(img_args / image_w)
-            num_image_tokens = int(image_h * image_w //
-                                   (vit_cfg.hidden_stride**2))
-            image_grid_thw = torch.tensor([[1, image_h, image_w]],
-                                          dtype=torch.int64)
+            use_hpu_mp = (os.getenv("VLLM_USE_MEDIA_PIPELINE",
+                                    "false").lower() in ("1", "true", "yes"))
 
-            pixel_values = torch.randn(1,
-                                       image_grid_thw[0].prod(),
-                                       vit_cfg.num_channels *
-                                       vit_cfg.temporal_patch_size *
-                                       vit_cfg.patch_size * vit_cfg.patch_size,
-                                       dtype=torch.float32).to('hpu')
+            ps = vit_cfg.patch_size
+            hs = vit_cfg.hidden_stride
+            t_ps = vit_cfg.temporal_patch_size
+
+            B, C, H, W = 1, 3, 2016, 1568
+            grid_t = B // t_ps
+            grid_h = H // ps
+            grid_w = W // ps
+            Gy, Gx = grid_h // hs, grid_w // hs
+            num_image_tokens = int(grid_h * grid_w // (hs**2))
+            if use_hpu_mp:
+
+                processed_images = torch.ones((B, C, H, W),
+                                              dtype=torch.float32).to('hpu')
+                x = processed_images.contiguous().reshape(B, C, grid_h, ps, grid_w, ps) \
+                                        .reshape(B, C, Gy, hs, ps, Gx, hs, ps)
+                tiles = x.permute(0, 2, 5, 3, 6, 1, 4, 7).contiguous()
+                pixel_values = tiles.reshape(1, B * grid_h * grid_w,
+                                             C * ps * ps).contiguous()
+
+                image_grid_thw = torch.tensor([[grid_t, grid_h, grid_w]] * B,
+                                              device=pixel_values.device)
+            else:
+                image_pt = np.ones((C, H, W), dtype=np.float32)
+                patches = np.expand_dims(image_pt, axis=0)
+
+                patches = patches.reshape(grid_t, t_ps, C, Gy, hs, ps, Gx, hs,
+                                          ps)
+                patches = patches.transpose(0, 3, 6, 4, 7, 2, 1, 5, 8)
+                pixel_values = patches.reshape(1, grid_t * grid_h * grid_w,
+                                               C * t_ps * ps * ps)
+                image_grid_thw = torch.tensor([[grid_t, grid_h, grid_w]],
+                                              dtype=torch.int64)
             indicator_tokens = torch.tensor([65532, 65533],
                                             device='hpu').unsqueeze(0)
             multi_modal_data = {
