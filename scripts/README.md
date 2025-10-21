@@ -4,16 +4,19 @@
 This is used to set up vLLM service on Intel(R) Gaudi(R) accelerator. Please refer to [Hardware and Network Requirements](https://docs.habana.ai/en/latest/Installation_Guide/Platform_Readiness.html#) to check your hardware readiness.
 
 ### Set CPU to Performance Mode
-Please change the CPU setting to be performance optimization mode in BIOS setup and execute the command below in OS to make sure get the best CPU performance.
+Please set CPU to performance mode, enable CPU P state, enable CPU turbo state and disable CPU C6 state in BIOS setup. 
+Please execute the commands below in OS to make sure get the best CPU performance.
 
 ```
 sudo echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+sudo sysctl -w vm.nr_hugepages=40000
+sudo echo 0 > /proc/sys/kernel/numa_balancing
 ```
 
 ## Software Requirements
 * The supported OS are in [Supported Configurations and Components](https://docs.habana.ai/en/latest/Support_Matrix/Support_Matrix.html#support-matrix)
-* Refer to [Driver and Software Installation](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html) to install the Intel(R) Gaudi(R) driver and software stack (>= 1.20.1) on each node. Make sure `habanalabs-container-runtime` is installed.
-* Refer to [Firmware Upgrade](https://docs.habana.ai/en/latest/Installation_Guide/Firmware_Upgrade.html) to upgrade the Gaudi(R) firmware to 1.20.1 version on each node.
+* Refer to [Driver and Software Installation](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html) to install the Intel(R) Gaudi(R) driver and software stack (>= 1.21.3) on each node. Make sure `habanalabs-container-runtime` is installed.
+* Refer to [Firmware Upgrade](https://docs.habana.ai/en/latest/Installation_Guide/Firmware_Upgrade.html) to upgrade the Gaudi(R) firmware to 1.21.3 version on each node.
 * Refer to [Configure Container Runtime](https://docs.habana.ai/en/latest/Installation_Guide/Additional_Installation/Docker_Installation.html#configure-container-runtime) to configure the `habana` container runtime on each node.
 
 ## Install vLLM
@@ -462,11 +465,11 @@ The following 4 ENVs are used to control the device profiling:
 > Please use the `-f` flag or `export VLLM_PROFILER_ENABLED=True` to enable the high-level vLLM profile and to choose the preferred steps to profile.
 
 # Releases
-## aice/v1.21.0
+## aice/v1.22.0
 vllm-fork:
-https://github.com/HabanaAI/vllm-fork/tree/aice/v1.21.0
+https://github.com/HabanaAI/vllm-fork/tree/aice/v1.22.0
 vllm-hpu-extension:
-https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.21.0
+https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.22.0
 ## Valided models
 * DeepSeek-R1-Distill-Llama-70B (bf16 and fp8)
 * DeepSeek-R1-Distill-Qwen-32B (bf16 and fp8)
@@ -488,6 +491,10 @@ https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.21.0
 * Qwen2.5-1.5B-Instruct (bf16)
 * QwQ-32B (bf16)
 * Llama4 (bf16 and fp8)
+* GLM-4.5 (bf16 and fp8)
+* GLM-4.5-Air (bf16 and fp8)
+* ERNIE 4.5 (bf16)
+
 * multimodal models:
   - Qwen2.5 Omni
   - Qwen2-VL-7B-Instruct
