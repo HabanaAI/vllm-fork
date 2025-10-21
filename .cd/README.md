@@ -51,7 +51,7 @@ cd vllm-fork/.cd/
    cd vllm-fork/.cd/
    MODEL="Qwen/Qwen2.5-14B-Instruct" \
    HF_TOKEN="<your huggingface token>" \
-   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest" \
+   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/vllm-installer-2.9.0:latest" \
    docker compose up
    ```
 
@@ -63,7 +63,7 @@ cd vllm-fork/.cd/
    cd vllm-fork/.cd/
    MODEL="Qwen/Qwen2.5-14B-Instruct" \
    HF_TOKEN="<your huggingface token>" \
-   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest" \
+   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/vllm-installer-2.9.0:latest" \
    docker compose --profile benchmark up
    ```
 
@@ -90,7 +90,7 @@ cd vllm-fork/.cd/
    cd vllm-fork/.cd/
    MODEL="Qwen/Qwen2.5-14B-Instruct" \
    HF_TOKEN="<your huggingface token>" \
-   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest" \
+   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/vllm-installer-2.9.0:latest" \
    TENSOR_PARALLEL_SIZE=1 \
    MAX_MODEL_LEN=2048 \
    docker compose up
@@ -111,7 +111,7 @@ cd vllm-fork/.cd/
    cd vllm-fork/.cd/
    MODEL="Qwen/Qwen2.5-14B-Instruct" \
    HF_TOKEN="<your huggingface token>" \
-   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest" \
+   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/vllm-installer-2.9.0:latest" \
    INPUT_TOK=128 \
    OUTPUT_TOK=128 \
    CON_REQ=16 \
@@ -131,7 +131,7 @@ cd vllm-fork/.cd/
    cd vllm-fork/.cd/
    MODEL="Qwen/Qwen2.5-14B-Instruct" \
    HF_TOKEN="<your huggingface token>" \
-   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest" \
+   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/vllm-installer-2.9.0:latest" \
    TENSOR_PARALLEL_SIZE=1 \
    MAX_MODEL_LEN=2048 \
    INPUT_TOK=128 \
@@ -156,7 +156,7 @@ cd vllm-fork/.cd/
 
    ```bash
    HF_TOKEN=<your huggingface token> \
-   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest" \
+   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/vllm-installer-2.9.0:latest" \
    VLLM_SERVER_CONFIG_FILE=server/server_scenarios_text.yaml \
    VLLM_SERVER_CONFIG_NAME=llama31_8b_instruct \
    VLLM_BENCHMARK_CONFIG_FILE=benchmark/benchmark_scenarios_text.yaml \
@@ -187,7 +187,7 @@ cd vllm-fork/.cd/
      -p 8000:8000 \
      -e HF_HOME='mnt/hf_cache'
      --name vllm-server \
-     vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest
+     vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/vllm-installer-2.9.0:latest
    ```
 
    This method gives you full flexibility over Docker runtime options.
