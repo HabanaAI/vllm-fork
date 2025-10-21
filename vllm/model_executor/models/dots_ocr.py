@@ -793,6 +793,22 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
 
         return inputs_embeds
 
+    def get_input_embeddings_v0(
+        self,
+        input_ids: torch.Tensor,
+        image_input: Optional[DotsOCRImagePixelInputs] = None,
+    ) -> torch.Tensor:
+        inputs_embeds = self.get_input_embeddings(input_ids)
+        if image_input is not None:
+            image_embeds = self._process_image_input(image_input)
+            inputs_embeds = merge_multimodal_embeddings(
+                input_ids,
+                inputs_embeds,
+                image_embeds,
+                placeholder_token_id=self.config.image_token_id,
+            )
+        return inputs_embeds
+
     def forward(
         self,
         input_ids: Optional[torch.Tensor],
@@ -809,7 +825,7 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
                 inputs_embeds = None
             else:
                 assert input_ids is not None
-                inputs_embeds = self.get_multimodal_embeddings(
+                inputs_embeds = self.get_input_embeddings_v0(
                     input_ids,
                     image_input=image_input,
                 )
