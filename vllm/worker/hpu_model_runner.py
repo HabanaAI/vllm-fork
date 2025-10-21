@@ -410,6 +410,11 @@ class HpuModelAdapter(torch.nn.Module):
             self.model)
         self._rotary_prepare_cos_sin = self._get_prepare_cos_sin()
 
+        if 'Ovis2_5' in str(type(self.model)):
+            self.indicator_tokens = torch.tensor([[[65532, 65533]]],
+                                                 dtype=torch.int64,
+                                                 device='hpu')
+
     def _get_rotary_embedding_module(self, model: torch.nn.Module):
         """
         Dynamically get the RotaryEmbedding layer in the model.
@@ -2808,8 +2813,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                C * t_ps * ps * ps)
                 image_grid_thw = torch.tensor([[grid_t, grid_h, grid_w]],
                                               dtype=torch.int64)
-            indicator_tokens = torch.tensor([65532, 65533],
-                                            device='hpu').unsqueeze(0)
+            indicator_tokens = torch.tensor([[65532, 65533]],
+                                            dtype=torch.int64,
+                                            device='hpu')
+            indicator_tokens = indicator_tokens.contiguous()
             multi_modal_data = {
                 "pixel_values": pixel_values,
                 "indicator_tokens": indicator_tokens,
@@ -3906,6 +3913,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 cache_orig_output_tokens_len[i][j]
                             data.output_token_ids = \
                                 data.output_token_ids[:orig_output_tokens_len]
+
+            if is_prompt and 'Ovis2_5' in str(type(self.model.model)):
+                if warmup_mode and (
+                        'indicator_tokens') in execute_model_kwargs:
+                    self.indicator_tokens = execute_model_kwargs[
+                        'indicator_tokens']
+                elif not warmup_mode and (
+                        'indicator_tokens') in execute_model_kwargs:
+                    execute_model_kwargs[
+                        'indicator_tokens'] = self.indicator_tokens
 
             for i in range(num_steps):
                 if i != 0 and not self.is_driver_worker:
