@@ -674,8 +674,7 @@ class MultiModalKwargsItems(UserDict[str, Sequence[_I]]):
                     elems_by_key[key].append(elem)
 
         return MultiModalKwargs({
-            key:
-            elems[0].field.reduce_data(elems, pin_memory=pin_memory)
+            key: elems[0].field.reduce_data(elems)
             for key, elems in elems_by_key.items()
         })
 

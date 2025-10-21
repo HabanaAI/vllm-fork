@@ -1075,6 +1075,7 @@ def run_qwen2_5_omni(questions: list[str], modality: str):
         prompts=prompts,
     )
 
+
 # Qwen3-VL-Dense
 def run_qwen3_vl(questions: list[str], modality: str) -> ModelRequestData:
     model_name = "Qwen/Qwen3-VL-4B-Instruct"

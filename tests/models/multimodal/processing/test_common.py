@@ -40,6 +40,7 @@ def glm4_1v_patch_mm_data(mm_data: MultiModalDataDict) -> MultiModalDataDict:
         })
     return mm_data
 
+
 def qwen3_vl_patch_mm_data(mm_data: MultiModalDataDict) -> MultiModalDataDict:
     """
     Patch the multimodal data for Qwen3-VL model.
