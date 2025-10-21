@@ -384,6 +384,7 @@ class HpuModelAdapter(torch.nn.Module):
                 if hasattr(self.model, 'vision_tower'):
                     self.model.vision_tower = htorch.hpu.wrap_in_hpu_graph(
                         self.model.vision_tower, disable_tensor_cache=False)
+                        self.model.vision_tower, disable_tensor_cache=False)
                 if hasattr(self.model, 'multi_modal_projector'):
                     self.model.multi_modal_projector = \
                             htorch.hpu.wrap_in_hpu_graph( \
@@ -674,6 +675,8 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs.pop("graphed_multimodal_buckets", None)
         return kwargs
 
+    def compute_input_embeddings_for_mrope_mm_optimized(
+            self, warmup_mode, **kwargs):
     def compute_input_embeddings_for_mrope_mm_optimized(
             self, warmup_mode, **kwargs):
 
@@ -3755,6 +3758,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
+            use_graphs = self._use_graphs()
             use_graphs = self._use_graphs()
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
