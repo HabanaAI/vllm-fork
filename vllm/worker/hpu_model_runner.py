@@ -1310,7 +1310,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         if supports_multimodal(model):
             if hasattr(model, "get_vision_buckets"):
-                model.vision_buckets = model.get_vision_buckets()  # customized vision bucket
+                model.vision_buckets = model.get_vision_buckets(
+                )  # customized vision bucket
             else:
                 model.vision_buckets = DefaultVisionBuckets()
             model.vision_buckets.graphed_buckets = \
@@ -2282,10 +2283,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         )
         return seq_group
 
-    def create_dummy_internvl_multi_modal_seq_group_metadata(self, group_id,
-                                                            num_patches,
-                                                            sampling_params,
-                                                            lora_request):
+    def create_dummy_internvl_multi_modal_seq_group_metadata(
+            self, group_id, num_patches, sampling_params, lora_request):
         if not hasattr(self.get_model().config, "vision_config"):
             raise ValueError("Expect internvl model to have vision_config")
         model_config = self.get_model().config
@@ -2294,18 +2293,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         num_channels = vision_config.num_channels
         image_size = vision_config.image_size
         patch_size = vision_config.patch_size
-        img_block_patch_num = (image_size // patch_size) ** 2
+        img_block_patch_num = (image_size // patch_size)**2
         assert image_size % image_size == 0
         assert num_patches % img_block_patch_num == 0, (
-            f"num_patches % image_block_patch_num should be 0, got {num_patches % img_block_patch_num}"
-        )
+            f"num_patches % image_block_patch_num should be 0, \
+                got {num_patches % img_block_patch_num}")
         if num_patches == UNSET_NUM_PATCHES:
             # Using the largest bucket
             num_patches = self.get_model(
             ).vision_buckets.multimodal_buckets[-1]
 
         num_image_tokens = int(num_patches * (downsample_ratio**2))
-        image_token_id = 92546 # from tokenizer_config.json of internvl2-2b, for dummy input construction
+        # from tokenizer_config.json of internvl2-2b,
+        # for dummy input construction
+        image_token_id = 92546
         prompt_token_ids = [image_token_id] * num_image_tokens
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
@@ -2314,11 +2315,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         }
         seq_data = SequenceData(prompt_token_ids_array)
 
-        pixel_values = torch.randn(num_patches//img_block_patch_num, num_channels, image_size, image_size)
+        pixel_values = torch.randn(num_patches // img_block_patch_num,
+                                   num_channels, image_size, image_size)
 
         multi_modal_data = {
             "pixel_values": pixel_values,
-            "image_num_patches": torch.Tensor([num_patches//img_block_patch_num]),
+            "image_num_patches":
+            torch.Tensor([num_patches // img_block_patch_num]),
             "image_token_id": torch.tensor(image_token_id, dtype=torch.long),
         }
         multi_modal_data = MultiModalKwargs(multi_modal_data)
@@ -2359,7 +2362,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 )
             else:
                 # internvl
-                return self.create_dummy_internvl_multi_modal_seq_group_metadata(
+                return \
+                    self.create_dummy_internvl_multi_modal_seq_group_metadata(
                     group_id=group_id,
                     num_patches=num_patches,
                     sampling_params=sampling_params,
@@ -3140,12 +3144,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         max_bucket_size = 0
         for pixel_values in pixel_values_list:
             assert isinstance(pixel_values, torch.Tensor)
-            if model.config.model_type ==  "internvl_chat":
-                curr_num_patches = pixel_values.shape[0] * model.vision_buckets.img_block_patch_num
-                bucket_size = model.vision_buckets.get_multimodal_bucket(curr_num_patches)
+            if model.config.model_type == "internvl_chat":
+                curr_num_patches = pixel_values.shape[
+                    0] * model.vision_buckets.img_block_patch_num
+                bucket_size = model.vision_buckets.get_multimodal_bucket(
+                    curr_num_patches)
             else:
                 curr_num_pixels = pixel_values.shape[-2]
-                bucket_size = model.vision_buckets.get_multimodal_bucket(curr_num_pixels)
+                bucket_size = model.vision_buckets.get_multimodal_bucket(
+                    curr_num_pixels)
             max_bucket_size = max(max_bucket_size, bucket_size)
         return max_bucket_size
 
@@ -3391,10 +3398,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # done compute the visual tokens
                     execute_model_kwargs.pop('pixel_values', None)
                     execute_model_kwargs.pop('image_grid_thw', None)
-                elif self.get_model().config.model_type ==  "internvl_chat":
-                    multimodal_embeddings = self.model.model.get_multimodal_embeddings(**execute_model_kwargs)
+                elif self.get_model().config.model_type == "internvl_chat":
+                    multimodal_embeddings = \
+                        self.model.model.get_multimodal_embeddings(
+                        **execute_model_kwargs)
                     inputs_embeds = self.model.model.get_input_embeddings(
-                        execute_model_kwargs['input_ids'], multimodal_embeddings).clone()
+                        execute_model_kwargs['input_ids'],
+                        multimodal_embeddings).clone()
                     execute_model_kwargs.update({
                         'inputs_embeds': inputs_embeds,
                     })
