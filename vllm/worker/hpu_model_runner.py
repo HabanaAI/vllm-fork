@@ -3982,6 +3982,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         if warmup_mode and bypass_model_exec:
                             return []
 
+                    if 'Ovis2_5' in str(type(self.model.model)):
+                        if "indicator_tokens" in execute_model_kwargs:
+                            execute_model_kwargs.pop('indicator_tokens', None)
+                        if "pixel_values" in execute_model_kwargs:
+                            execute_model_kwargs.pop('pixel_values', None)
+                        if "grids" in execute_model_kwargs:
+                            execute_model_kwargs.pop('grids', None)
+
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
