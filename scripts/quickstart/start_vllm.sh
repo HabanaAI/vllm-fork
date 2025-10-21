@@ -19,6 +19,7 @@ Help() {
     echo "c  Cache HPU recipe to the specified path, str, default=None"
     echo "s  Skip warmup or not, bool, default=false"
     echo "q  Enable INC fp8 quantization, go to README.md for details."
+    echo "m  Max number of the prefill sequences, int, default=1 to optimize TTFT"
     echo "h  Help info"
     echo
 }
@@ -27,13 +28,14 @@ Help() {
 model_path=/data/hf_models/DeepSeek-R1-Gaudi
 vllm_port=8688
 warmup_cache_path=/data/warmup_cache
-max_num_seqs=128
+max_num_seqs=64
 host=0.0.0.0
 max_model_len=16384
+max_num_prefill_seqs=1
 
 KV_CACHE_DTYPE=fp8_inc
 
-while getopts hw:u:p:l:b:c:sq flag; do
+while getopts hw:u:p:l:b:c:m:sq flag; do
     case $flag in
     h) # display Help
         Help
@@ -51,6 +53,8 @@ while getopts hw:u:p:l:b:c:sq flag; do
         max_num_seqs=$OPTARG ;;
     c) # use_recipe_cache
         warmup_cache_path=$OPTARG ;;
+    m) # max number of prefill sequences
+        max_num_prefill_seqs=$OPTARG ;;
     s) # skip_warmup
         skip_warmup=true ;;
     q) # enable inc fp8 quantization
@@ -153,8 +157,8 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 # !!!!!!!!!!!!!!!!!!!! set bucketing !!!!!!!!!!!!!
 BUCKET_PADDING_RATIO=${BUCKET_PADDING_RATIO:-"0.25"}  # tune this to balance warmup time and runtime performance
 prompt_bs_min=1
-prompt_bs_step=$(( $max_num_seqs > 32 ? 32 : $max_num_seqs ))
-prompt_bs_max=$(( $max_num_seqs > 64 ? 64 : $max_num_seqs ))
+prompt_bs_step=1
+prompt_bs_max=$max_num_prefill_seqs
 export VLLM_PROMPT_BS_BUCKET_MIN=${VLLM_PROMPT_BS_BUCKET_MIN:-$prompt_bs_min}
 export VLLM_PROMPT_BS_BUCKET_STEP=${VLLM_PROMPT_BS_BUCKET_STEP:-$prompt_bs_step}
 export VLLM_PROMPT_BS_BUCKET_MAX=${VLLM_PROMPT_BS_BUCKET_MAX:-$prompt_bs_max}
@@ -198,6 +202,7 @@ python3 -m vllm.entrypoints.openai.api_server --host $host --port $vllm_port \
 --dtype bfloat16 \
 --kv-cache-dtype $KV_CACHE_DTYPE \
 --tensor-parallel-size 8 \
+--max-num-prefill-seqs "${max_num_prefill_seqs}" \
 --trust-remote-code  \
 --max-model-len $max_model_len \
 --max-num-seqs $max_num_seqs \
