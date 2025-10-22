@@ -354,8 +354,12 @@ def run_internvl(questions: list[str], modality: str) -> ModelRequestData:
     # models variants may have different stop tokens
     # please refer to the model card for the correct "stop words":
     # https://huggingface.co/OpenGVLab/InternVL2-2B/blob/main/conversation.py
-    stop_tokens = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<|end|>"]
-    stop_token_ids = [tokenizer.convert_tokens_to_ids(i) for i in stop_tokens]
+    stop_tokens = ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "<|end|>"]
+    stop_token_ids = []
+    for token in stop_tokens:
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        if token_id is not None:
+            stop_token_ids.append(token_id)
 
     return ModelRequestData(
         engine_args=engine_args,

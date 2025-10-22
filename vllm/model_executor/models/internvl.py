@@ -33,6 +33,7 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.tokenizer import AnyTokenizer
+from vllm.worker.hpu_model_runner import DefaultVisionBuckets
 
 from .interfaces import MultiModalEmbeddings, SupportsMultiModal, SupportsPP
 from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
@@ -46,9 +47,27 @@ IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
+class InternVLVisionBuckets(DefaultVisionBuckets):
+
+    def __init__(self, img_block_patch_num=1024):
+        self.img_block_patch_num = img_block_patch_num  #patches of each block
+        super().__init__()
+
+    def _get_default_buckets(self):
+        multimodal_buckets = [
+            self.img_block_patch_num * i for i in range(1, 16)
+        ]  # i: image block num, 1 -> 15 img blocks
+        multimodal_buckets.extend([
+            self.img_block_patch_num << i for i in range(4, 8)
+        ])  # 16/32/64/128 img blocks
+        # multimodal_buckets = \
+        #   [self.img_block_patch_num * i for i in range(25, 176, 25)] # linear
+        return multimodal_buckets
+
+
 class InternVLImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
-    pixel_values_flat: torch.Tensor
+    pixel_values: torch.Tensor
     """
     Shape:
     `(batch_size * num_images * (1 + num_patches), num_channels, height, width)`
@@ -402,7 +421,7 @@ class BaseInternVLProcessor(ABC):
                 dynamic_image_size=dynamic_image_size,
             )
             image_inputs: dict[str, NestedTensors] = {
-                "pixel_values_flat":
+                "pixel_values":
                 torch.cat(pixel_values_lst),
                 "image_num_patches":
                 torch.tensor([len(item) for item in pixel_values_lst]),
@@ -557,7 +576,7 @@ class InternVLMultiModalProcessor(BaseMultiModalProcessor[_I]):
         num_images = len(image_num_patches)
 
         return dict(
-            pixel_values_flat=MultiModalFieldConfig.flat_from_sizes(
+            pixel_values=MultiModalFieldConfig.flat_from_sizes(
                 "image", image_num_patches),
             image_num_patches=MultiModalFieldConfig.batched("image"),
             image_embeds=MultiModalFieldConfig.batched("image"),
@@ -733,6 +752,15 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP):
             nn.Linear(llm_hidden_size, llm_hidden_size),
         )
 
+    def get_vision_buckets(self):
+        if hasattr(self, "vision_buckets"):
+            return self.vision_buckets
+        else:
+            image_size = self.config.vision_config.image_size
+            patch_size = self.config.vision_config.patch_size
+            img_block_patch_num = (image_size // patch_size)**2
+            return InternVLVisionBuckets(img_block_patch_num)
+
     def pixel_shuffle(self, x, scale_factor=0.5):
         n, w, h, c = x.size()
         # N, W, H, C --> N, W, H * scale, C // scale
@@ -747,8 +775,40 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP):
             x = x.permute(0, 2, 1, 3).contiguous()
         return x
 
-    def extract_feature(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        vit_embeds = self.vision_model(pixel_values=pixel_values)
+    def extract_feature(self, image_input: torch.Tensor) -> torch.Tensor:
+        pixel_values = image_input.pop("pixel_values", None)
+        # solution 1：direct forward
+        # patches_num = pixel_values.shape[0] \
+        #    * self.vision_buckets.img_block_patch_num
+        # bypass_hpu_graphs = image_input["bypass_hpu_graphs"] \
+        #               and self.vision_buckets.use_graph(patches_num)
+        # vit_embeds = self.vision_model(pixel_values=pixel_values,
+        #                               bypass_hpu_graphs=bypass_hpu_graphs)
+
+        # solution 2: multiple forward
+        input_block_num = pixel_values.shape[0]
+        res_list = []
+        s, t = 0, 0
+        for vision_bucket in sorted(self.vision_buckets.multimodal_buckets,
+                                    reverse=True):
+            # patches -> img blocks
+            vision_bucket = \
+                vision_bucket // self.vision_buckets.img_block_patch_num
+            while input_block_num >= vision_bucket:
+                t += vision_bucket
+                vit_embeds = self.vision_model(
+                    pixel_values=pixel_values[s:t].clone(),
+                    bypass_hpu_graphs=image_input["bypass_hpu_graphs"]
+                )  # (num_img_blocks, img_tokens+cls=1025, hiddensize=1024)
+                s = t
+                input_block_num -= vision_bucket
+                res_list.append(vit_embeds)
+                if input_block_num == 0:
+                    break
+        assert input_block_num == 0, "should all be resolved"
+        assert len(res_list) > 0
+        vit_embeds = torch.cat(res_list, dim=0)
+
         vit_embeds = vit_embeds[:, 1:, :]
 
         h = w = int(vit_embeds.shape[1]**0.5)
@@ -782,11 +842,11 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP):
 
     def _parse_and_validate_image_input(
             self, **kwargs: object) -> Optional[InternVLImageInputs]:
-        pixel_values_flat = kwargs.pop("pixel_values_flat", None)
+        pixel_values = kwargs.pop("pixel_values", None)
         image_num_patches = kwargs.pop("image_num_patches", None)
         image_embeds = kwargs.pop("image_embeds", None)
 
-        if pixel_values_flat is None and image_embeds is None:
+        if pixel_values is None and image_embeds is None:
             return None
 
         if image_embeds is not None:
@@ -801,26 +861,28 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP):
 
         image_token_id = kwargs["image_token_id"]
         assert isinstance(image_token_id, torch.Tensor)
-        self.img_context_token_id = image_token_id.flatten().unique().item()
+        # Graph mode does not support unique() op
+        # self.img_context_token_id = image_token_id.flatten().unique().item()
+        self.img_context_token_id = image_token_id[
+            0]  # Assume image_token_id is unique
 
-        if pixel_values_flat is not None:
-            if not isinstance(pixel_values_flat, (torch.Tensor, list)):
+        if pixel_values is not None:
+            if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
-                                 f"Got type: {type(pixel_values_flat)}")
+                                 f"Got type: {type(pixel_values)}")
 
             if not isinstance(image_num_patches, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of image_num_patches. "
                                  f"Got type: {type(image_num_patches)}")
 
-            pixel_values_flat = flatten_bn(pixel_values_flat, concat=True)
+            pixel_values = flatten_bn(pixel_values, concat=True)
             image_num_patches = flatten_bn(image_num_patches, concat=True)
 
             return InternVLImagePixelInputs(
                 type="pixel_values",
-                pixel_values_flat=self._validate_pixel_values(
-                    pixel_values_flat),
+                pixel_values=self._validate_pixel_values(pixel_values),
                 num_patches=image_num_patches,
-            )
+                bypass_hpu_graphs=kwargs.get("bypass_hpu_graphs"))
 
         raise AssertionError("This line should be unreachable.")
 
@@ -833,24 +895,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP):
 
         assert self.vision_model is not None
 
-        image_embeds = self.extract_feature(image_input["pixel_values_flat"])
-
-        num_patches = image_input["num_patches"]
-
-        # Only one image in the current batch
-        if len(num_patches) == 1:
-            return image_embeds.view(
-                -1, self.config.text_config.hidden_size).unsqueeze(0)
-
-        # NOTE: Image embeddings are split into separate tensors for each image
-        # by the size of each embedding.
-        feature_size = image_embeds.shape[1]
-        image_embeds = image_embeds.view(-1,
-                                         self.config.text_config.hidden_size)
-        image_feature_sizes = [
-            num_patches * feature_size for num_patches in num_patches
-        ]
-        return image_embeds.split(image_feature_sizes)
+        image_embeds = self.extract_feature(image_input)
+        return image_embeds
 
     def _set_visual_token_mask(self, input_ids: torch.Tensor) -> None:
         if self.is_mono:
