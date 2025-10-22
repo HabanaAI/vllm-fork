@@ -29,7 +29,7 @@ Verified models:
   - [Multi-Node Setup and Serving Deployment](#multi-node-setup-and-serving-deployment)
     - [Identical Software Stack](#identical-software-stack)
     - [Network Configuration](#network-configuration)
-    - [Start Dcoker Container Parameters](#start-docker-container-parameters)
+    - [Start Docker Container Parameters](#start-docker-container-parameters)
     - [HCCL Demo Test](#hccl-demo-test)
     - [Install vLLM on Both Nodes](#install-vllm-on-both-nodes)
     - [Configure Multi-Node Script](#configure-multi-node-script)
@@ -312,7 +312,7 @@ bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -q -u 0.0.0.0 -p 8688 -l 16
 Note: for DeepSeek-V3.1, please remove the parameters "--enable-reasoning --reasoning-parser deepseek_r1" in the file "start_vllm.sh" if the client uses non-thinking mode. 
 
 
-It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.
+It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is reused. vLLM server is ready to serve when the log below appears.
 ```bash
 INFO 04-09 00:49:01 llm_engine.py:431] init engine (profile, create kv cache, warmup model) took 32.75 seconds
 INFO 04-09 00:49:01 api_server.py:800] Using supplied chat template:
@@ -333,7 +333,7 @@ curl http://127.0.0.1:8688/v1/chat/completions \
   -H 'Content-Type: application/json'
 ```
 
-If it reponses normally, refer to [Check the vLLM Performance](#Check-the-vLLM-performance) and [Check the Model Accuracy](#check-the-model-accuracy) to measure the performance and accuracy.
+If it responses normally, refer to [Check the vLLM Performance](#Check-the-vLLM-performance) and [Check the Model Accuracy](#check-the-model-accuracy) to measure the performance and accuracy.
 
 
 ## Multi-Node Setup and Serving Deployment
@@ -346,7 +346,7 @@ Ensure both nodes have the same software stack, including:
 - Firmware: 1.20.1 (how to update Gaudi firmware: https://docs.habana.ai/en/latest/Installation_Guide/Firmware_Upgrade.html#system-unboxing-main)
 - Docker: vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
 - vLLM branch for DeepSeek-R1 671B: https://github.com/HabanaAI/vllm-fork/tree/deepseek_r1
-- vLLM HPU extention for DeepSeek-R1 671B: https://github.com/HabanaAI/vllm-hpu-extension/tree/deepseek_r1
+- vLLM HPU extension for DeepSeek-R1 671B: https://github.com/HabanaAI/vllm-hpu-extension/tree/deepseek_r1
 
 ### Network Configuration
 - Ensure both nodes are connected to the same switch/router.
@@ -586,7 +586,7 @@ ip_addr=127.0.0.1
 port=8688
 ```
 
-- Execute this scrpt in the folder "vllm-fork/benchmarks". 
+- Execute this script in the folder "vllm-fork/benchmarks". 
 ```bash
 pip install datasets
 bash benchmark_vllm_client.sh

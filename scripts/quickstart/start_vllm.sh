@@ -110,7 +110,7 @@ else
     exit 1
 fi
 
-# DO NOT change unless you fully undersand its purpose
+# DO NOT change unless you fully understand its purpose
 export HABANA_VISIBLE_DEVICES="ALL"
 export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
 export VLLM_RAY_DISABLE_LOG_TO_DRIVER="1"
@@ -125,7 +125,7 @@ export VLLM_EP_SIZE=8
 block_size=128
 # DO NOT change ends...
 
-# memory footprint tunning params
+# memory footprint tuning params
 if (( max_model_len <= 16384 )); then
 	export VLLM_GPU_MEMORY_UTILIZATION=0.85
 else
@@ -190,7 +190,7 @@ export VLLM_DECODE_BLOCK_BUCKET_MAX=${VLLM_DECODE_BLOCK_BUCKET_MAX:-$decode_bloc
 export VLLM_DECODE_BLOCK_BUCKET_LIMIT=${BUCKET_PADDING_RATIO}
 
 
-echo " environments are reseted "
+echo " environments are reset "
 
 env | grep VLLM
 
