@@ -16,7 +16,7 @@ from transformers.modeling_outputs import BaseModelOutputWithNoAttention
 from vllm.platforms import _Backend, current_platform
 
 from .vision import get_vit_attn_backend
-from vllm.model_executor.layers.rotary_embedding import _apply_rotary_emb_torch
+from vllm.model_executor.layers.rotary_embedding import get_rope
 
 is_hpu = current_platform.is_hpu()
 
@@ -145,26 +145,26 @@ def rotate_half(x, interleaved=False):
                          two=2)
 
 
-# def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
-#     """
-#     x: (batch_size, seqlen, nheads, headdim)
-#     cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
-#     """
-#     ro_dim = cos.shape[-1] * 2
-#     assert ro_dim <= x.shape[-1]
-#     cos = repeat(
-#         cos,
-#         "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
-#     sin = repeat(
-#         sin,
-#         "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
-#     return torch.cat(
-#         [
-#             x[..., :ro_dim] * cos +
-#             rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]
-#         ],
-#         dim=-1,
-#     )
+def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
+    """
+    x: (batch_size, seqlen, nheads, headdim)
+    cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
+    """
+    ro_dim = cos.shape[-1] * 2
+    assert ro_dim <= x.shape[-1]
+    cos = repeat(
+        cos,
+        "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    sin = repeat(
+        sin,
+        "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    return torch.cat(
+        [
+            x[..., :ro_dim] * cos +
+            rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]
+        ],
+        dim=-1,
+    )
 
 
 def apply_rotary_pos_emb(
@@ -180,11 +180,11 @@ def apply_rotary_pos_emb(
         from flash_attn.layers.rotary import apply_rotary_emb
         apply_rotary_emb_func = apply_rotary_emb
     else:
-        apply_rotary_emb_func = _apply_rotary_emb_torch
+        apply_rotary_emb_func = apply_rotary_emb_torch
     q_embed = apply_rotary_emb_func(q.float(), cos.float(),
-                                    sin.float(), False).type_as(q)
+                                    sin.float()).type_as(q)
     k_embed = apply_rotary_emb_func(k.float(), cos.float(),
-                                    sin.float(), False).type_as(k)
+                                    sin.float()).type_as(k)
     return q_embed, k_embed
 
 
@@ -212,6 +212,17 @@ class Siglip2Attention(nn.Module):
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim)
 
         self.use_rope = config.use_rope
+        max_position = getattr(config, "max_position_embeddings", 4096 * 32)
+        rope_theta = getattr(config, "rope_theta", 10000.0)
+        rope_scaling = getattr(config, "rope_scaling", None)
+        
+        self.rotary_emb = get_rope(
+            self.head_dim,
+            rotary_dim=self.head_dim,
+            max_position=max_position,
+            base=rope_theta,
+            rope_scaling=rope_scaling,
+        )
 
         # Detect attention implementation.
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
@@ -244,12 +255,16 @@ class Siglip2Attention(nn.Module):
         values = values.view(seq_length, self.num_heads, self.head_dim)
 
         if self.use_rope:
-            cos, sin = position_embeddings
-            queries, keys = apply_rotary_pos_emb(queries.unsqueeze(0),
-                                                 keys.unsqueeze(0), cos, sin,
-                                                 self.is_flash_attn_backend)
-            queries = queries.squeeze(0)
-            keys = keys.squeeze(0)
+            # cos, sin = position_embeddings
+            # queries, keys = apply_rotary_pos_emb(queries.unsqueeze(0),
+            #                                      keys.unsqueeze(0), cos, sin,
+            #                                      self.is_flash_attn_backend)
+            # queries = queries.squeeze(0)
+            # keys = keys.squeeze(0)
+            seq_len = queries.shape[0]
+            positions = torch.arange(seq_len, device=queries.device)
+            queries, keys = self.rotary_emb(positions, queries.unsqueeze(0), keys.unsqueeze(0))
+            queries, keys = queries.squeeze(0), keys.squeeze(0)
 
         max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         if self.is_flash_attn_backend:
