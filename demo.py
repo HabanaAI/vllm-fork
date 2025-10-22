@@ -41,7 +41,7 @@ def get_demo_data():
     # 在这里提供你想测试的图像路径
     #   image_path = "path_to_your_image.jpg"
     #   image = fetch_image(image_path)  # 使用 dotsocr 的图片加载工具
-    image = Image.open('math.jpg').convert('RBG')
+    image = Image.open('math.jpg').convert('RGB')
     questions = [
         "What is the content of this image?",  # 任务1：提取图像内容
         "Where is this image taken?",  # 任务2：如果需要识别图像地点
