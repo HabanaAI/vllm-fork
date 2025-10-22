@@ -13,8 +13,8 @@ from transformers import AutoTokenizer
 
 from vllm import LLM, SamplingParams
 
-MODEL_NAME = "dotsocr"  # 设置为 dotsocr 模型
-TOKENIZER_NAME = "dotsocr"  # 设置为 dotsocr 对应的 tokenizer
+MODEL_NAME = "/home/disk6/HF_models/dotsocr"
+TOKENIZER_NAME = "/home/disk6/HF_models/dotsocr"
 
 
 def build_prompts(questions):
@@ -26,7 +26,7 @@ def build_prompts(questions):
     # OCR任务中，问题改为针对图像内容的提问
     messages = [[{
         "role": "user",
-        "content": f"<image>\n{q}"
+        "content": f"<|img|><|imgpad|><|endofimg|>{q}"
     }] for q in questions]
     return tokenizer.apply_chat_template(messages,
                                          tokenize=False,
