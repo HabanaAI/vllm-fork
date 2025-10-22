@@ -9,7 +9,7 @@ Help() {
     # Display Help
     echo "Start a vLLM server for a huggingface model on Gaudi."
     echo
-    echo "Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:q:i:p:o:b:g:u:e:lc:sf] [-h]"
+    echo "Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:q:i:p:o:b:g:u:e:l:c:sf] [-h]"
     echo "Options:"
     echo "-w  Weights of the model, str, could be model id in huggingface or local path."
     echo "    DO NOT change the model name as some of the parameters depend on it."
@@ -26,11 +26,13 @@ Help() {
     echo "    The environment variable 'QUANT_CONFIG' will override this option."
     echo "-i  Input range, str, format='input_min,input_max', default='4,1024'"
     echo "    Make sure the range cover all the possible lengths from the benchmark/client."
-    echo "-p  Max number of prefill sequences, int, default=${PREFERED_BATCHED_TOKENS}/input_min"
-    echo "    Used to control the max batch size for prefill to optimize the TTFT."
+    echo "-p  Max number of the prefill sequences, int, default=${PREFERED_PREFILL_BS}"
+    echo "    Used to control the max batch size for prefill to balance the TTFT and throughput."
+    echo "    The default value of 1 is used to optimize the TTFT."
+    echo "    Set to '' to optimize the throughput for short prompts."
     echo "-o  Output range, str, format='output_min,output_max', default='4,2048'"
     echo "    Make sure the range cover all the possible lengths from the benchmark/client."
-    echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_NUM_SEQS}"
+    echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_DECODING_BS}"
     echo "    Used to control the max batch size for decoding phase."
     echo "    It is recommended to set this value according to the 'Maximum concurrency'"
     echo "    reported by a test run."
@@ -41,10 +43,11 @@ Help() {
     echo "    Used to control the GPU memory utilization. Reduce this value if OOM occurs."
     echo "-e  Extra vLLM server parameters, str, default=None"
     echo "    Extra parameters that will pass to the vLLM server."
-    echo "-l  Use linear bucketing or not, bool, default=false"
-    echo "    The exponential bucketing is used by default to reduce number of buckets."
-    echo "    Turn on to switch to linear bucketing that introduce less padding, and more"
-    echo "    buckets and thus longer warmup time."
+    echo "-l  Limit of the padding ratio, float, [0.0, 0.5], default=0.25"
+    echo "    The padding strategy ensures that padding_size/bucket_size <= limit."
+    echo "    Smaller limit values result in more aggressive padding and more buckets."
+    echo "    Set to 0.5 is equivalent to use the exponential bucketing."
+    echo "    Set to 0.0 is equivalent to use the linear bucketing without padding limits."
     echo "-c  Cache HPU recipe to the specified path, str, default=None"
     echo "    The recipe cache could be reused to reduce the warmup time."
     echo "-s  Skip warmup or not, bool, default=false"
@@ -56,7 +59,7 @@ Help() {
 }
 
 # Get the options
-while getopts hw:t:m:a:d:q:i:p:o:b:g:u:e:lc:sf flag; do
+while getopts hw:t:m:a:d:q:i:p:o:b:g:u:e:l:c:sf flag; do
     case $flag in
     h) # display Help
         Help
@@ -94,8 +97,19 @@ while getopts hw:t:m:a:d:q:i:p:o:b:g:u:e:lc:sf flag; do
         gpu_memory_utilization=$OPTARG ;;
     e) # extra vLLM server parameters
         IFS=" " read -r -a extra_params <<< "$OPTARG" ;;
-    l) # use linear bucketing
-        use_linear_bucketing=true ;;
+    l) # limit of the padding ratio
+        max_padding_ratio=$OPTARG
+        # make sure max_padding_ratio is a float and in [0.0, 0.5]
+        if ! [[ "$max_padding_ratio" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "[ERROR]: max_padding_ratio should be a float."
+            exit 1
+        fi
+        if (( $(echo "$max_padding_ratio < 0.0" | bc -l) )) || \
+            (( $(echo "$max_padding_ratio > 0.5" | bc -l) )); then
+            echo "[ERROR]: max_padding_ratio should be in [0.0, 0.5]."
+            exit 1
+        fi
+        ;;
     c) # use_recipe_cache
         cache_path=$OPTARG ;;
     s) # skip_warmup
@@ -124,14 +138,14 @@ dtype=${dtype:-"bfloat16"}
 quant_config=${quant_config:-""}
 input_min=${input_min:-"4"}
 input_max=${input_max:-"1024"}
-max_num_prefill_seqs=${max_num_prefill_seqs:-""}
+max_num_prefill_seqs=${max_num_prefill_seqs-${PREFERED_PREFILL_BS}}
 output_min=${output_min:-"4"}
 output_max=${output_max:-"2048"}
-max_num_seqs=${max_num_seqs:-$PREFERED_NUM_SEQS}
+max_num_seqs=${max_num_seqs:-$PREFERED_DECODING_BS}
 max_seq_len_to_capture=${max_seq_len_to_capture:-$PREFERED_SEQ_LEN_TO_CAPTURE}
 gpu_memory_utilization=${gpu_memory_utilization:-"0.9"}
 extra_params=(${extra_params[@]:-})
-use_linear_bucketing=${use_linear_bucketing:-"false"}
+max_padding_ratio=${max_padding_ratio:-"0.25"}
 cache_path=${cache_path:-""}
 skip_warmup=${skip_warmup:-"false"}
 profile=${profile:-"false"}

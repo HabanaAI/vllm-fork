@@ -233,6 +233,7 @@ def is_init_field(cls: ConfigType, name: str) -> bool:
 
 TokenizerMode = Literal["auto", "slow", "mistral", "custom"]
 ModelDType = Literal["auto", "half", "float16", "bfloat16", "float", "float32"]
+MambaDType = Literal["auto", "float32"]
 
 
 @config
@@ -1298,11 +1299,25 @@ class ModelConfig:
             if attn_type_list:
                 return sum(t == 1 for t in attn_type_list[start:end])
 
-            if layers_block_type_value is None and attn_type_list is None:
+            # Hybrid model Qwen3Next
+            layer_types_value = getattr(self.hf_config, "layer_types", None)
+            if layer_types_value is not None:
+                if getattr(block_type, "value", block_type) == "attention":
+                    return sum(t == "full_attention"
+                               for t in layer_types_value[start:end])
+                elif getattr(block_type, "value", block_type) == "mamba":
+                    return sum(t == "linear_attention"
+                               for t in layer_types_value[start:end])
+                else:
+                    return sum(t == getattr(block_type, "value", block_type)
+                               for t in layer_types_value[start:end])
+
+            if (layers_block_type_value is None and attn_type_list is None
+                    and layer_types_value is None):
                 raise ValueError(
                     "The model is an hybrid without a"
-                    "layers_block_type or an attn_type_list in the hf_config,"
-                    "cannot determine the num of "
+                    "layers_block_type or an attn_type_list, or a layer_types "
+                    "in the hf_config, cannot determine the num of "
                     f"{block_type.value} layers")
 
             return sum(t == 1 for t in attn_type_list[start:end])
@@ -2573,10 +2588,12 @@ class SpeculativeConfig:
             if self.target_model_config and \
                 (self.target_model_config.hf_text_config.model_type \
                         == "deepseek_v3" or
-                    self.target_model_config.hf_text_config.model_type \
-                        == "mimo"):
+                    self.target_model_config.hf_text_config.model_type in
+                        ("mimo", "qwen3_next")):
                 # use the draft model from the same model:
                 self.model = self.target_model_config.model
+                if not self.quantization:
+                    self.quantization = self.target_model_config.quantization
             elif self.method in ("ngram", "[ngram]"):
                 self.model = "ngram"
             else:
@@ -4496,7 +4513,8 @@ class VllmConfig:
                     logger.info_once(
                         'Enable conversion from fp8_e4m3fn to fp8_e4m3fnuz')
                     os.environ["VLLM_HPU_CONVERT_TO_FP8UZ"] = "true"
-                if self.load_config.device != 'cpu':
+                if envs.VLLM_HPU_CONVERT_TO_FP8UZ and \
+                    self.load_config.device != 'cpu':
                     logger.info_once('Reset weights_load_device to CPU.')
                     self.load_config.device = 'cpu'
 

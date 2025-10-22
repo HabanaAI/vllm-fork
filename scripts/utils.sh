@@ -7,8 +7,9 @@ original_env=( $(env) )
 # HPU specific constants
 DEVICE_NAME=$(hl-smi -Q name -f csv | tail -n 1)
 BLOCK_SIZE=128
-PREFERED_BATCHED_TOKENS=8192
-PREFERED_NUM_SEQS=128
+PREFERED_BATCHED_TOKENS=2048
+PREFERED_PREFILL_BS=1
+PREFERED_DECODING_BS=128
 PREFERED_SEQ_LEN_TO_CAPTURE=8192
 DATA_TYPE="bfloat16"
 
@@ -98,8 +99,12 @@ set_length(){
     if [ "$max_num_prefill_seqs" == "" ]; then
         # Ceiling input_min to a multiple of BLOCK_SIZE
         input_min_ceil=$( ceil $input_min $BLOCK_SIZE )
-        max_num_prefill_seqs=$(( $max_num_batched_tokens / $input_min_ceil ))
+        max_num_prefill_seqs=$(( $PREFERED_BATCHED_TOKENS / $input_min_ceil ))
         max_num_prefill_seqs=$( max $max_num_prefill_seqs 1 )
+    fi
+    if [ "$max_num_prefill_seqs" -gt "$max_num_seqs" ]; then
+        max_num_prefill_seqs=$max_num_seqs
+        echo "Warning: max_num_prefill_seqs is set to max_num_seqs: $max_num_seqs"
     fi
 
     max_model_len=$(( $input_max + $output_max ))
@@ -260,7 +265,7 @@ set_dtype(){
 }
 
 # set up linear bucketing based on input/output range and max_num_batched_tokens
-set_linear_bucketing(){
+set_bucketing(){
     export VLLM_EXPONENTIAL_BUCKETING=false
 
     max_num_batched_tokens=${max_num_batched_tokens:-8192}
@@ -272,16 +277,11 @@ set_linear_bucketing(){
 
     prompt_bs_step=1
     prompt_bs_min=1
-    prompt_bs_max=$(( $PREFERED_SEQ_LEN_TO_CAPTURE / $(ceil $input_min $block_size) ))
-    prompt_bs_max=$( ceil $prompt_bs_max $prompt_bs_step )
-    prompt_bs_max=$( min $prompt_bs_max $max_num_seqs )
-    if [ -n "$max_num_prefill_seqs" ]; then
-        prompt_bs_max=$( min $prompt_bs_max $max_num_prefill_seqs )
-    fi
-    prompt_bs_max=$( max $prompt_bs_max 1 )
+    prompt_bs_max=$max_num_prefill_seqs
     export VLLM_PROMPT_BS_BUCKET_MIN=${VLLM_PROMPT_BS_BUCKET_MIN:-$prompt_bs_min}
     export VLLM_PROMPT_BS_BUCKET_STEP=${VLLM_PROMPT_BS_BUCKET_STEP:-$prompt_bs_step}
     export VLLM_PROMPT_BS_BUCKET_MAX=${VLLM_PROMPT_BS_BUCKET_MAX:-$prompt_bs_max}
+    export VLLM_PROMPT_BS_BUCKET_LIMIT=${VLLM_PROMPT_BS_BUCKET_LIMIT:-$max_padding_ratio}
 
     prompt_seq_step=$block_size
     prompt_seq_min=$( ceil $input_min $prompt_seq_step )
@@ -289,6 +289,7 @@ set_linear_bucketing(){
     export VLLM_PROMPT_SEQ_BUCKET_MIN=${VLLM_PROMPT_SEQ_BUCKET_MIN:-$prompt_seq_min}
     export VLLM_PROMPT_SEQ_BUCKET_STEP=${VLLM_PROMPT_SEQ_BUCKET_STEP:-$prompt_seq_step}
     export VLLM_PROMPT_SEQ_BUCKET_MAX=${VLLM_PROMPT_SEQ_BUCKET_MAX:-$prompt_seq_max}
+    export VLLM_PROMPT_SEQ_BUCKET_LIMIT=${VLLM_PROMPT_SEQ_BUCKET_LIMIT:-$max_padding_ratio}
 
     decode_bs_step=$( ceil_div $max_num_seqs 16 )
     decode_bs_step=$( min $decode_bs_step 16 )
@@ -297,6 +298,7 @@ set_linear_bucketing(){
     export VLLM_DECODE_BS_BUCKET_MIN=${VLLM_DECODE_BS_BUCKET_MIN:-$decode_bs_min}
     export VLLM_DECODE_BS_BUCKET_STEP=${VLLM_DECODE_BS_BUCKET_STEP:-$decode_bs_step}
     export VLLM_DECODE_BS_BUCKET_MAX=${VLLM_DECODE_BS_BUCKET_MAX:-$decode_bs_max}
+    export VLLM_DECODE_BS_BUCKET_LIMIT=${VLLM_DECODE_BS_BUCKET_LIMIT:-$max_padding_ratio}
 
     decode_block_step=$block_size
     decode_block_min=$( ceil_div $input_min $block_size )
@@ -308,6 +310,7 @@ set_linear_bucketing(){
     export VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN:-$decode_block_min}
     export VLLM_DECODE_BLOCK_BUCKET_STEP=${VLLM_DECODE_BLOCK_BUCKET_STEP:-$decode_block_step}
     export VLLM_DECODE_BLOCK_BUCKET_MAX=${VLLM_DECODE_BLOCK_BUCKET_MAX:-$decode_block_max}
+    export VLLM_DECODE_BLOCK_BUCKET_LIMIT=${VLLM_DECODE_BLOCK_BUCKET_LIMIT:-$max_padding_ratio}
 }
 
 set_perf_tuning(){
@@ -365,9 +368,7 @@ set_config(){
     set_length
     set_module_ids
     set_dtype
-    if [ "$use_linear_bucketing" == "true" ]; then
-        set_linear_bucketing
-    fi
+    set_bucketing
     set_perf_tuning
 
     new_env=( $(env) )

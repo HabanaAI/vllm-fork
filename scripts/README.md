@@ -86,7 +86,7 @@ The command output is like below.
 ```
 Start a vLLM server for a huggingface model on Gaudi.
 
-Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:q:i:p:o:b:g:u:e:lc:sf] [-h]
+Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:q:i:p:o:b:g:u:e:l:c:sf] [-h]
 Options:
 -w  Weights of the model, str, could be model id in huggingface or local path.
     DO NOT change the model name as some of the parameters depend on it.
@@ -103,8 +103,10 @@ Options:
     The environment variable 'QUANT_CONFIG' will override this option.
 -i  Input range, str, format='input_min,input_max', default='4,1024'
     Make sure the range cover all the possible lengths from the benchmark/client.
--p  Max number of prefill sequences, int, default=8192/input_min
-    Used to control the max batch size for prefill to optimize the TTFT.
+-p  Max number of the prefill sequences, int, default=1
+    Used to control the max batch size for prefill to balance the TTFT and throughput.
+    The default value of 1 is used to optimize the TTFT.
+    Set to '' to optimize the throughput for short prompts.
 -o  Output range, str, format='output_min,output_max', default='4,2048'
     Make sure the range cover all the possible lengths from the benchmark/client.
 -b  max-num-seqs for vLLM, int, default=128
@@ -118,10 +120,11 @@ Options:
     Used to control the GPU memory utilization. Reduce this value if OOM occurs.
 -e  Extra vLLM server parameters, str, default=None
     Extra parameters that will pass to the vLLM server.
--l  Use linear bucketing or not, bool, default=false
-    The exponential bucketing is used by default to reduce number of buckets.
-    Turn on to switch to linear bucketing that introduce less padding, and more
-    buckets and thus longer warmup time.
+-l  Limit of the padding ratio, float, [0.0, 0.5], default=0.25
+    The padding strategy ensures that padding_size/bucket_size <= limit.
+    Smaller limit values result in more aggressive padding and more buckets.
+    Set to 0.5 is equivalent to use the exponential bucketing.
+    Set to 0.0 is equivalent to use the linear bucketing without padding limits.
 -c  Cache HPU recipe to the specified path, str, default=None
     The recipe cache could be reused to reduce the warmup time.
 -s  Skip warmup or not, bool, default=false
@@ -231,7 +234,7 @@ For Qwen3-235B-A22B, the original bfloat16 weights can not fit into 4 Gaudi2 HPU
 
 ``` bash
 bash calibrate_model.sh \
-     -m /models/Qwen3-235B-A22B \
+     -m /models/Qwen3-235B-A22B-FP8 \
      -d NeelNanda/pile-10k \
      -o quantization \
      -t 8 -r 4 -u
@@ -248,6 +251,12 @@ bash calibrate_model.sh \
      -o quantization \
      -t 8 -x 4 -u
 ```
+
+> [!TIP]
+> **For models with fp8 weights**: Gaudi2 supports `fp8_e4m3fnuz` instead of the `fp8_e4m3fn`, so far the fp8_e4m3fn weights will be loaded to the host memory first and be converted to `fp8_e4m3fnuz` before be moved to the HPU. The conversion is done with CPU and could be time consuming. Another option is to convert the `fp8_e4m3fn` weights offline with the script [convert_weights_for_gaudi2.py](https://github.com/HabanaAI/vllm-hpu-extension/blob/aice/v1.22.0/scripts/convert_weights_for_gaudi2.py) and set the environment variable `VLLM_HPU_CONVERT_TO_FP8UZ=false` for the benchmark and calibration sessions.
+
+> [!WARNING]
+> Do not set `VLLM_HPU_CONVERT_TO_FP8UZ=false` when using the original `fp8_e4m3fn` weights, and **do not forget** to set `VLLM_HPU_CONVERT_TO_FP8UZ=false` when using the converted `fp8_e4m3fnuz` weights.
 
 #### 3. Make the Quantization folder
 Create a quantization folder at the same level as start_gaudi_vllm_server.sh.
@@ -292,11 +301,12 @@ The command output is like below.
 ```
 Benchmark vLLM throughput for a huggingface model on Gaudi.
 
-Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:q:i:o:r:j:t:l:b:c:sfza] [-h]
+Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:q:i:p:o:b:r:j:n:g:u:e:l:c:sf] [-h]
 options:
 -w  Weights of the model, str, could be model id in huggingface or local path.
     DO NOT change the model name as some of the parameters depend on it.
--t  Number of HPUs to use, [1-8], default=1. Used to set TP and EP size.
+-t  tensor-parallel-size for vLLM, int, default=1.
+    Also used to set EP size if it's enable by --enable-expert-parallel
 -m  Module IDs of the HPUs to use, comma separated int in [0-7], default=None
     Used to select HPUs and to set NUMA accordingly. It's recommended to set
     for cases with 4 or less HPUs.
@@ -306,9 +316,12 @@ options:
     default=./quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'
     The environment variable 'QUANT_CONFIG' will override this option.
 -i  Input length, int, default=1024
--p  Max number of prefill sequences, int, default=8192/input_min
+-p  Max number of the prefill sequences, int, default=1
+    Used to control the max batch size for prefill to balance the TTFT and throughput.
+    The default value of 1 is used to optimize the TTFT.
+    Set to '' to optimize the throughput for short prompts.
 -o  Output length, int, default=512
--b  max_num_seqs for vllm, int, default=128
+-b  max-num-seqs for vLLM, int, default=128
     Used to control the max batch size for decoding phase.
     It is recommended to set this value according to the 'Maximum concurrency'
     reported by a test run.
@@ -323,11 +336,12 @@ options:
 -u  gpu-memory-utilization, float, default=0.9
     Used to control the GPU memory utilization. Reduce this value if OOM occurs.
 -e  Extra vLLM server parameters, str, default=None
-    Extra parameters that will pass to the vLLM engine.
--l  Use linear bucketing or not, bool, default=false
-    The exponential bucketing is used by default to reduce number of buckets.
-    Turn on to switch to linear bucketing that introduce less padding, and more
-    buckets and thus longer warmup time.
+    Extra parameters passed to benchmarks/benchmark_throughput.py and vLLM engine.
+-l  Limit of the padding ratio, float, [0.0, 0.5], default=0.25
+    The padding strategy ensures that padding_size/bucket_size <= limit.
+    Smaller limit values result in more aggressive padding and more buckets.
+    Set to 0.5 is equivalent to use the exponential bucketing.
+    Set to 0.0 is equivalent to use the linear bucketing without padding limits.
 -c  Cache HPU recipe to the specified path, str, default=None
     The recipe cache could be reused to reduce the warmup time.
 -s  Skip warmup or not, bool, default=false
