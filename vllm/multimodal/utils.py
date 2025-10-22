@@ -151,10 +151,6 @@ class MediaConnector:
         url_spec = urlparse(url)
 
         if url_spec.scheme.startswith("http"):
-            if load_type == "bytes":
-                raise NotImplementedError(
-                    "Only data URLs are currently supported for bytes loading."
-                )
             data = self.connection.get_bytes(url, timeout=fetch_timeout)
             return media_io.load_bytes(data)
 
@@ -162,10 +158,6 @@ class MediaConnector:
             return self._load_data_url(url_spec, media_io, load_type)
 
         if url_spec.scheme == "file":
-            if load_type == "bytes":
-                raise NotImplementedError(
-                    "Only data URLs are currently supported for bytes loading."
-                )
             return self._load_file_url(url_spec, media_io)
 
         raise ValueError("The URL must be either a HTTP, data or file URL.")
@@ -203,10 +195,6 @@ class MediaConnector:
         url_spec = urlparse(url)
 
         if url_spec.scheme.startswith("http"):
-            if load_type == "bytes":
-                raise NotImplementedError(
-                    "Only data URLs are currently supported for bytes loading."
-                )
             data = await self.connection.async_get_bytes(url,
                                                          timeout=fetch_timeout)
             return media_io.load_bytes(data)
@@ -215,10 +203,6 @@ class MediaConnector:
             return self._load_data_url(url_spec, media_io, load_type)
 
         if url_spec.scheme == "file":
-            if load_type == "bytes":
-                raise NotImplementedError(
-                    "Only data URLs are currently supported for bytes loading."
-                )
             return self._load_file_url(url_spec, media_io)
 
         raise ValueError("The URL must be either a HTTP, data or file URL.")
