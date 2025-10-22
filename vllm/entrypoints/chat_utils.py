@@ -38,6 +38,8 @@ from vllm.multimodal import MultiModalDataDict
 from vllm.multimodal.utils import MediaConnector
 from vllm.transformers_utils.tokenizer import AnyTokenizer, MistralTokenizer
 
+from vllm.utils import random_uuid
+
 logger = init_logger(__name__)
 
 
@@ -1005,3 +1007,11 @@ def apply_mistral_chat_template(
         messages=messages,
         **kwargs,
     )
+
+
+def make_tool_call_id(id_type: str = "random", func_name=None, idx=None):
+    if id_type == "kimi_k2":
+        return f"functions.{func_name}:{idx}"
+    else:
+        # by default return random
+        return f"chatcmpl-tool-{random_uuid()}"
