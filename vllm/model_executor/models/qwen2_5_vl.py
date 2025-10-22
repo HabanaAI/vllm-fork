@@ -318,6 +318,7 @@ class Qwen2_5_VisionAttention(nn.Module):
         self.softmax_mode = 'fp32' if os.environ.get(
             'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
                                                              ] else 'None'
+        self.sdpa_compose_step = 16
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -393,17 +394,23 @@ class Qwen2_5_VisionAttention(nn.Module):
                 # in patches of 64
                 outputs = []
                 cu_seqlens = list(range(0, x.shape[0] + 1, 64))
-                for i in range(1, len(cu_seqlens)):
-                    # For large image, we add mark step here
-                    # for every 100th step to make compile time shorter
-                    if i % 100 == 0:
+                #As window attention seqlen=64, it is too small,
+                #SDPA is not efficient.
+                #So use bigger seqlen with mask to do the SDPA.
+                #composed seqlen = compose_step*64
+                compose_step = self.sdpa_compose_step
+                mark_step_loop = int(100 / compose_step) * compose_step
+                for i in range(0, len(cu_seqlens) - 1, compose_step):
+                    if i % mark_step_loop:
                         htcore.mark_step()
-                    start_idx = cu_seqlens[i - 1]
-                    end_idx = cu_seqlens[i]
+                    start_idx = cu_seqlens[i]
+                    end_idx = cu_seqlens[min(i + compose_step,
+                                             len(cu_seqlens) - 1)]
+
                     q_i = q[:, start_idx:end_idx]
                     k_i = k[:, start_idx:end_idx]
                     v_i = v[:, start_idx:end_idx]
-                    a_i = attn_mask[:, :, :, start_idx:end_idx]
+                    a_i = attn_mask[start_idx:end_idx, start_idx:end_idx]
                     q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                      for x in [q_i, k_i, v_i])
                     output_i = FusedSDPA.apply(q_i, k_i, v_i, a_i, 0.0, False,
@@ -1036,11 +1043,13 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         seq_len = x.shape[0]
         rot_pos_emb, cu_window_seqlens, window_index,attention_mask, _  = \
             self.prepare_for_attn_cpu(seq_len, grid_thw, vision_buckets)
-        hidden_states, rot_pos_emb, attention_mask = self.pre_attn_hpu(
-            x, rot_pos_emb, attention_mask, window_index, grid_thw,
-            vision_buckets)
+        hidden_states, rot_pos_emb, \
+            attention_mask, attention_mask_compose \
+                = self.pre_attn_hpu(x, rot_pos_emb, attention_mask, \
+                    window_index, grid_thw,vision_buckets)
         return hidden_states, rot_pos_emb, None, cu_window_seqlens, \
-               window_index, attention_mask.bool(), grid_thw
+               window_index, attention_mask.bool(), \
+                   attention_mask_compose.bool(),grid_thw
 
     def prepare_for_attn_cpu(self, seq_len, grid_thw: torch.Tensor,
                              vision_buckets):
@@ -1071,7 +1080,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
         rotary_pos_emb = rotary_pos_emb.to(device=self.device,
                                            dtype=self.dtype)
-        attention_mask = attention_mask.bool().to(device=self.device)
+
+        attention_mask = attention_mask.bool()
 
         return (rotary_pos_emb, cu_window_seqlens, window_index,
                 attention_mask, grid_thw)
@@ -1099,7 +1109,19 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         attention_mask = attention_mask[window_index, :]
         attention_mask = attention_mask.reshape(1, 1, 1, seq_len)
 
-        return hidden_states, rotary_pos_emb, attention_mask
+        cu_seqlens = list(range(0, seq_len + 1, 64))
+        attention_mask_compose = torch.zeros(seq_len, seq_len)
+        for i in range(0, len(cu_seqlens) - 1):
+            a_i = attention_mask[0, 0, :, cu_seqlens[i - 1]:cu_seqlens[i]]
+            attention_mask_compose[
+                cu_seqlens[i - 1]:cu_seqlens[i],
+                cu_seqlens[i - 1]:cu_seqlens[i]] = a_i * a_i.reshape(-1, 1)
+
+        attention_mask_compose = attention_mask_compose.to(device=self.device)
+        attention_mask = attention_mask.to(device=self.device)
+
+        return hidden_states, rotary_pos_emb, \
+            attention_mask, attention_mask_compose
 
     def forward(
         self,
@@ -1177,7 +1199,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
                 pixel_values_curr_img_padded, rot_pos_emb, \
                     _, cu_window_seqlens, window_index, \
-                    attention_mask, img_shape_padded = self.pre_attn(
+                    attention_mask, attention_mask_compose,\
+                        img_shape_padded = self.pre_attn(
                         pixel_values_curr_img,
                         img_shape,
                         vision_buckets)
@@ -1197,7 +1220,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                     pixel_values_curr_img_padded,
                     rotary_pos_emb=rot_pos_emb,
                     fullattn_mask=fullatt_block_attn_mask,
-                    windowattn_mask=attention_mask,
+                    windowattn_mask=attention_mask_compose,
                     cu_window_seqlens=cu_window_seqlens,
                     **extra_forward_kwargs)
                 htcore.mark_step()
