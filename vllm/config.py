@@ -342,8 +342,10 @@ class ModelConfig:
     output will contain token ids."""
     enable_prompt_embeds: bool = False
     """If `True`, enables passing text embeddings as inputs via the
-    `prompt_embeds` key. Note that enabling this will double the time required
-    for graph compilation."""
+    `prompt_embeds` key.
+
+    WARNING: The vLLM engine may crash if incorrect shape of embeddings 
+    is passed. Only enable this flag for trusted users!"""
     served_model_name: Optional[Union[str, list[str]]] = None
     """The model name(s) used in the API. If multiple names are provided, the
     server will respond to any of the provided names. The model name in the
@@ -355,6 +357,7 @@ class ModelConfig:
     limit_mm_per_prompt: dict[str, int] = field(default_factory=dict)
     """Maximum number of data items per modality per prompt. Only applicable
     for multimodal models."""
+    enable_mm_embeds: Union[bool | None] = None
     use_async_output_proc: bool = True
     """Whether to use async output processor."""
     config_format: Union[str, ConfigFormat] = ConfigFormat.AUTO.value
@@ -683,7 +686,9 @@ class ModelConfig:
                 limit_per_prompt=self.limit_mm_per_prompt,
                 mm_processor_kwargs=self.mm_processor_kwargs,
                 disable_mm_preprocessor_cache=self.
-                disable_mm_preprocessor_cache)
+                disable_mm_preprocessor_cache,
+                enable_mm_embeds=self.enable_mm_embeds,
+            )
 
         if self.limit_mm_per_prompt:
             raise ValueError("`limit_mm_per_prompt` is only supported for "
@@ -3019,6 +3024,15 @@ class MultiModalConfig:
     For example, to allow up to 16 images and 2 videos per prompt:
     `{"images": 16, "videos": 2}`
     """
+
+    enable_mm_embeds: bool = False
+    """If `True`, enables passing multimodal embeddings:
+    for `LLM` class, this refers to tensor inputs under `multi_modal_data`;
+    for the OpenAI-compatible server, this refers to chat messages with content
+    `"type": "*_embeds"`.
+
+    WARNING: The vLLM engine may crash if incorrect shape of embeddings
+    is passed. Only enable this flag for trusted users!"""
 
     mm_processor_kwargs: Optional[dict[str, object]] = None
     """

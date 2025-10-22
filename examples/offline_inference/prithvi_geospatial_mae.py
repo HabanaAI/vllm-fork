@@ -144,6 +144,9 @@ class PrithviMAE:
             model=os.path.join(os.path.dirname(__file__), "./model"),
             skip_tokenizer_init=True,
             dtype="float32",
+            enforce_eager=True,
+            model_impl="terratorch",
+            enable_mm_embeds=True,
         )
 
     def run(self, input_data, location_coords):
