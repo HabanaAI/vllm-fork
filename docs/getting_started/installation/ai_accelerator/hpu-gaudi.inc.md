@@ -10,7 +10,7 @@ This tab provides instructions on how to run vLLM with Intel Gaudi devices.
 
 - Python 3.10
 - Intel Gaudi 2 and 3 AI accelerators
-- Intel Gaudi software version 1.22.0 and above
+- Intel Gaudi software version 1.23.0 and above
 
 Please follow the instructions provided in the [Gaudi Installation Guide](https://docs.habana.ai/en/latest/Installation_Guide/index.html) to set up the execution environment. To achieve the best performance, please follow the methods outlined in the [Optimizing Training Platform Guide](https://docs.habana.ai/en/latest/PyTorch/Model_Optimization_PyTorch/Optimization_in_Training_Platform.html).
 
@@ -36,8 +36,8 @@ It is highly recommended to use the latest Docker image from Intel Gaudi vault. 
 Use the following commands to run a Docker image. Make sure to update the versions below as listed in the [Support Matrix](https://docs.habana.ai/en/latest/Support_Matrix/Support_Matrix.html):
 
 ```console
-docker pull vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/pytorch-installer-2.7.1:latest
-docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/pytorch-installer-2.7.1:latest
+docker pull vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
 ```
 
 # --8<-- [end:requirements]
@@ -60,7 +60,7 @@ vLLM releases are being performed periodically to align with Intel® Gaudi® sof
 ```console
 git clone https://github.com/HabanaAI/vllm-fork.git
 cd vllm-fork
-git checkout v0.9.0.1+Gaudi-1.22.0
+git checkout v0.9.0.1+Gaudi-1.23.0
 pip install --upgrade pip
 pip install -r requirements-hpu.txt
 python setup.py develop
