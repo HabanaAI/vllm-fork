@@ -1,74 +1,93 @@
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from dots_ocr.model.inference import inference_with_vllm
+"""
+Minimal DotsOCR offline inference on vLLM.
+Image-only demo with correct prompt formatting for OCR tasks.
+"""
+
+import argparse
+
 from dots_ocr.utils.image_utils import fetch_image
-from dots_ocr.utils.prompts import dict_promptmode_to_prompt
+from transformers import AutoTokenizer
+
+from vllm import LLM, SamplingParams
+
+MODEL_NAME = "dotsocr"  # 设置为 dotsocr 模型
+TOKENIZER_NAME = "dotsocr"  # 设置为 dotsocr 对应的 tokenizer
 
 
-class DotsOCRParser:
+def build_prompts(questions):
+    """
+    构建 OCR 任务的提示信息。此处问题对应 OCR 任务中的文本识别需求。
+    """
+    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME,
+                                              trust_remote_code=True)
+    # OCR任务中，问题改为针对图像内容的提问
+    messages = [[{
+        "role": "user",
+        "content": f"<image>\n{q}"
+    }] for q in questions]
+    return tokenizer.apply_chat_template(messages,
+                                         tokenize=False,
+                                         add_generation_prompt=True)
 
-    def __init__(self,
-                 use_hf=False,
-                 model_name='model',
-                 ip='localhost',
-                 port=8000,
-                 temperature=0.1,
-                 top_p=1.0):
-        self.use_hf = use_hf
-        self.model_name = model_name
-        self.ip = ip
-        self.port = port
-        self.temperature = temperature
-        self.top_p = top_p
 
-    def _inference_with_hf(self, image, prompt):
-        # 使用 Hugging Face 模型进行推理
-        response = "HF model inference result"
-        return response
+def get_demo_data():
+    """
+    获取示例数据，返回待测试图像和 OCR 任务的提示问题。
+    """
+    # 在这里提供你想测试的图像路径
+    image_path = "path_to_your_image.jpg"
+    image = fetch_image(image_path)  # 使用 dotsocr 的图片加载工具
+    questions = [
+        "What is the content of this image?",  # 任务1：提取图像内容
+        "Where is this image taken?",  # 任务2：如果需要识别图像地点
+    ]
+    return image, questions
 
-    def _inference_with_vllm(self, image, prompt):
-        # 使用 vLLM 进行推理
-        response = inference_with_vllm(image,
-                                       prompt,
-                                       model_name=self.model_name,
-                                       ip=self.ip,
-                                       port=self.port,
-                                       temperature=self.temperature,
-                                       top_p=self.top_p)
-        return response
 
-    def get_prompt(self, prompt_mode, bbox=None, image=None):
-        prompt = dict_promptmode_to_prompt[prompt_mode]
-        if prompt_mode == 'prompt_grounding_ocr':
-            assert bbox is not None
-            prompt = prompt + str(bbox)
-        return prompt
-
-    def parse_image(self, input_path, prompt_mode, bbox=None):
-        origin_image = fetch_image(input_path)
-        prompt = self.get_prompt(prompt_mode, bbox=bbox, image=origin_image)
-
-        if self.use_hf:
-            response = self._inference_with_hf(origin_image, prompt)
-        else:
-            response = self._inference_with_vllm(origin_image, prompt)
-
-        return response
+def parse_args():
+    """
+    解析命令行参数，支持用户定义要使用的提示数量。
+    """
+    p = argparse.ArgumentParser("Minimal DotsOCR vLLM OCR demo")
+    p.add_argument("--num-prompts", type=int, default=2)
+    return p.parse_args()
 
 
 def main():
-    # 设置要使用的 OCR 功能
-    input_path = "path_to_your_image.jpg"
-    prompt_mode = "prompt_layout_all_en"  # 选择不同的 prompt 模式
-    # 示例：OCR区域（如果使用 "prompt_grounding_ocr"）
-    bbox = [100, 150, 300, 400]
+    """
+    主函数，执行模型推理并输出结果。
+    """
+    args = parse_args()
+    image, questions = get_demo_data()
+    prompts = build_prompts(questions)
 
-    # 实例化 DotsOCRParser 类
-    parser = DotsOCRParser(use_hf=False)  # 根据需求选择使用 HF 或 vLLM
-    result = parser.parse_image(input_path, prompt_mode, bbox)
+    llm = LLM(
+        model=MODEL_NAME,
+        trust_remote_code=True,
+        dtype="bfloat16",
+        max_model_len=4096,
+        max_num_seqs=max(1, args.num_prompts),
+        limit_mm_per_prompt={"image": 1},
+    )
 
-    # 输出结果
-    print("OCR Result:", result)
+    req_prompts = [prompts[i % len(prompts)] for i in range(args.num_prompts)]
+    inputs = [{
+        "prompt": p,
+        "multi_modal_data": {
+            "image": image
+        }
+    } for p in req_prompts]
+
+    sampling = SamplingParams(temperature=0.2, max_tokens=64)
+    outputs = llm.generate(inputs, sampling_params=sampling)
+
+    print("-" * 50)
+    for out in outputs:
+        print(out.outputs[0].text.strip())  # 输出 OCR 结果
+        print("-" * 50)
 
 
 if __name__ == "__main__":
