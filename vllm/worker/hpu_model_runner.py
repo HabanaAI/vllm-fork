@@ -3248,7 +3248,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             event
                         )
 
-                    if get_world_group().rank == 0:
+                    tp_size = (self.vllm_config.parallel_config.
+                               tensor_parallel_size)
+                    if get_world_group().rank % tp_size == 0:
                         if self.use_async_kv_transfer_in_pd:
                             async_send_kv_caches(hidden_states)
                         else:
