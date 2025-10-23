@@ -537,6 +537,8 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
                 return "<|vision_start|><|image_pad|><|vision_end|>"
             if model_type == "qwen2_5_omni":
                 return "<|vision_start|><|IMAGE|><|vision_end|>"
+            if model_type in ("qwen3_vl_moe", "qwen3_vl"):
+                return "<|vision_start|><|image_pad|><|vision_end|>"
             if model_type == "molmo":
                 return ""
             if model_type == "aria":
@@ -567,6 +569,8 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
                 return "<|vision_start|><|video_pad|><|vision_end|>"
             if model_type == "qwen2_5_omni":
                 return "<|vision_start|><|VIDEO|><|vision_end|>"
+            if model_type in ("qwen3_vl_moe", "qwen3_vl"):
+                return "<|vision_start|><|video_pad|><|vision_end|>"
             if model_type in ("minicpmo", "minicpmv"):
                 return "(<video>./</video>)"
             if model_type.startswith("llava"):
