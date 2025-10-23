@@ -419,6 +419,32 @@ bash start_gaudi_vllm_server.sh \
     -c /data/8B_warmup_cache
 ```
 
+### 3.3 Qwen 系列模型
+
+#### 3.3.1 启动容器和下载模型权重
+
+请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。
+
+```bash
+docker run -it --name qwen_server --runtime=habana \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+    -v /mnt/disk4:/models \
+    --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
+    vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+```
+
+下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
+
+```bash
+sudo apt install git-lfs
+git-lfs install
+git clone https://www.modelscope.cn/Qwen/Qwen2.5-7B-Instruct.git /data/hf_models/Qwen2.5-7B-Instruct
+git clone https://www.modelscope.cn/Qwen/QwQ-32B.git /data/hf_models/QwQ-32B
+git clone https://www.modelscope.cn/Qwen/Qwen3-8B.git /data/hf_models/Qwen3-8B
+git clone https://www.modelscope.cn/Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8.git /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8
+```
+
 #### 3.3.2 安装和启动 vLLM
 
 安装 vLLM  
