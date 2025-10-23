@@ -39,9 +39,6 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
 from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
     causal_conv1d_update)
 from vllm.model_executor.layers.quantization import QuantizationConfig
-from vllm.model_executor.layers.quantization.gptq import GPTQConfig
-from vllm.model_executor.layers.quantization.gptq_marlin import (
-    GPTQMarlinConfig)
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
@@ -276,12 +273,11 @@ class Qwen3NextSparseMoeBlock(nn.Module):
                                 quant_config=quant_config,
                                 prefix=f"{prefix}.experts")
 
-        self.gate = ReplicatedLinear(
-            config.hidden_size,
-            config.num_experts,
-            bias=False,
-            quant_config=None,
-            prefix=f"{prefix}.gate")
+        self.gate = ReplicatedLinear(config.hidden_size,
+                                     config.num_experts,
+                                     bias=False,
+                                     quant_config=None,
+                                     prefix=f"{prefix}.gate")
 
         if config.shared_expert_intermediate_size > 0:
             self.shared_expert = Qwen3NextMLP(
@@ -579,8 +575,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
         mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
 
-        conv1d_weight = self.conv1d.weight.squeeze(1).transpose(0, 
-            1).contiguous().float()
+        conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
+            0, 1).contiguous().float()
 
         if attn_metadata.is_prompt:
             bs, seq_len, qkv_dim = mixed_qkv.shape
@@ -596,7 +592,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             mixed_qkv_with_pad = F.pad(mixed_qkv,
                                        (0, 0, self.conv_kernel_size - 1, 0))
             for idx in range(self.conv_kernel_size):
-                qkv_slice = mixed_qkv_with_pad[:, idx: (idx + seq_len), :]
+                qkv_slice = mixed_qkv_with_pad[:, idx:(idx + seq_len), :]
                 conv1d_weight_slice = conv1d_weight[idx]
                 qkv_conv = qkv_slice * conv1d_weight_slice
                 if idx == 0:
