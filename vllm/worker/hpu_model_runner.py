@@ -3596,7 +3596,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def fetch_kv_to_host_chunked(self, model, model_input, kv_caches,
                                  hidden_states):
         if not self.has_kv_to_send(model_input):
-            return None, None, None
+            return None, None, None, None
 
         torch.hpu.synchronize()  # sync here may hurt performance.
         seq_lens = model_input.attn_metadata.seq_lens
