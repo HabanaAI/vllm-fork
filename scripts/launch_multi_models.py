@@ -108,10 +108,12 @@ Examples:
     parser.add_argument("--stop-all",
                         action="store_true",
                         help="Stop all running models")
-    parser.add_argument("--max-model-len",
-                        type=int,
-                        default=512,
-                        help="Maximum model length (default: 512)")
+    parser.add_argument(
+        "--max-model-len",
+        type=int,
+        default=512,
+        help="Maximum model length for each model (default: 512). "
+        "Set to -1 to use each model's native maximum length.")
     parser.add_argument("--dtype",
                         type=str,
                         default="bfloat16",
@@ -290,11 +292,12 @@ def launch_server(models, port, max_model_len, device, dtype,
         "python3", "-m", "vllm.entrypoints.openai.mm_api_server", "--port",
         str(port), "--device", device, "--dtype", dtype,
         "--gpu-memory-utilization",
-        str(gpu_memory_utilization), "--use-v2-block-manager",
-        "--max-model-len",
-        str(max_model_len), "--models"
+        str(gpu_memory_utilization), "--use-v2-block-manager", "--models"
     ]
     command += models
+
+    if max_model_len != -1:
+        command += ["--max-model-len", str(max_model_len)]
 
     try:
         # Open log file for writing
