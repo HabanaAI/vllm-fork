@@ -466,6 +466,27 @@ class HpuModelAdapter(torch.nn.Module):
         if hasattr(self._rotary_embed_module, "sin"):
             delattr(self._rotary_embed_module, "sin")
 
+    def _set_attn_bias_chunked(self, seq_len, context_len, query_len, device,
+                               dtype):
+        con_len = context_len.item()
+        past_mask = torch.arange(0, con_len, dtype=torch.int32, device=device)
+        past_mask = (past_mask.view(1, -1).expand(1, -1).ge(con_len).view(
+            1, 1, -1).expand(1, seq_len, -1).view(1, 1, seq_len, -1))
+        len_mask = (torch.arange(
+            0, seq_len - con_len, device=device,
+            dtype=torch.int32).view(1, seq_len - con_len).ge(
+                query_len.unsqueeze(-1)).view(1, 1, 1, seq_len - con_len))
+        causal_mask = torch.triu(torch.ones((1, 1, seq_len, seq_len - con_len),
+                                            device=device,
+                                            dtype=torch.bool),
+                                 diagonal=1)
+        mask = causal_mask.logical_or(len_mask)
+        mask = torch.concat((past_mask, mask), dim=-1)
+        attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
+            mask, -math.inf))
+
+        return attn_bias
+
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
@@ -597,6 +618,11 @@ class HpuModelAdapter(torch.nn.Module):
                                             "TrimmedAttentionMetadata",
                                             window_block_mapping=block_mapping,
                                             window_attn_bias=attn_bias)
+        elif metadata.chunk_prefill_enabled:
+            metadata = custom_tuple_replace(metadata,
+                                            "TrimmedAttentionMetadata",
+                                            block_mapping=block_mapping,
+                                            decode_attn_bias=attn_bias)
         else:
             metadata = custom_tuple_replace(metadata,
                                             "TrimmedAttentionMetadata",
@@ -631,6 +657,65 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
+        return attn_metadata
+
+    def _update_metadata_chunked_prefill(self,
+                         attn_metadata,
+                         device,
+                         dtype,
+                         global_attn_masks=None,
+                         local_attn_masks=None):
+
+        if attn_metadata.num_prefills > 0 :
+            if attn_metadata.block_list is not None:
+              seq_lens_t = attn_metadata.seq_lens_tensor
+              context_lens_t = attn_metadata.context_lens_tensor
+              query_lens_t = seq_lens_t - context_lens_t
+              batch_size = attn_metadata.num_prefills
+              seq_len = (int)(attn_metadata.num_prefill_tokens /
+                              attn_metadata.num_prefills)
+              attn_bias = None
+              for i in range(batch_size):
+                  single_attn_bias = self._set_attn_bias_chunked(
+                      int(seq_len), context_lens_t[i], query_lens_t[i], device,
+                      dtype)
+                  if attn_bias is None:
+                      attn_bias = single_attn_bias
+                  else:
+                      attn_bias = torch.cat((single_attn_bias, attn_bias), dim=0)
+              attn_metadata = attn_metadata._replace(attn_bias=attn_bias)
+            else:
+              seq_lens_t = attn_metadata.seq_lens_tensor
+              context_lens_t = attn_metadata.context_lens_tensor
+              query_lens_t = seq_lens_t - context_lens_t
+              batch_size = attn_metadata.num_prefills
+              seq_len = (int)(attn_metadata.num_prefill_tokens /
+                              attn_metadata.num_prefills)
+              attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
+                                                    seq_len, device, dtype)
+
+            #For Gemma3, we need to override attn_mask with these sliding_window
+            #mask which are updated during prepare_attn_mask()
+            if global_attn_masks is not None:
+                attn_metadata = attn_metadata._replace(
+                    attn_bias=global_attn_masks[0])
+
+            if self.interleaved_sliding_window:
+                if local_attn_masks is not None:
+                    attn_metadata = attn_metadata._replace(
+                        window_attn_bias=local_attn_masks[0])
+                elif global_attn_masks is None:
+                    attn_metadata = self._set_attn_bias_for_sliding_window(
+                        attn_metadata, batch_size, seq_len,
+                        self.interleaved_sliding_window, device, dtype)
+        if attn_metadata.num_decode_tokens > 0:
+            attn_metadata = self._set_block_mapping(attn_metadata, attn_metadata.num_decode_tokens,
+                                                    device, dtype, False)
+        if hasattr(attn_metadata, 'window_block_list'
+                   ) and attn_metadata.window_block_list is not None:
+
+            attn_metadata = self._set_block_mapping(attn_metadata, attn_metadata.num_decode_tokens,
+                                                    device, dtype, True)
         return attn_metadata
 
     def _update_metadata(self,
@@ -765,9 +850,13 @@ class HpuModelAdapter(torch.nn.Module):
         local_attn_masks = kwargs.pop("local_attn_masks") \
                 if kwargs.get("local_attn_masks") else None
 
-        kwargs['attn_metadata'] = self._update_metadata(
-            kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype, global_attn_masks, local_attn_masks)
+        if kwargs['attn_metadata'].chunk_prefill_enabled:
+            kwargs['attn_metadata'] = self._update_metadata_chunked_prefill(
+                kwargs['attn_metadata'], input_ids.device, self.dtype, global_attn_masks, local_attn_masks)
+        else:
+            kwargs['attn_metadata'] = self._update_metadata(
+                kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
+                input_ids.device, self.dtype, global_attn_masks, local_attn_masks)
 
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
@@ -832,7 +921,7 @@ class HpuModelAdapter(torch.nn.Module):
 
 class PreparePromptMetadata(NamedTuple):
     input_tokens: torch.Tensor
-    input_positions: List[List[int]]
+    input_positions: torch.Tensor
     attn_metadata: Optional[AttentionMetadata]
     seq_lens: List[int]
     query_lens: List[int]
@@ -864,7 +953,7 @@ class PreparePromptMetadata(NamedTuple):
 
 class PrepareDecodeMetadata(NamedTuple):
     input_tokens: torch.Tensor
-    input_positions: List[List[int]]
+    input_positions: torch.Tensor
     attn_metadata: Optional[AttentionMetadata]
     lora_index_mapping: List[List[int]]
     lora_prompt_mapping: List[List[int]]
@@ -1962,11 +2051,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                  seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if any(context_lens):
-            assert not self.scheduler_config.chunked_prefill_enabled
-            assert self.scheduler_config.max_num_prefill_seqs == 1
+            if self.vllm_config.cache_config.enable_prefix_caching:
+                assert self.scheduler_config.max_num_prefill_seqs == 1
             assert bs == 1, (
-                "Prefix caching with multiple sequences is not supported yet.")
-            # prefix caching
+                "Prefix caching or chunked prefill with multiple sequences is not supported yet.")
+            # prefix caching or chunked prefill
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
             prefix_block_list = list(
@@ -1975,6 +2064,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     ([_PAD_BLOCK_ID] * (max_num_block - len(bt)))
                     for bt in prefix_block_tables))
 
+            if self.scheduler_config.chunked_prefill_enabled:
+                if max_prompt_len < max_num_block * self.block_size:
+                    max_prompt_len = max_num_block * self.block_size
             pad_len = len(prefix_block_list)
             prefix_block_list = pad_list(prefix_block_list, pad_len,
                                          _PAD_BLOCK_ID)
@@ -2643,9 +2735,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         base_event_name = 'prompt' if is_prompt else 'decode'
         self.profiler.start('internal', base_event_name)
 
-        seq_group_metadata_list, real_batch_size, batch_size_padded = (
-            self._add_dummy_seq(seq_group_metadata_list, is_prompt,
-                                align_worker))
+        real_batch_size = len(seq_group_metadata_list)
+        if self.scheduler_config.enable_chunked_prefill:
+            real_batch_size = len(seq_group_metadata_list)
+            batch_size_padded = real_batch_size
+        else:
+            seq_group_metadata_list, real_batch_size, batch_size_padded = (
+                self._add_dummy_seq(seq_group_metadata_list, is_prompt, align_worker))
 
         prefill_reqs = []
         decode_reqs = []
@@ -2684,12 +2780,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  align_worker=align_worker)
 
         selected_token_indices = None
+        temp_query_lens = query_lens.copy()
+        if self.scheduler_config.enable_chunked_prefill:
+            for i in range(len(decode_input_tokens)):
+                temp_query_lens.append(1)
         if not self.is_pooler:
             generators = self.get_generators(finished_requests_ids)
             sampling_metadata = SamplingMetadata.prepare(
                 seq_group_metadata_list,
                 seq_lens,
-                query_lens,
+                temp_query_lens,
                 'cpu',
                 self.pin_memory,
                 generators=generators)
@@ -2727,13 +2827,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # NOTE(kzawora): Here we diverge from GPU code - we don't
         # support mixed batches, so we either use decode or prefill
         # inputs, without coalescing.
-        assert (num_prefills == 0 and num_decode_tokens > 0) or (
-            num_prefills > 0
-            and num_decode_tokens == 0), "HPU does not support mixed batches!"
+        if not self.scheduler_config.enable_chunked_prefill:
+            assert (num_prefills == 0 and num_decode_tokens
+                    > 0) or (num_prefills > 0 and num_decode_tokens
+                             == 0), "HPU does not support mixed batches!"
         if num_decode_tokens > 0:
-            input_tokens = decode_input_tokens
-            input_positions = decode_input_positions
-            slot_mapping = decode_slot_mapping
+            if not self.scheduler_config.enable_chunked_prefill:
+                input_tokens = decode_input_tokens
+                input_positions = decode_input_positions
+                slot_mapping = decode_slot_mapping
             lora_index_mapping = decode_lora_index_mapping
             lora_prompt_mapping = decode_lora_prompt_mapping
             lora_requests = decode_lora_requests
@@ -2742,12 +2844,45 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.is_pooler:
             sampling_metadata = None
         elif not self.use_merged_prefill:
-            # FIXME: We need to adjust selected_token_indices to accommodate
-            # for padding
-            max_len = input_tokens.size(1)
-            paddings = [max_len - q for q in query_lens]
+            if self.scheduler_config.enable_chunked_prefill:
+                if num_prefills > 0:
+                    max_len = input_tokens.size(1)
+                    input_tokens = input_tokens.flatten()
+                    input_positions = input_positions.flatten()
+                    if num_decode_tokens > 0:
+                        decode_input_tokens = decode_input_tokens.flatten()
+                        decode_input_positions = decode_input_positions.flatten()
+                        input_tokens = torch.cat(
+                            (input_tokens, decode_input_tokens), dim=0)
+                        input_positions = torch.cat(
+                            (input_positions, decode_input_positions), dim=0)
+                        #max_len += decode_input_tokens.size(0)
+
+                else:
+                    max_len = decode_input_tokens.size(1)
+                    input_tokens = decode_input_tokens.flatten()
+                    input_positions = decode_input_positions.flatten()
+                # FIXME: We need to adjust selected_token_indices to accommodate
+                # for padding
+                paddings = []
+                for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                    if seq_group_metadata.is_prompt:# and \
+                    #   seq_group_metadata.do_sample:
+                        padding = max_len - temp_query_lens[i]
+                        paddings.append(padding)
+                    else:
+                        paddings.append(0)
+
+            else:
+                # FIXME: We need to adjust selected_token_indices to accommodate
+                # for padding
+                max_len = input_tokens.size(1)
+                paddings = [max_len - q for q in temp_query_lens]
             paddings = [0] + paddings[:-1]
             paddings = list(itertools.accumulate(paddings))
+            for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                if  seq_group_metadata.is_prompt and not seq_group_metadata.do_sample:
+                    del paddings[i]
             paddings_prompt_logprobs = []
 
             for i, seq_group_metadata in enumerate(seq_group_metadata_list):
@@ -2756,12 +2891,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is not None and seq_group_metadata.is_prompt:
                     paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
 
-            paddings = torch.tensor(
-                paddings_prompt_logprobs
-                if paddings_prompt_logprobs else paddings,
-                dtype=sampling_metadata.selected_token_indices.dtype,
-                device=sampling_metadata.selected_token_indices.device)
-            sampling_metadata.selected_token_indices.add_(paddings)
+            if not self.scheduler_config.chunked_prefill_enabled:
+                paddings = torch.tensor(
+                    paddings_prompt_logprobs
+                    if paddings_prompt_logprobs else paddings,
+                    dtype=sampling_metadata.selected_token_indices.dtype,
+                    device=sampling_metadata.selected_token_indices.device)
+                sampling_metadata.selected_token_indices.add_(paddings)
+            else:
+                paddings_fix = torch.tensor(paddings, dtype=sampling_metadata.selected_token_indices.dtype, device=sampling_metadata.selected_token_indices.device)
+                sampling_metadata.selected_token_indices.add_(paddings_fix)
 
         if self.lora_config:
             lora_mapping = LoRAMapping(
@@ -2774,7 +2913,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if (prefill_attn_metadata is not None
                 and decode_attn_metadata is not None):
             batch_type = BatchType.MIXED
-            raise NotImplementedError("Mixed batch is not supported on HPU")
+            if not self.scheduler_config.enable_chunked_prefill:
+                raise NotImplementedError(
+                    "Mixed batch is not supported on HPU")
         elif prefill_attn_metadata is not None:
             batch_type = BatchType.PREFILL
         else:
@@ -2793,7 +2934,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             "num_prefills": num_prefills,
             "batch_type": batch_type,
             "seq_lens": seq_lens,
-            "query_lens": query_lens,
+            "query_lens": temp_query_lens,
             "token_types": token_types
         }
         if prefill_attn_metadata is not None:
@@ -2802,8 +2943,32 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             assert decode_attn_metadata is not None
             metadata_dict.update(decode_attn_metadata.asdict_zerocopy())
 
-        attn_metadata = prefill_attn_metadata if \
-            prefill_attn_metadata is not None else decode_attn_metadata
+        if self.scheduler_config.enable_chunked_prefill:
+            if prefill_attn_metadata:
+                attn_metadata = prefill_attn_metadata
+                if decode_attn_metadata:
+                    attn_metadata.num_decode_tokens =\
+                        decode_attn_metadata.num_decode_tokens
+                    attn_metadata.decode_slot_mapping =\
+                        decode_attn_metadata.slot_mapping
+                    attn_metadata.decode_block_list =\
+                        decode_attn_metadata.block_list
+                    attn_metadata.block_usage =\
+                        decode_attn_metadata.block_usage
+                    attn_metadata.block_groups =\
+                        decode_attn_metadata.block_groups
+            elif decode_attn_metadata:
+                attn_metadata = decode_attn_metadata
+                attn_metadata.decode_slot_mapping =\
+                    decode_attn_metadata.slot_mapping
+                attn_metadata.decode_block_list =\
+                    decode_attn_metadata.block_list
+                attn_metadata.block_list = None
+                attn_metadata.slot_mapping = None
+            attn_metadata.chunk_prefill_enabled = True
+        else:
+            attn_metadata = prefill_attn_metadata if \
+                prefill_attn_metadata is not None else decode_attn_metadata
 
         return self._model_input_cls(input_tokens=input_tokens,
                                      seq_lens=seq_lens,
@@ -2940,6 +3105,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _seq_len(self, attn_metadata):
         if attn_metadata.num_prefills != 0:
             return attn_metadata.slot_mapping.size(1)
+        elif self.scheduler_config.chunked_prefill_enabled:
+            return attn_metadata.decode_block_list.numel()
         else:
             return attn_metadata.block_list.numel()
 
@@ -2975,6 +3142,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'is_prompt',
             'block_size',
             'block_groups',
+            'num_prefills',
+            'num_prefill_tokens',
+            'num_decode_tokens',
+            'decode_slot_mapping',
+            'decode_block_list',
+            'decode_attn_bias',
+            'chunk_prefill_enabled',
             'input_positions',
             'alibi_blocks',
             'window_block_list',
@@ -3169,6 +3343,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
             logger.info(logger_msg)
 
+        if max_batch_size < 1:
+            max_batch_size = 1
+            max_seq_len = self.max_num_batched_tokens
         logger.info("Profile run with bs=%s, seq_len=%s", \
                     max_batch_size, max_seq_len)
 
@@ -4701,3 +4878,4 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # need to do that manually.
                     sg.seq_group.prompt_logprobs = [None] + real_logprobs
         self.has_patched_prev_output = True
+
