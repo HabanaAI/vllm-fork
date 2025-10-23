@@ -94,10 +94,10 @@ Examples:
   VLLM_SKIP_WARMUP=false --env PT_HPU_LAZY_MODE=1
         """)
 
-    parser.add_argument("--models",
-                        nargs="+",
-                        required=True,
-                        help="List of models to load (required)")
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        help="List of models to load (required unless --stop-all)")
     parser.add_argument("--force-restart",
                         action="store_true",
                         help="Force restart the server")
@@ -343,6 +343,11 @@ def launch_server(models, port, max_model_len, device, dtype,
 
 def main():
     args = parse_arguments()
+
+    # Require --models unless --stop-all is specified
+    if not args.stop_all and not args.models:
+        print("Error: --models is required unless --stop-all is specified.")
+        sys.exit(2)
 
     # Get environment variables
     env_vars = get_environment_variables(args)
