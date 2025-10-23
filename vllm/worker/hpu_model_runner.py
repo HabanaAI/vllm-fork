@@ -1336,6 +1336,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 changed = True
                             new_dict[k] = v
                         if changed:
+                            if attr_name == "dummy_inputs":
+                                continue
                             setattr(module, attr_name, new_dict)
 
             def move_model_to_hpu(model):
