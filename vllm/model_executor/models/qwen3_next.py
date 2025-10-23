@@ -27,7 +27,6 @@ from vllm.model_executor.layers.layernorm import (
 from vllm.model_executor.layers.layernorm import RMSNormGated
 # yapf: enable
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
-                                               MergedColumnParallelLinear,
                                                QKVParallelLinear,
                                                ReplicatedLinear,
                                                RowParallelLinear)
@@ -281,7 +280,7 @@ class Qwen3NextSparseMoeBlock(nn.Module):
             config.hidden_size,
             config.num_experts,
             bias=False,
-            quant_config=self._maybe_ignore_quant_config(quant_config),
+            quant_config=None,
             prefix=f"{prefix}.gate")
 
         if config.shared_expert_intermediate_size > 0:
@@ -298,14 +297,6 @@ class Qwen3NextSparseMoeBlock(nn.Module):
         self.shared_expert_gate = torch.nn.Linear(config.hidden_size,
                                                   1,
                                                   bias=False)
-
-    def _maybe_ignore_quant_config(self, quant_config: QuantizationConfig):
-        # GPTQ configs do not have a list of ignored modules, however AutoGPTQ
-        # seems to avoid gate quantization.
-        # See: https://huggingface.co/Qwen/Qwen3-30B-A3B-GPTQ-Int4
-        if isinstance(quant_config, (GPTQConfig, GPTQMarlinConfig)):
-            return None
-        return quant_config
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         # NOTE: hidden_states can have either 1D or 2D shape.
@@ -404,6 +395,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             input_size=self.conv_kernel_size,
             output_size=self.conv_dim,
             bias=False,
+            quant_config=None,
             prefix=f"{prefix}.conv1d",
         )
         self.conv1d.weight.data = self.conv1d.weight.data.unsqueeze(1)
@@ -411,12 +403,20 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         # projection of the input hidden states
         self.projection_size_qkvz = self.key_dim * 2 + self.value_dim * 2
         self.projection_size_ba = self.num_v_heads * 2
-        self.in_proj = MergedColumnParallelLinear(
+        self.in_proj_qkvz = ColumnParallelLinear(
             input_size=self.hidden_size,
-            output_sizes=[self.projection_size_qkvz, self.projection_size_ba],
+            output_size=self.projection_size_qkvz,
             bias=False,
             quant_config=quant_config,
-            prefix=f"{prefix}.in_proj",
+            prefix=f"{prefix}.in_proj_qkvz",
+        )
+        # ba_proj doesn't support blockwise fp8 quantization.
+        self.in_proj_ba = ColumnParallelLinear(
+            input_size=self.hidden_size,
+            output_size=self.projection_size_ba,
+            bias=False,
+            quant_config=None,
+            prefix=f"{prefix}.in_proj_ba",
         )
 
         query_key_settings = (self.key_dim, 0, False)
@@ -564,16 +564,12 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         conv_state = self.conv_state
         ssm_state = self.ssm_state
 
-        projected_states, _ = self.in_proj(hidden_states)
-        projected_states = projected_states.float()
-        projected_states_qkvz, projected_states_ba = torch.split(
-            projected_states,
-            [
-                self.projection_size_qkvz // self.tp_size,
-                self.projection_size_ba // self.tp_size
-            ],
-            dim=-1,
-        )
+        projected_states_qkvz, _ = self.in_proj_qkvz(hidden_states)
+        projected_states_ba, _ = self.in_proj_ba(hidden_states)
+
+        projected_states_qkvz = projected_states_qkvz.float()
+        projected_states_ba = projected_states_ba.float()
+
         query, key, value, z, b, a = self.fix_query_key_value_ordering(
             projected_states_qkvz, projected_states_ba)
         query, key, value = (x.reshape(x.shape[0], x.shape[1], -1) \
@@ -582,6 +578,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
         mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
+
+        conv1d_weight = self.conv1d.weight.squeeze(1).transpose(0, 
+            1).contiguous().float()
 
         if attn_metadata.is_prompt:
             bs, seq_len, qkv_dim = mixed_qkv.shape
@@ -594,21 +593,24 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                                    index=mamba_cache_prefill_indices,
                                    source=prefill_conv_state)
 
-            mixed_qkv_non_spec = F.conv1d(
-                mixed_qkv.transpose(1, 2).contiguous(),
-                self.conv1d.weight.contiguous().float(),
-                bias=None,
-                padding=self.conv_kernel_size - 1,
-                groups=(self.conv_dim // self.tp_size))
+            mixed_qkv_with_pad = F.pad(mixed_qkv,
+                                       (0, 0, self.conv_kernel_size - 1, 0))
+            for idx in range(self.conv_kernel_size):
+                qkv_slice = mixed_qkv_with_pad[:, idx: (idx + seq_len), :]
+                conv1d_weight_slice = conv1d_weight[idx]
+                qkv_conv = qkv_slice * conv1d_weight_slice
+                if idx == 0:
+                    mixed_qkv_non_spec = qkv_conv
+                else:
+                    mixed_qkv_non_spec.add_(qkv_conv)
+
             mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
-            mixed_qkv_non_spec = \
-                mixed_qkv_non_spec[:, :, :seq_len].transpose(1, 2)
 
         else:
             mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
                 mixed_qkv,
                 conv_state,
-                self.conv1d.weight.float(),
+                conv1d_weight,
                 self.conv1d.bias,
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
@@ -1046,8 +1048,6 @@ class Qwen3NextModel(nn.Module):
             ("qkv_proj", "v_proj", "v"),
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
-            ("in_proj", "in_proj_qkvz", 0),
-            ("in_proj", "in_proj_ba", 1),
         ]
 
         params_dict = dict(self.named_parameters())
@@ -1125,7 +1125,6 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
             "v_proj",
         ],
         "gate_up_proj": ["up_proj", "down_proj"],
-        "in_proj": ["in_proj_qkvz", "in_proj_ba"],
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
