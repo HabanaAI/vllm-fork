@@ -2949,9 +2949,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             image_h = img_args // 8
             image_grid_thw = torch.tensor(
                 [[1, image_h, int(img_args / image_h)]])
+            embed_dim = 1176
+            if 'qwen3_vl' in self.get_model().config.model_type:
+                embed_dim = 1536
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
-                1176)  # TODO: figure out the variable name
+                embed_dim)  # TODO: figure out the variable name
 
             assert pixel_values.shape[0] % 64 == 0, (
                 f"pixel_values must be sliced in 64 chunks, "

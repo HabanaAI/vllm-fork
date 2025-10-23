@@ -439,7 +439,7 @@ def load_ovis(question: str, image_urls: list[str]) -> ModelRequestData:
         max_model_len=8192,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="half",
+        dtype="bfloat16",
         limit_mm_per_prompt={"image": len(image_urls)},
     )
 
@@ -449,6 +449,38 @@ def load_ovis(question: str, image_urls: list[str]) -> ModelRequestData:
     messages = [{"role": "user", "content": f"{placeholders}\n{question}"}]
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    prompt = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompt=prompt,
+        image_data=[fetch_image(url) for url in image_urls],
+    )
+
+
+# ovis2_5
+def load_ovis2_5(question: str, image_urls: list[str]) -> ModelRequestData:
+    model_name = "AIDC-AI/Ovis2.5-2B"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=8192,
+        max_num_seqs=2,
+        trust_remote_code=True,
+        dtype="bfloat16",
+        limit_mm_per_prompt={"image": len(image_urls)},
+    )
+
+    placeholders = "\n".join(
+        f"Image-{i}: <image>\n" for i, _ in enumerate(image_urls, start=1)
+    )
+    messages = [{"role": "user", "content": f"{placeholders}\n{question}"}]
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        "AIDC-AI/Ovis2-1B", trust_remote_code=True
+    )
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
@@ -742,6 +774,7 @@ model_example_map = {
     "mllama": load_mllama,
     "NVLM_D": load_nvlm_d,
     "ovis": load_ovis,
+    "ovis2_5": load_ovis2_5,
     "phi3_v": load_phi3v,
     "phi4_mm": load_phi4mm,
     "pixtral_hf": load_pixtral_hf,

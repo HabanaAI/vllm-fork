@@ -794,13 +794,48 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
         max_model_len=4096,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="half",
+        dtype="bfloat16",
         limit_mm_per_prompt={modality: 1},
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     messages = [
         [{"role": "user", "content": f"<image>\n{question}"}] for question in questions
+    ]
+    prompts = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
+
+
+# Ovis2_5
+def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
+    model_name = "AIDC-AI/Ovis2.5-2B"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=2,
+        trust_remote_code=True,
+        dtype="bfloat16",
+        limit_mm_per_prompt={modality: 1},
+    )
+    if modality == "image":
+        placeholder = "<image>"
+    elif modality == "video":
+        placeholder = "<video>"
+
+    # need to use ovis tokenizer, since ovis2.5 tokenizer is not configured properly
+    tokenizer = AutoTokenizer.from_pretrained(
+        "AIDC-AI/Ovis2-1B", trust_remote_code=True
+    )
+    messages = [
+        [{"role": "user", "content": f"{placeholder}\n{question}"}]
+        for question in questions
     ]
     prompts = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
@@ -1076,6 +1111,80 @@ def run_qwen2_5_omni(questions: list[str], modality: str):
     )
 
 
+# Qwen3-VL-Dense
+def run_qwen3_vl(questions: list[str], modality: str) -> ModelRequestData:
+    model_name = "Qwen/Qwen3-VL-4B-Instruct"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
+        mm_processor_kwargs={
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+            "fps": 1,
+        },
+        limit_mm_per_prompt={modality: 1},
+    )
+
+    if modality == "image":
+        placeholder = "<|image_pad|>"
+    elif modality == "video":
+        placeholder = "<|video_pad|>"
+
+    prompts = [
+        (
+            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            f"<|im_start|>user\n<|vision_start|>{placeholder}<|vision_end|>"
+            f"{question}<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+        for question in questions
+    ]
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
+
+
+# Qwen3-VL-MOE
+def run_qwen3_vl_moe(questions: list[str], modality: str) -> ModelRequestData:
+    model_name = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
+        mm_processor_kwargs={
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+            "fps": 1,
+        },
+        limit_mm_per_prompt={modality: 1},
+    )
+
+    if modality == "image":
+        placeholder = "<|image_pad|>"
+    elif modality == "video":
+        placeholder = "<|video_pad|>"
+
+    prompts = [
+        (
+            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            f"<|im_start|>user\n<|vision_start|>{placeholder}<|vision_end|>"
+            f"{question}<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+        for question in questions
+    ]
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
+
+
 # SkyworkR1V
 def run_skyworkr1v(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
@@ -1137,6 +1246,7 @@ model_example_map = {
     "molmo": run_molmo,
     "NVLM_D": run_nvlm_d,
     "ovis": run_ovis,
+    "ovis2_5": run_ovis2_5,
     "paligemma": run_paligemma,
     "paligemma2": run_paligemma2,
     "phi3_v": run_phi3v,
@@ -1146,10 +1256,18 @@ model_example_map = {
     "qwen2_vl": run_qwen2_vl,
     "qwen2_5_vl": run_qwen2_5_vl,
     "qwen2_5_omni": run_qwen2_5_omni,
+    "qwen3_vl": run_qwen3_vl,
+    "qwen3_vl_moe": run_qwen3_vl_moe,
     "skywork_chat": run_skyworkr1v,
     "smolvlm": run_smolvlm,
     "tarsier": run_tarsier,
 }
+
+MODELS_NEED_VIDEO_METADATA = [
+    "glm4_1v",
+    "qwen3_vl",
+    "qwen3_vl_moe",
+]
 
 
 def get_multi_modal_input(args):
@@ -1176,12 +1294,13 @@ def get_multi_modal_input(args):
 
     if args.modality == "video":
         # Input video and question
+        needs_metadata = args.model_type in MODELS_NEED_VIDEO_METADATA
         video = VideoAsset(name="baby_reading", num_frames=args.num_frames).np_ndarrays
         metadata = VideoAsset(name="baby_reading", num_frames=args.num_frames).metadata
         vid_questions = ["Why is this video funny?"]
 
         return {
-            "data": [(video, metadata)] if args.model_type == "glm4_1v" else video,
+            "data": [(video, metadata)] if needs_metadata else video,
             "questions": vid_questions,
         }
 
