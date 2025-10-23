@@ -19,6 +19,7 @@ from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
                      Request, status)
 from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 from transformers import AutoTokenizer
+from asyncio import CancelledError
 
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s",
                               "%Y-%m-%d %H:%M:%S")
@@ -30,6 +31,7 @@ logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 logger.propagate = False
 
+from fastapi.middleware.cors import CORSMiddleware
 
 def log_info_blue(msg):
     logger.info("%s%s%s", escape_codes['cyan'], msg, escape_codes['reset'])
@@ -47,10 +49,10 @@ def log_info_red(msg):
     logger.info("%s%s%s", escape_codes['red'], msg, escape_codes['reset'])
 
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=60 * 60 * 60,
-                                        connect=60000,
-                                        sock_read=120000,
-                                        sock_connect=30000)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=None,
+                                        connect=None,
+                                        sock_read=None,
+                                        sock_connect=None)
 
 
 async def P_first_token_generator(generator_p,
@@ -60,21 +62,31 @@ async def P_first_token_generator(generator_p,
                                   decode_instance: str = None,
                                   req_len: int = None):
     first_decode = True
-    async for chunk in generator_p:
-        yield chunk
-    if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(prefill_instance=prefill_instance,
-                               req_len=req_len)
 
-    async for chunk in generator_d:
-        if first_decode:
-            first_decode = False
-            continue
-        yield chunk
-    if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(decode_instance=decode_instance,
-                               req_len=req_len)
+    try:
+        async for chunk in generator_p:
+            yield chunk
+    finally:
+        if callback_owner:
+            callback_owner.exception_handler(
+                prefill_instance=prefill_instance,
+                decode_instance=None,
+                req_len=req_len
+            )
 
+    try:
+        async for chunk in generator_d:
+            if first_decode:
+                first_decode = False
+                continue
+            yield chunk
+    finally:
+        if callback_owner:
+            callback_owner.exception_handler(
+                prefill_instance=None,
+                decode_instance=decode_instance,
+                req_len=req_len
+            )
 
 async def D_first_token_generator(generator_p,
                                   generator_d,
@@ -82,18 +94,27 @@ async def D_first_token_generator(generator_p,
                                   prefill_instance: str = None,
                                   decode_instance: str = None,
                                   req_len: int = None):
-    async for _ in generator_p:
-        continue
-    if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(prefill_instance=prefill_instance,
-                               req_len=req_len)
-
-    async for chunk in generator_d:
-        yield chunk
-    if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(decode_instance=decode_instance,
-                               req_len=req_len)
-
+    try:
+        async for _ in generator_p:
+            continue
+    finally:
+        if callback_owner:
+            callback_owner.exception_handler(
+                prefill_instance=prefill_instance,
+                decode_instance=None,
+                req_len=req_len
+            )
+    
+    try:
+        async for chunk in generator_d:
+            yield chunk
+    finally:
+        if callback_owner:
+            callback_owner.exception_handler(
+                prefill_instance=None,
+                decode_instance=decode_instance,
+                req_len=req_len
+            )
 
 class SchedulingPolicy(ABC):
 
@@ -152,6 +173,25 @@ class Proxy:
                 Depends(self.validate_json_request)
             ])(self.custom_create_chat_completion if self.
                custom_create_chat_completion else self.create_chat_completion)
+
+        self.router.options("/v1/completions")(lambda: None)
+        self.router.options("/v1/chat/completions")(lambda: None)
+        self.router.options("/v1/models")(lambda: None)
+        self.router.options("/status")(lambda: None)
+        self.router.options("/health")(lambda: None)
+        self.router.options("/ping")(lambda: None)
+        self.router.options("/tokenize")(lambda: None)
+        self.router.options("/detokenize")(lambda: None)
+        self.router.options("/version")(lambda: None)
+        self.router.options("/v1/embeddings")(lambda: None)
+        self.router.options("/pooling")(lambda: None)
+        self.router.options("/score")(lambda: None)
+        self.router.options("/v1/score")(lambda: None)
+        self.router.options("/rerank")(lambda: None)
+        self.router.options("/v1/rerank")(lambda: None)
+        self.router.options("/v2/rerank")(lambda: None)
+        self.router.options("/invocations")(lambda: None)
+
         self.router.get("/status",
                         response_class=JSONResponse)(self.get_status)
         self.router.post("/instances/add",
@@ -492,9 +532,25 @@ class Proxy:
             logger.error("Unsupported prompt type: %s", type(prompt))
             return fake_len
 
+    def exception_handler(self, prefill_instance=None, decode_instance=None, req_len=None):
+        if prefill_instance or decode_instance:
+            try:
+                self.on_done(
+                    prefill_instance=prefill_instance,
+                    decode_instance=decode_instance,
+                    req_len=req_len
+                )
+            except Exception as e:
+                logger.error(f"Error releasing instances: {e}")
+                raise
+
     async def create_completion(self, raw_request: Request):
         try:
             request = await raw_request.json()
+
+            total_length = 0
+            prefill_instance = None
+            decode_instance = None
 
             if len(self.prefill_instances) > 0:
                 kv_prepare_request = request.copy()
@@ -519,7 +575,7 @@ class Proxy:
                             kv_prepare_request):
                         value += chunk
                 except HTTPException as http_exc:
-                    self.remove_instance_endpoint("prefill", prefill_instance)
+                    self.exception_handler(prefill_instance, decode_instance, total_length)
                     raise http_exc
 
             # Perform kv recv and decoding stage
@@ -540,7 +596,7 @@ class Proxy:
                 generator_d = self.forward_request(
                     f"http://{decode_instance}/v1/completions", request)
             except HTTPException as http_exc:
-                self.remove_instance_endpoint("decode", decode_instance)
+                self.exception_handler(prefill_instance, decode_instance, total_length)
                 raise http_exc
 
             if request.get("stream", False):
@@ -559,12 +615,17 @@ class Proxy:
                 if request.get("stream", False)
                 else "application/json"
             )
-            response = StreamingResponse(final_generator,
-                                         media_type=media_type)
-            return response
+            async def wrapped_generator():
+                try:
+                    async for chunk in final_generator:
+                        yield chunk
+                except CancelledError:
+                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                except Exception as e:
+                    logger.error("[1] Exception in wrapped_generator: %s", str(e))
+                    raise
+            return StreamingResponse(wrapped_generator(), media_type=media_type)
         except Exception:
-            import sys
-
             exc_info = sys.exc_info()
             print("Error occurred in disagg proxy server")
             print(exc_info)
@@ -572,6 +633,10 @@ class Proxy:
     async def create_chat_completion(self, raw_request: Request):
         try:
             request = await raw_request.json()
+
+            total_length = 0
+            prefill_instance = None
+            decode_instance = None
 
             # add params to request
             kv_prepare_request = request.copy()
@@ -599,7 +664,7 @@ class Proxy:
                         kv_prepare_request):
                     value += chunk
             except HTTPException as http_exc:
-                self.remove_instance_endpoint("prefill", prefill_instance)
+                self.exception_handler(prefill_instance, decode_instance, total_length)
                 raise http_exc
             # Perform kv recv and decoding stage
             decode_instance = self.schedule(self.decode_cycler,
@@ -620,7 +685,7 @@ class Proxy:
                     "http://" + decode_instance + "/v1/chat/completions",
                     request)
             except HTTPException as http_exc:
-                self.remove_instance_endpoint("decode", decode_instance)
+                self.exception_handler(prefill_instance, decode_instance, total_length)
                 raise http_exc
 
             if request.get("stream", False):
@@ -639,9 +704,16 @@ class Proxy:
                 if request.get("stream", False)
                 else "application/json"
             )
-            response = StreamingResponse(final_generator,
-                                         media_type=media_type)
-            return response
+            async def wrapped_generator():
+                try:
+                    async for chunk in final_generator:
+                        yield chunk
+                except CancelledError:
+                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                except Exception as e:
+                    logger.error("[1] Exception in wrapped_generator: %s", str(e))
+                    raise
+            return StreamingResponse(wrapped_generator(), media_type=media_type)
         except Exception:
             exc_info = sys.exc_info()
             error_messages = [str(e) for e in exc_info if e]
@@ -744,51 +816,57 @@ class LoadBalancedScheduler(SchedulingPolicy):
         with self.lock:
             if prefill_instance:
                 index = self.prefill_instances.index(prefill_instance)
-                self.prefill_schedule_completion_index += 1
-                log_info_yellow(f"<Prefill completed "
-                                f"{self.prefill_schedule_completion_index}> "
-                                f"instance = {index}, req_len={req_len}")
-
-                self.prefill_bs_counter[index] -= 1
-                all_zero = True
-                for index, _ in enumerate(self.prefill_instances):
-                    if self.prefill_bs_counter[index] != 0:
-                        all_zero = False
-                        break
-                if all_zero:
-                    log_info_red("<Prefill in idle state>")
-                    for index, _ in enumerate(self.prefill_instances):
-                        self.prefill_utils_counter[index] = 0
+                if self.prefill_bs_counter[index] == 0:
+                    logger.warning("No alive requests for prefill instance, skipping...")
                 else:
-                    index = self.prefill_instances.index(prefill_instance)
-                    self.prefill_utils_counter[index] -= req_len
+                    self.prefill_schedule_completion_index += 1
+                    log_info_yellow(f"<Prefill completed "
+                                    f"{self.prefill_schedule_completion_index}> "
+                                    f"instance = {index}, req_len={req_len}")
+
+                    self.prefill_bs_counter[index] -= 1
+                    all_zero = True
+                    for index, _ in enumerate(self.prefill_instances):
+                        if self.prefill_bs_counter[index] != 0:
+                            all_zero = False
+                            break
+                    if all_zero:
+                        log_info_red("<Prefill in idle state>")
+                        for index, _ in enumerate(self.prefill_instances):
+                            self.prefill_utils_counter[index] = 0
+                    else:
+                        index = self.prefill_instances.index(prefill_instance)
+                        self.prefill_utils_counter[index] -= req_len
 
             if decode_instance:
                 index = self.decode_instances.index(decode_instance)
-                self.decode_schedule_completion_index += 1
-                log_info_blue(f"<Decode completed "
-                              f"{self.decode_schedule_completion_index}> "
-                              f"instance = {index}, req_len={req_len}")
-
-                self.decode_bs_counter[index] -= 1
-                all_zero = True
-                for index, _ in enumerate(self.decode_instances):
-                    if self.decode_bs_counter[index] != 0:
-                        all_zero = False
-                        break
-                if all_zero:
-                    log_info_red("<Decode in idle state>")
-                    self.decode_kv_utils_counter = [0] * len(
-                        self.decode_instances)
+                if self.decode_bs_counter[index] == 0:
+                    logger.warning("No alive requests for decode instance, skipping...")
                 else:
-                    index = self.decode_instances.index(decode_instance)
-                    self.decode_kv_utils_counter[index] -= req_len
-                    log_info_blue(
-                        f"<schedule_completion decode> "
-                        f"decode_bs_counter: {self.decode_bs_counter}")
-                    log_info_blue(f"<schedule_completion decode> "
-                                  f"decode_kv_utils_counter: "
-                                  f"{self.decode_kv_utils_counter}")
+                    self.decode_schedule_completion_index += 1
+                    log_info_blue(f"<Decode completed "
+                                  f"{self.decode_schedule_completion_index}> "
+                                  f"instance = {index}, req_len={req_len}")
+
+                    self.decode_bs_counter[index] -= 1
+                    all_zero = True
+                    for index, _ in enumerate(self.decode_instances):
+                        if self.decode_bs_counter[index] != 0:
+                            all_zero = False
+                            break
+                    if all_zero:
+                        log_info_red("<Decode in idle state>")
+                        self.decode_kv_utils_counter = [0] * len(
+                            self.decode_instances)
+                    else:
+                        index = self.decode_instances.index(decode_instance)
+                        self.decode_kv_utils_counter[index] -= req_len
+                        log_info_blue(
+                            f"<schedule_completion decode> "
+                            f"decode_bs_counter: {self.decode_bs_counter}")
+                        log_info_blue(f"<schedule_completion decode> "
+                                      f"decode_kv_utils_counter: "
+                                      f"{self.decode_kv_utils_counter}")
 
 
 class ProxyServer:
@@ -861,6 +939,14 @@ class ProxyServer:
 
     def run_server(self):
         app = FastAPI()
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
         app.include_router(self.proxy_instance.router)
         config = uvicorn.Config(app,
                                 host="0.0.0.0",

@@ -374,12 +374,12 @@ def sample_random_requests(
                                          size=prefix_len).tolist()
 
     input_lens = np.random.randint(
-        int(input_len * range_ratio),
+        max(1, int(input_len * range_ratio)), # At least 1 input token
         input_len + 1,
         size=num_prompts,
     )
     output_lens = np.random.randint(
-        int(output_len * range_ratio),
+        max(1, int(output_len * range_ratio)), # At least 1 output token
         output_len + 1,
         size=num_prompts,
     )
@@ -602,7 +602,7 @@ async def benchmark(
             f"are correctly specified. Error: {test_output.error}")
     else:
         print("Initial test run completed. Starting main benchmark run...")
-    time.sleep(5)
+
     if lora_modules:
         # For each input request, choose a LoRA module at random.
         lora_modules = iter(
@@ -623,7 +623,6 @@ async def benchmark(
         profile_output = await request_func(request_func_input=profile_input)
         if profile_output.success:
             print("Profiler started")
-        time.sleep(5)
 
     if burstiness == 1.0:
         distribution = "Poisson process"

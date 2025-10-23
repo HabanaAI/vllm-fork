@@ -1,32 +1,33 @@
 #!/bin/bash
 
-export PATH=$PATH:/usr/local/lib/python3.10/dist-packages/mooncake/
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/python3.10/dist-packages/mooncake
+BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$BASH_DIR"/pd_env.sh
 
 pkill -f mooncake_master
 pkill -f etcd
 sleep 5s
 
-has_arg() {
-  local keyword=$1
-  shift
-  for arg in "$@"; do
-    if [ "$arg" == "$keyword" ]; then
-      return 0
-    fi
-  done
-  return 1
-}
+# Define commands as arrays
+ETCD_CMD=(etcd --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://localhost:2379)
+MOON_CMD=(mooncake_master -max_threads 64 -port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2)
 
-BENCHMARK_MODE=0
+# Check if XPYD_LOG is set
+if [ -n "$XPYD_LOG" ]; then
+    timestamp=$(date +"%Y%m%d_%H%M%S")
 
-if has_arg benchmark "$@"; then
-  echo "Benchmark mode enabled"
-  BENCHMARK_MODE=1
+    # Run etcd with logging
+    ETCD_LOG="$XPYD_LOG/etcd_${timestamp}.log"
+    echo "Starting etcd, logging to $ETCD_LOG..."
+    "${ETCD_CMD[@]}" > "$ETCD_LOG" 2>&1 &
+
+    # Run mooncake_master with logging
+    MOON_LOG="$XPYD_LOG/mooncake_master_${timestamp}.log"
+    echo "Starting mooncake_master, logging to $MOON_LOG..."
+    "${MOON_CMD[@]}" > "$MOON_LOG" 2>&1 &
+else
+    # Run without logging
+    echo "XPYD_LOG not set, running without logging..."
+    "${ETCD_CMD[@]}" > /dev/null 2>&1 &
+    "${MOON_CMD[@]}" > /dev/null 2>&1 &
 fi
 
-etcd --listen-client-urls http://0.0.0.0:2379 \
-     --advertise-client-urls http://localhost:2379 \
-     >etcd.log 2>&1 &
-
-mooncake_master -max_threads 64 -port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2 >mooncake_master.log 2>&1 &

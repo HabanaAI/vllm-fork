@@ -3,8 +3,6 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
-
 export VLLM_GPU_MEMORY_UTILIZATION=0.7
 export VLLM_GRAPH_RESERVED_MEM=0.3
 export VLLM_GRAPH_PROMPT_RATIO=0
@@ -20,6 +18,7 @@ input_min=128
 input_max=16384
 output_max=16384
 
+# ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
 unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET_MAX
@@ -35,7 +34,7 @@ export VLLM_PROMPT_SEQ_BUCKET_STEP=128
 export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 
 #export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
-export VLLM_DECODE_BS_BUCKET_STEP=2
+#export VLLM_DECODE_BS_BUCKET_STEP=2
 #export VLLM_DECODE_BLOCK_BUCKET_STEP=2
 
 echo " environments are reseted "
@@ -44,19 +43,27 @@ env | grep VLLM_PROMPT_BS
 env | grep VLLM_PROMPT_SEQ
 env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
+# ***************************************  bucketing ends ************************************* #
 
-export VLLM_SKIP_WARMUP=True
-#unset VLLM_SKIP_WARMUP
-#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_d,false,131072
+SWAP_SPACE=64 # GB, memory per rank for preemption.swap.
 
+# decode specific settings
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0
 export VLLM_DP_MASTER_IP=10.239.129.81
 export VLLM_DP_MASTER_PORT=25940
 export VLLM_EP_SIZE=16
 
-export PT_HPU_MOE_THRESHOLD=64
+# warmup settings
+export VLLM_SKIP_WARMUP=True
+#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache,false,131072
 
+# MoE settings
+export VLLM_SUPPORT_MOE_CHUNK="true"
+export PT_HPU_MOE_CHUNK="64, 128"
+export PT_HPU_MOE_TOKEN_BOUNDARY="2048, 4096" # to be fine tuned further
+
+# INC FP8 settings
 if [ "$INC_FP8" -eq 1 ]; then
   export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json
 fi

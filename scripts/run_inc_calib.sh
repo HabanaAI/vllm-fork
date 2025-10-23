@@ -49,7 +49,7 @@ done
 
 
 
-QUANT_CONFIG_FILE="./scripts/quant_configs/inc_measure_with_fp8kv_config.json"
+QUANT_CONFIG_FILE="$(realpath ./scripts/quant_configs/inc_measure_with_fp8kv_config.json)"
 timestamp=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="prepare.pile.${NUM_PROMPTS}.${timestamp}.log"
 
@@ -90,6 +90,8 @@ QUANT_CONFIG=${QUANT_CONFIG_FILE} \
     --tokenizer ${FP8_MODEL_PATH} \
     --osl 32 \
     --max_num_seqs 1 \
+    --tp_size ${WORLD_SIZE} \
+    --ep_size ${WORLD_SIZE} \
     --nprompts ${NUM_PROMPTS} \
     --max_model_len 2048 \
     --dataset pile 2>&1 | tee $LOG_FILE

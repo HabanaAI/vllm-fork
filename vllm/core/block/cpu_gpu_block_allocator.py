@@ -253,7 +253,12 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         Returns:
             int: The zero-offset block id on certain device.
         """
-        return self._allocators[device].get_physical_block_id(absolute_id)
+        base = self._allocators[device].get_physical_block_id(absolute_id)
+        if device == Device.GPU and current_platform.is_hpu():
+            reserved_block = 1  # align with reserved blocks in create()
+        else:
+            reserved_block = 0
+        return base + reserved_block
 
     def swap(self, blocks: List[Block], src_device: Device,
              dst_device: Device) -> Dict[int, int]:

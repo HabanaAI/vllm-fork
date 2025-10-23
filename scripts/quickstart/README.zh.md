@@ -206,7 +206,7 @@ huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scr
 对于 DeepSeek-V3.1，请使用以下命令校准模型。命令完成后，DeepSeek-V3.1 测量文件将在文件夹 "scripts/nc_workspace_measure_kvcache" 中生成。
 ```bash
 cd vllm-fork
-bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
+bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2 --nprompts 5000
 ```
 
 #### 2. 配置环境变量（可选）
@@ -296,16 +296,17 @@ w  模型的权重，可以是 huggingface 中的模型 ID 或本地路径
 u  服务器的 URL，字符串，默认=0.0.0.0
 p  服务器的端口号，整数，默认=8688
 l  vllm 的 max_model_len，整数，默认=16384，单节点最大值：32768
-b  vllm 的 max_num_seqs，整数，默认=128
+b  vllm 的 max_num_seqs，整数，默认=64
 c  将 HPU 配方缓存到指定路径，字符串，默认=None
 s  是否跳过预热，布尔值，默认=false
 q  启用 inc fp8 量化
+m  Prefill序列的最大个数, 整数, 默认=1 来优化TTFT
 h  帮助信息
 ```
 
 ### 以 TP=8 启动 vLLM 服务
 ```bash
-bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -q -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
+bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -q -u 0.0.0.0 -p 8688 -l 16384-c /data/warmup_cache
 ```
 
 注意：对于 DeepSeek-V3.1，如果客户端使用非思维模式，请删除文件 "start_vllm.sh" 中的参数 "--enable-reasoning --reasoning-parser deepseek_r1"。
@@ -441,7 +442,7 @@ cp -r ./scripts/measure_kvcache/ds-r1-0528-g2-tp16 ./scripts/nc_workspace_measur
 对于 DeepSeek-V3.1，请使用以下命令校准模型。命令完成后，DeepSeek-V3.1 测量文件将在文件夹 "vllm-fork/scripts/nc_workspace_measure_kvcache" 中生成。生成测量文件后，您可以将它们复制到其他工作节点的文件夹 vllm-fork/scripts/nc_workspace_measure_kvcache" 中。
 ```bash
 cd vllm-fork
-bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
+bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2 --wd 16 --nprompts 5000
 ```
 
 
