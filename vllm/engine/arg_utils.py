@@ -1207,6 +1207,8 @@ class EngineArgs:
             if speculative_config is None \
             else speculative_config.num_lookahead_slots
 
+        if self.enable_chunked_prefill:
+            self.use_padding_aware_scheduling = False
         scheduler_config = SchedulerConfig(
             runner_type=model_config.runner_type,
             max_num_batched_tokens=self.max_num_batched_tokens,
