@@ -1132,6 +1132,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_size=self.block_size,
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_model_len=self.max_model_len)
+        # Generate prompt buckets for pooler runner
+        if self.vllm_config.model_config.runner_type == "pooling":
+            self.bucketing_manager.generate_prompt_buckets()
+
         self.graphed_buckets: Set[Any] = set()
         self.multimodal_buckets: List[int] = [
         ]  #TODO: Move to HPUBucketingContext
