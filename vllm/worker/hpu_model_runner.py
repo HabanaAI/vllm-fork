@@ -3177,10 +3177,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
-        prompt_buckets = len(self.bucketing_manager.prompt_buckets)
         if not self.is_pooler:
+            prompt_buckets = len(self.bucketing_manager.prompt_buckets)
             decode_buckets = len(self.bucketing_manager.decode_buckets)
         else:
+            # prompt buckets were not generated before this point when pooling
+            self.bucketing_manager.generate_prompt_buckets()
+            prompt_buckets = len(self.bucketing_manager.prompt_buckets)
             # When pooling we're not using decode phase
             decode_buckets = 0
 
