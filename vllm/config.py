@@ -925,13 +925,13 @@ class ModelConfig:
                     f"method specified in the `quantization` argument "
                     f"({self.quantization}).")
 
-        if current_platform.is_hpu() and \
-            os.getenv("QUANT_CONFIG", None) is not None:
-            os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
-            if quant_cfg is None:
-                logger.info_once('Enable INC as QUANT_CONFIG is set '
-                                 'for an unquantized model.')
-                self.quantization = 'inc'
+        # if current_platform.is_hpu() and \
+        #     os.getenv("QUANT_CONFIG", None) is not None:
+        #     os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
+        #     if quant_cfg is None:
+        #         logger.info_once('Enable INC as QUANT_CONFIG is set '
+        #                          'for an unquantized model.')
+        #         self.quantization = 'inc'
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
