@@ -36,7 +36,8 @@ from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
 from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (QKVParallelLinear,
-                                               RowParallelLinear)
+                                               RowParallelLinear,
+                                               SplitQKVParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
@@ -89,16 +90,28 @@ class Qwen3Attention(nn.Module):
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
+        self.split_qkv = True #cache_config.split_qkv
 
-        self.qkv_proj = QKVParallelLinear(
-            hidden_size,
-            self.head_dim,
-            self.total_num_heads,
-            self.total_num_kv_heads,
-            bias=qkv_bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.qkv_proj",
-        )
+        if self.split_qkv:
+            self.qkv_proj = SplitQKVParallelLinear(
+                hidden_size=hidden_size,
+                head_size=self.head_dim,
+                total_num_heads=self.total_num_heads,
+                total_num_kv_heads=self.total_num_kv_heads,
+                bias=qkv_bias,
+                quant_config=quant_config,
+                prefix=f"{prefix}.qkv_proj",
+            )
+        else:
+            self.qkv_proj = QKVParallelLinear(
+                hidden_size,
+                self.head_dim,
+                self.total_num_heads,
+                self.total_num_kv_heads,
+                bias=qkv_bias,
+                quant_config=quant_config,
+                prefix=f"{prefix}.qkv_proj",
+            )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
@@ -130,15 +143,20 @@ class Qwen3Attention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        if self.split_qkv:
+            q, k, v, _ = self.qkv_proj(hidden_states)
+            
+            
+        else:
+            qkv, _ = self.qkv_proj(hidden_states)
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         # Add qk-norm
         q_by_head = q.view(*q.shape[:-1], q.shape[-1] // self.head_dim,
-                           self.head_dim)
+                        self.head_dim)
         q_by_head = self.q_norm(q_by_head)
         q = q_by_head.view(q.shape)
         k_by_head = k.view(*k.shape[:-1], k.shape[-1] // self.head_dim,
-                           self.head_dim)
+                            self.head_dim)
         k_by_head = self.k_norm(k_by_head)
         k = k_by_head.view(k.shape)
         q, k = self.rotary_emb(positions, q, k)
@@ -243,6 +261,8 @@ class Qwen3Model(Qwen2Model):
         super().__init__(vllm_config=vllm_config,
                          prefix=prefix,
                          decoder_layer_type=Qwen3DecoderLayer)
+        cache_config = vllm_config.cache_config
+        self.split_qkv = True #cache_config.split_qkv
 
 
 class Qwen3ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
@@ -258,12 +278,13 @@ class Qwen3ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         ],
     }
 
+
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
         lora_config = vllm_config.lora_config
-
+        self.split_qkv = True
         self.config = config
         self.lora_config = lora_config
 
@@ -318,4 +339,5 @@ class Qwen3ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
             skip_prefixes=(["lm_head."]
                            if self.config.tie_word_embeddings else None),
         )
+
         return loader.load_weights(weights)
