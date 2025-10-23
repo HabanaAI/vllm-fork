@@ -3701,7 +3701,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             start_query_block += max_query_blocks
             start_context_block += max_context_blocks
 
-        return input_tokens_list, kv_caches_send_list, hidden_states_list
+        return input_tokens_list, kv_caches_send_list, hidden_states_list, None
 
     def _dummy_sampler_outputs(self, model_input):
         if self.scheduler_config.chunked_prefill_enabled:
