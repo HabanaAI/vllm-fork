@@ -103,12 +103,12 @@ run_tests_for_model() {
     # Calculate port number (base port + instance number)
     PORT=$((8300 + i))
     # Calculate side channel port. Avoid clash with with TP workers. 
-    SIDE_CHANNEL_PORT=$((5559 + i))
+    SIDE_CHANNEL_PORT=$((6559 + i))
 
     echo "Starting prefill instance $i on GPU $GPU_ID, port $PORT"
 
     # Build the command with or without model-specific args
-    BASE_CMD="HABANA_VISIBLE_DEVICES=0 RANK=0 UCX_TLS=rc,ud,ib VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
+    BASE_CMD="HABANA_VISIBLE_DEVICES=0 RANK=0 UCX_TLS=tcp VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
     --port $PORT \
     --long_prefill_token_threshold 8192 \
     --max_num_batched_tokens 8192 \
@@ -135,14 +135,14 @@ run_tests_for_model() {
     # Calculate GPU ID - we'll distribute across available GPUs, starting from after prefill GPUs
     #GPU_ID=$(((i + NUM_PREFILL_INSTANCES) % $(get_num_gpus)))
     # Calculate port number (base port + instance number)
-    PORT=$((8400 + i))
+    PORT=$((9400 + i))
     # Calculate side channel port
-    SIDE_CHANNEL_PORT=$((4659 + i * $DECODER_TP_SIZE))
+    SIDE_CHANNEL_PORT=$((5659 + i * $DECODER_TP_SIZE))
 
     echo "Starting decode instance $i on GPU $GPU_ID, port $PORT"
 
     # Build the command with or without model-specific args
-    BASE_CMD="HABANA_VISIBLE_DEVICES=1 RANK=1 UCX_TLS=rc,ud,ib VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
+    BASE_CMD="HABANA_VISIBLE_DEVICES=1 RANK=1 UCX_TLS=tcp VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
     --port $PORT \
     --gpu-memory-utilization 0.3 \
     --tensor-parallel-size $DECODER_TP_SIZE \
@@ -176,7 +176,7 @@ run_tests_for_model() {
   done
 
   # Build the command for the proxy server with all the hosts and ports
-  PROXY_CMD="python toy_proxy_server.py --port 9111"
+  PROXY_CMD="python toy_proxy_server.py --port 8111"
 
   # Add all prefill hosts and ports
   PROXY_CMD+=" --prefiller-hosts ${PREFILL_HOSTS[@]}"
@@ -203,14 +203,14 @@ run_tests_for_model() {
 #	}'
 #	sleep 5
 #	echo "--------------------===================-------------"
-#curl -X POST -s http://localhost:9111/v1/completions \
-#        -H "Content-Type: application/json" \
-#        -d '{
-#        "model": "/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/",
-#        "prompt": "Mark Elliot Zuckerberg is an American businessman who co-founded the social media service Facebook and its parent company Meta Platforms, of which he is the chairman, chief executive officer, and controlling shareholder. Zuckerberg has been the subject of multiple lawsuits regarding the creation and ownership of the website as well as issues such as user privacy. Born in White Plains, New York, Zuckerberg briefly attended Harvard College, where he launched Facebook in February 2004 with his roommates Eduardo Saverin, Andrew McCollum, Dustin Moskovitz and Chris Hughes. Zuckerberg took the company public in May 2012 with majority shares. He became the worlds youngest self-made billionaire[a] in 2008, at age 23, and has consistently ranked among the worlds wealthiest individuals. According to Forbes, Zuckerbergs estimated net worth stood at US$221.2 billion as of May 2025, making him the second-richest individual in the world.[2] Intel opened its first international manufacturing facility in 1972, in Malaysia, which would host multiple Intel operations, before opening assembly facilities and semiconductor plants in Singapore and Jerusalem in the early 1980s, and manufacturing and development centers in China, India, and Costa Rica in the 1990s.[31] By the early 1980s, its business was dominated by DRAM chips. However, increased competition from Japanese semiconductor manufacturers had, by 1983, dramatically reduced the profitability of this market. The growing success of the IBM personal computer, based on an Intel microprocessor, was among factors that convinced Gordon Moore (CEO since 1975) to shift the companys focus to microprocessors and to change fundamental aspects of that business model. Moores decision to sole-source Intels 386 chip played into the companys continuing success.",
-#        "max_tokens": 5,
-#        "temperature": 0
-#        }'
+curl -X POST -s http://localhost:8111/v1/completions \
+        -H "Content-Type: application/json" \
+        -d '{
+        "model": "/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/",
+        "prompt": "Mark Elliot Zuckerberg is an American businessman who co-founded the social media service Facebook and its parent company Meta Platforms, of which he is the chairman, chief executive officer, and controlling shareholder. Zuckerberg has been the subject of multiple lawsuits regarding the creation and ownership of the website as well as issues such as user privacy. Born in White Plains, New York, Zuckerberg briefly attended Harvard College, where he launched Facebook in February 2004 with his roommates Eduardo Saverin, Andrew McCollum, Dustin Moskovitz and Chris Hughes. Zuckerberg took the company public in May 2012 with majority shares. He became the worlds youngest self-made billionaire[a] in 2008, at age 23, and has consistently ranked among the worlds wealthiest individuals. According to Forbes, Zuckerbergs estimated net worth stood at US$221.2 billion as of May 2025, making him the second-richest individual in the world.[2] Intel opened its first international manufacturing facility in 1972, in Malaysia, which would host multiple Intel operations, before opening assembly facilities and semiconductor plants in Singapore and Jerusalem in the early 1980s, and manufacturing and development centers in China, India, and Costa Rica in the 1990s.[31] By the early 1980s, its business was dominated by DRAM chips. However, increased competition from Japanese semiconductor manufacturers had, by 1983, dramatically reduced the profitability of this market. The growing success of the IBM personal computer, based on an Intel microprocessor, was among factors that convinced Gordon Moore (CEO since 1975) to shift the companys focus to microprocessors and to change fundamental aspects of that business model. Moores decision to sole-source Intels 386 chip played into the companys continuing success.",
+        "max_tokens": 5,
+        "temperature": 0
+        }'
  #curl -X POST -s http://localhost:9111/v1/completions \
  #      -H "Content-Type: application/json" \
  #      -d '{

@@ -2,13 +2,13 @@ services:
 
  skavulya_vllm_nixl_pd:
     image:  amr-idc-registry.infra-host.com/asv-content/vllm-v1-ucx-gpu:25.01-py3
-    container_name: skavulya_vllm_nixl_pd
+    container_name: litang_vllm_nixl_pd
     runtime: nvidia
     network_mode: host
     ipc: host
     privileged: yes
     environment:
-#        - NVIDIA_VISIBLE_DEVICES=0,1
+        - NVIDIA_VISIBLE_DEVICES=6
         - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
         - /mnt/weka:/mnt/weka
