@@ -1355,10 +1355,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 torch.hpu.synchronize()
                 return model
 
-            with HabanaMemoryProfiler() as m_to_hpu:
-                self.model = move_model_to_hpu(self.model)
-            logger.info("Moving model to HPU took %s",
-                        m_to_hpu.get_summary_string())
+            if self.model_config.quantization != 'inc':
+                with HabanaMemoryProfiler() as m_to_hpu:
+                    self.model = move_model_to_hpu(self.model)
+                logger.info("Moving model to HPU took %s",
+                            m_to_hpu.get_summary_string())
 
             if self._is_quant_with_inc():
                 logger.info("Preparing model with INC..")
