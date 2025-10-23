@@ -3106,7 +3106,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         if hasattr(model, "model"):
             for layer in self.get_model().model.layers:
-                if getattr(layer, "is_mla_layer", None) is None:
+                if getattr(layer, "self_attn", None) is None:
                     continue
                 self_attn = layer.self_attn
                 # delete attr kv_b_proj in self_attn,
