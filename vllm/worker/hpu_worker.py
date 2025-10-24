@@ -124,6 +124,9 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         else:
             self.profiler = None
 
+        # State for sleep/wakeup functionality
+        self._model_on_cpu = False
+
     def full_trace_handler(self, dir_name, use_gzip=False):
 
         def handler_fn(prof) -> None:
@@ -514,6 +517,105 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         return HPUCacheEngine.get_cache_block_size(self.cache_config,
                                                    self.model_config,
                                                    self.parallel_config)
+
+    def sleep(self, level: int = 1) -> None:
+        """Put the worker into sleep mode to reduce memory usage.
+
+        Unlike GPU workers that use custom memory allocators, HPU workers
+        use a simpler approach of moving model to CPU and clearing KV cache.
+
+        Args:
+            level (int): Sleep level (kept for interface compatibility,
+                        always performs level 1 operations)
+        """
+        assert not htorch.utils.internal.is_lazy() \
+                or self.model_config.enforce_eager, \
+                "sleep mode is not supported in graph mode"
+
+        if self._model_on_cpu:
+            logger.warning("Worker is already in sleep mode")
+            return
+
+        # Move model to CPU (if model is loaded)
+        if hasattr(self.model_runner,
+                   'model') and self.model_runner.model is not None:
+            with HabanaMemoryProfiler() as m:
+                self.model_runner.model.to("cpu")
+                torch.hpu.synchronize()
+            msg = ("Moving model to CPU for sleep mode "
+                   f"took {m.get_summary_string()}")
+            logger.info(msg)
+        else:
+            logger.warning("Model not loaded yet, skipping model move to CPU")
+
+        # Clear KV cache
+        with HabanaMemoryProfiler() as m:
+            for ve in range(self.parallel_config.pipeline_parallel_size):
+                del self.cache_engine[ve].gpu_cache
+                del self.cache_engine[ve].cpu_cache
+            self.cache_engine.clear()
+            self.hpu_cache.clear()
+            self.hpu_cache = None
+            for layer_name in self.compilation_config.static_forward_context:
+                self.compilation_config.static_forward_context[
+                    layer_name].kv_cache.clear()
+                self.compilation_config.static_forward_context[
+                    layer_name].kv_cache = [
+                        torch.tensor([]) for _ in range(
+                            self.parallel_config.pipeline_parallel_size)
+                    ]
+            torch.hpu.synchronize()
+
+        msg = ("Clean up KV cache for sleep mode "
+               f"took {m.get_summary_string()}")
+        logger.info(msg)
+
+        self._model_on_cpu = True
+
+    def wake_up(self, tags: Optional[list[str]] = None) -> None:
+        """Wake up the worker from sleep mode.
+
+        Moves the model back to HPU and optionally reinitializes KV cache.
+
+        Args:
+            tags: Optional list of tags (kept for interface compatibility)
+        """
+        assert not htorch.utils.internal.is_lazy() \
+                or self.model_config.enforce_eager, \
+                "sleep mode is not supported in graph mode"
+
+        if tags is None:
+            tags = ["weights", "kv_cache"]
+        if "weights" in tags:
+            if not self._model_on_cpu:
+                logger.warning("Worker is not in sleep mode")
+                return
+
+            logger.info("")
+
+            # Move model back to HPU (if model is loaded)
+            if hasattr(self.model_runner,
+                       'model') and self.model_runner.model is not None:
+                with HabanaMemoryProfiler() as m:
+                    self.model_runner.model.to(self.device)
+                    torch.hpu.synchronize()
+                msg = ("Waking up worker: moving model back to HPU "
+                       f"took {m.get_summary_string()}")
+                logger.info(msg)
+            else:
+                logger.warning(
+                    "Model not loaded yet, skipping model move to HPU")
+            self._model_on_cpu = False
+
+        if "kv_cache" in tags:
+            # If KV cache was cleared, it will need to be reinitialized
+            # by the engine when needed
+            with HabanaMemoryProfiler() as m:
+                self._init_cache_engine()
+                torch.hpu.synchronize()
+            msg = ("Waking up worker: initializing KV cache "
+                   f"took {m.get_summary_string()}")
+            logger.info(msg)
 
 
 def init_worker_distributed_environment(
