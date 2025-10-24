@@ -391,10 +391,12 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             input_size=self.conv_kernel_size,
             output_size=self.conv_dim,
             bias=False,
+            params_dtype=torch.float32,
             quant_config=None,
             prefix=f"{prefix}.conv1d",
         )
         self.conv1d.weight.data = self.conv1d.weight.data.unsqueeze(1)
+        self.conv1d_weight = None
 
         # projection of the input hidden states
         self.projection_size_qkvz = self.key_dim * 2 + self.value_dim * 2
@@ -429,8 +431,15 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 ], self.tp_size, self.tp_rank)
             })
 
-        mamba_cache_bs = vllm_config.scheduler_config.max_num_seqs + \
-            max(8, vllm_config.scheduler_config.max_num_seqs) + 1
+        max_prefill_bs = vllm_config.scheduler_config.max_num_prefill_seqs
+        max_decode_bs = vllm_config.scheduler_config.max_num_seqs
+
+        mamba_cache_bs = max_decode_bs + max(8, max_decode_bs)
+        if max_prefill_bs is not None:
+            mamba_cache_bs += max_prefill_bs
+        else:
+            mamba_cache_bs += max_decode_bs
+
         conv_state_shape = (
             mamba_cache_bs,
             self.conv_kernel_size - 1,
@@ -575,8 +584,11 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
         mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
 
-        conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
-            0, 1).contiguous().float()
+        if self.conv1d_weight is None:
+            self.conv1d_weight = self.conv1d.weight.squeeze(1).transpose(0,
+                1).flatten().reshape(self.conv_kernel_size,
+                    self.conv_dim // self.tp_size).float()
+            del self.conv1d.weight
 
         if attn_metadata.is_prompt:
             bs, seq_len, qkv_dim = mixed_qkv.shape
@@ -593,7 +605,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                                        (0, 0, self.conv_kernel_size - 1, 0))
             for idx in range(self.conv_kernel_size):
                 qkv_slice = mixed_qkv_with_pad[:, idx:(idx + seq_len), :]
-                conv1d_weight_slice = conv1d_weight[idx]
+                conv1d_weight_slice = self.conv1d_weight[idx]
                 qkv_conv = qkv_slice * conv1d_weight_slice
                 if idx == 0:
                     mixed_qkv_non_spec = qkv_conv
@@ -606,7 +618,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
                 mixed_qkv,
                 conv_state,
-                conv1d_weight,
+                self.conv1d_weight,
                 self.conv1d.bias,
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
