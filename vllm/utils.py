@@ -1169,7 +1169,16 @@ def _patched_set_stream(stream: torch.cuda.Stream) -> None:
     prev_set_stream(stream)
 
 
-torch.cuda.set_stream = _patched_set_stream
+is_hpu = False
+try:
+    import os
+    from importlib import util
+    is_hpu = util.find_spec('habana_frameworks') is not None or os.environ.get(
+        'VLLM_USE_FAKE_HPU', '0') != '0'
+except Exception:
+    pass
+
+torch.cuda.set_stream = _patched_set_stream if not is_hpu else None
 
 
 def current_stream() -> torch.cuda.Stream:
