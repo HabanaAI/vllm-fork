@@ -1545,7 +1545,9 @@ class MRotaryEmbedding(RotaryEmbedding):
                         video_grid_thw[mm_data_idx][2],
                     )
                     llm_grid_t, llm_grid_h, llm_grid_w = \
-                        t // temporal_conv_size, h // spatial_conv_size, w // spatial_conv_size
+                        t // temporal_conv_size, \
+                        h // spatial_conv_size, \
+                        w // spatial_conv_size
 
                     for t_idx in range(llm_grid_t):
                         t_index = torch.tensor(t_idx).view(-1, 1).expand(
@@ -2239,7 +2241,6 @@ class DualChunkRotaryEmbedding(CustomOp):
         s += f", base={self.base}, is_neox_style={self.is_neox_style}"
         s += f", chunk_size={self.chunk_size}, local_size={self.local_size}"
         return s
-
 
 
 class Ernie4_5_VLRotaryEmbedding(MRotaryEmbedding):
