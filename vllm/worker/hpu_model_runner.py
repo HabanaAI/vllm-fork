@@ -2962,7 +2962,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 vision_feat_dim = (getattr(vision_config, "in_chans", 0) * \
                                    getattr(vision_config, "patch_size", 0) ** 2)
                 if vision_feat_dim > 0:
-                    embed_dim = vision_feat_dim # 588
+                    embed_dim = vision_feat_dim  # 588
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
                 embed_dim)  # TODO: figure out the variable name
@@ -2985,9 +2985,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "num_crops": torch.zeros([img_args], dtype=torch.int32)
             }
 
-        image_token_id = self.get_model().config.im_patch_id \
-                         if self.get_model().config.model_type == "ernie4_5_moe_vl" \
-                         else self.get_model().config.image_token_id
+        if 'ernie4_5_moe_vl' in self.get_model().config.model_type:
+            image_token_id = self.get_model().config.im_patch_id
+        else:
+            image_token_id = self.get_model().config.image_token_id
         prompt_token_ids_image = [image_token_id] * num_image_tokens
         prompt_token_ids = [0] * (
             seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image

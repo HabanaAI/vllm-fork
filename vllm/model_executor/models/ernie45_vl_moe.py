@@ -287,20 +287,22 @@ class Ernie4_5_VLMoeMoE(nn.Module):
         if self.has_shared_experts:
             shared_output = self.shared_experts(hidden_states)
 
-        if visual_token_mask is not None and visual_token_mask.cpu().all(): # WA for HPU: fallback to CPU
+        if visual_token_mask is not None and visual_token_mask.cpu().all(
+        ):  # WA for HPU: fallback to CPU
             # only vision modal input
             router_logits, _ = self.vision_experts_gate(
                 hidden_states.to(dtype=torch.float32))
             final_hidden_states = self.vision_experts(
                 hidden_states=hidden_states, router_logits=router_logits)
-        elif visual_token_mask is not None and visual_token_mask.cpu().any(): # WA for HPU: fallback to CPU
+        elif visual_token_mask is not None and visual_token_mask.cpu().any(
+        ):  # WA for HPU: fallback to CPU
             if current_platform.is_hpu():
                 text_token_mask = ~visual_token_mask
                 final_hidden_states = torch.zeros_like(hidden_states)
 
                 text_router_logits, _ = self.text_experts_gate(
                     hidden_states.to(dtype=torch.float32))
-                text_hidden_states= self.text_experts(
+                text_hidden_states = self.text_experts(
                     hidden_states=hidden_states,
                     router_logits=text_router_logits)
                 vision_router_logits, _ = self.vision_experts_gate(
@@ -318,8 +320,8 @@ class Ernie4_5_VLMoeMoE(nn.Module):
 
                 text_hidden_states = hidden_states[text_token_mask].reshape(
                     -1, self.hidden_size)
-                vision_hidden_states = hidden_states[visual_token_mask].reshape(
-                    -1, self.hidden_size)
+                vision_hidden_states = hidden_states[
+                    visual_token_mask].reshape(-1, self.hidden_size)
 
                 text_router_logits, _ = self.text_experts_gate(
                     text_hidden_states.to(dtype=torch.float32))
@@ -335,7 +337,7 @@ class Ernie4_5_VLMoeMoE(nn.Module):
         else:
             # only text modal input
             text_router_logits, _ = self.text_experts_gate(
-                    hidden_states.to(dtype=torch.float32))
+                hidden_states.to(dtype=torch.float32))
 
             final_hidden_states = self.text_experts(
                 hidden_states=hidden_states, router_logits=text_router_logits)

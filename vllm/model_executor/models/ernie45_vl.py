@@ -174,14 +174,16 @@ class Ernie4_5_VisionAttention(nn.Module):
         # Detect attention implementation.
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
         if self.attn_backend not in {
-                _Backend.FLASH_ATTN, _Backend.TORCH_SDPA, _Backend.XFORMERS,
+                _Backend.FLASH_ATTN,
+                _Backend.TORCH_SDPA,
+                _Backend.XFORMERS,
                 # _Backend.ROCM_AITER_FA
         }:
             raise RuntimeError(
                 f"Ernie45-VL does not support {self.attn_backend} backend now."
             )
         self.is_flash_attn_backend = self.attn_backend in {
-            _Backend.FLASH_ATTN, #_Backend.ROCM_AITER_FA
+            _Backend.FLASH_ATTN,  #_Backend.ROCM_AITER_FA
         }
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
@@ -1510,7 +1512,8 @@ class Ernie4_5_VLMoeForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         if self.visual_token_mask is not None:
 
-            if self.visual_token_mask.shape[0] != inputs_embeds.shape[1 if current_platform.is_hpu() else 0]:
+            if self.visual_token_mask.shape[0] != inputs_embeds.shape[
+                    1 if current_platform.is_hpu() else 0]:
                 padding_len = inputs_embeds.shape[
                     0] - self.visual_token_mask.shape[0]
                 # right pad False
