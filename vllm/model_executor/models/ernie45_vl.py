@@ -1468,7 +1468,7 @@ class Ernie4_5_VLMoeForConditionalGeneration(nn.Module, SupportsMultiModal,
         image_input: Optional[Ernie4_5_VLImageInputs] = None,
         video_input: Optional[Ernie4_5_VLVideoInputs] = None,
     ) -> torch.Tensor:
-        inputs_embeds = self.get_input_embeddings(input_ids)
+        inputs_embeds = self.language_model.get_input_embeddings(input_ids)
         if image_input is not None:
             image_embeds = self._process_image_input(image_input)
             inputs_embeds = merge_multimodal_embeddings(
@@ -1481,7 +1481,7 @@ class Ernie4_5_VLMoeForConditionalGeneration(nn.Module, SupportsMultiModal,
             if current_platform.is_hpu():
                 logger.warning("Video inputs have not been enabled yet, "
                                "ignoring video inputs")
-                return multimodal_embeddings
+                return inputs_embeds
             video_embeds = self._process_video_input(video_input)
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids,
@@ -1489,6 +1489,7 @@ class Ernie4_5_VLMoeForConditionalGeneration(nn.Module, SupportsMultiModal,
                 video_embeds,
                 placeholder_token_id=self.config.im_patch_id,
             )
+        self._set_visual_token_mask(input_ids)
         return inputs_embeds
 
     def forward(
@@ -1509,7 +1510,7 @@ class Ernie4_5_VLMoeForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         if self.visual_token_mask is not None:
 
-            if self.visual_token_mask.shape[0] != inputs_embeds.shape[0]:
+            if self.visual_token_mask.shape[0] != inputs_embeds.shape[1 if current_platform.is_hpu() else 0]:
                 padding_len = inputs_embeds.shape[
                     0] - self.visual_token_mask.shape[0]
                 # right pad False

@@ -48,6 +48,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 
 from .ernie45_moe import Ernie4_5_MoeMLP
@@ -286,31 +287,55 @@ class Ernie4_5_VLMoeMoE(nn.Module):
         if self.has_shared_experts:
             shared_output = self.shared_experts(hidden_states)
 
-        if visual_token_mask is not None and visual_token_mask.any():
-            # assert visual_token_mask.shape[0] != hidden_states.shape[0]
-            visual_token_mask = visual_token_mask.repeat(
-                1, self.hidden_size).bool()
-            text_token_mask = ~visual_token_mask
-            final_hidden_states = torch.zeros_like(hidden_states)
+        if visual_token_mask is not None and visual_token_mask.cpu().all(): # WA for HPU: fallback to CPU
+            # only vision modal input
+            router_logits, _ = self.vision_experts_gate(
+                hidden_states.to(dtype=torch.float32))
+            final_hidden_states = self.vision_experts(
+                hidden_states=hidden_states, router_logits=router_logits)
+        elif visual_token_mask is not None and visual_token_mask.cpu().any(): # WA for HPU: fallback to CPU
+            if current_platform.is_hpu():
+                text_token_mask = ~visual_token_mask
+                final_hidden_states = torch.zeros_like(hidden_states)
 
-            text_hidden_states = hidden_states[text_token_mask].reshape(
-                -1, self.hidden_size)
-            vision_hidden_states = hidden_states[visual_token_mask].reshape(
-                -1, self.hidden_size)
+                text_router_logits, _ = self.text_experts_gate(
+                    hidden_states.to(dtype=torch.float32))
+                text_hidden_states= self.text_experts(
+                    hidden_states=hidden_states,
+                    router_logits=text_router_logits)
+                vision_router_logits, _ = self.vision_experts_gate(
+                    hidden_states.to(dtype=torch.float32))
+                vision_hidden_states = self.vision_experts(
+                    hidden_states=hidden_states,
+                    router_logits=vision_router_logits)
+                final_hidden_states = text_hidden_states * text_token_mask \
+                                    + vision_hidden_states * visual_token_mask
+            else:
+                visual_token_mask = visual_token_mask.repeat(
+                    1, self.hidden_size).bool()
+                text_token_mask = ~visual_token_mask
+                final_hidden_states = torch.zeros_like(hidden_states)
 
-            text_router_logits, _ = self.text_experts_gate(text_hidden_states)
-            final_hidden_states[text_token_mask] = self.text_experts(
-                hidden_states=text_hidden_states,
-                router_logits=text_router_logits).flatten()
+                text_hidden_states = hidden_states[text_token_mask].reshape(
+                    -1, self.hidden_size)
+                vision_hidden_states = hidden_states[visual_token_mask].reshape(
+                    -1, self.hidden_size)
 
-            vision_router_logits, _ = self.vision_experts_gate(
-                vision_hidden_states)
-            final_hidden_states[visual_token_mask] = self.vision_experts(
-                hidden_states=vision_hidden_states,
-                router_logits=vision_router_logits).flatten()
+                text_router_logits, _ = self.text_experts_gate(
+                    text_hidden_states.to(dtype=torch.float32))
+                final_hidden_states[text_token_mask] = self.text_experts(
+                    hidden_states=text_hidden_states,
+                    router_logits=text_router_logits).flatten()
+
+                vision_router_logits, _ = self.vision_experts_gate(
+                    vision_hidden_states.to(dtype=torch.float32))
+                final_hidden_states[visual_token_mask] = self.vision_experts(
+                    hidden_states=vision_hidden_states,
+                    router_logits=vision_router_logits).flatten()
         else:
-            # text modal input processing directly
-            text_router_logits, _ = self.text_experts_gate(hidden_states)
+            # only text modal input
+            text_router_logits, _ = self.text_experts_gate(
+                    hidden_states.to(dtype=torch.float32))
 
             final_hidden_states = self.text_experts(
                 hidden_states=hidden_states, router_logits=text_router_logits)

@@ -2962,7 +2962,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 vision_feat_dim = (getattr(vision_config, "in_chans", 0) * \
                                    getattr(vision_config, "patch_size", 0) ** 2)
                 if vision_feat_dim > 0:
-                    embed_dim = vision_feat_dim
+                    embed_dim = vision_feat_dim # 588
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
                 embed_dim)  # TODO: figure out the variable name
