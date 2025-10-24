@@ -1355,6 +1355,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 torch.hpu.synchronize()
                 return model
 
+            # Move quantized model and tensors to HPU to avoid deduplicated
+            # copies of MoE weights in w13/w2 weights and w13/12 list.
+            # Skip for unquantized model as INC will handle it layer-by-layer.
             if self.model_config.quantization != 'inc':
                 with HabanaMemoryProfiler() as m_to_hpu:
                     self.model = move_model_to_hpu(self.model)
