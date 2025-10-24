@@ -78,3 +78,4 @@ if __name__ == "__main__":
     outputs = model.score(queries, documents)
 
     print([output.outputs.score for output in outputs])
+    model.llm_engine.model_executor.shutdown()
