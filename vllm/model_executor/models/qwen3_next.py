@@ -585,9 +585,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
 
         if self.conv1d_weight is None:
-            self.conv1d_weight = self.conv1d.weight.squeeze(1).transpose(0,
-                1).flatten().reshape(self.conv_kernel_size,
-                    self.conv_dim // self.tp_size).float()
+            self.conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
+                0, 1).flatten().reshape(self.conv_kernel_size,
+                                        self.conv_dim // self.tp_size).float()
             del self.conv1d.weight
 
         if attn_metadata.is_prompt:
