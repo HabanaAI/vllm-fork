@@ -436,7 +436,7 @@ class FusedMoE(torch.nn.Module):
                   and self.tp_size * self.dp_size > 1)
 
         # For smuggling this layer into the fused moe custom op
-        self.use_direct_call = self.dp_size == 1
+        self.use_direct_call = not is_hpu
         if self.use_direct_call:
             compilation_config = vllm_config.compilation_config
             if prefix in compilation_config.static_forward_context:
@@ -864,7 +864,7 @@ class FusedMoE(torch.nn.Module):
                                         device=x.device)
         else:
             if output_tensor.ndim == 3 and x.ndim == 2:
-                output_tensor.view(-1, x.size(1))
+                output_tensor = output_tensor.view(-1, x.size(1))
         # All-gather.
         torch.distributed.all_gather_into_tensor(output_tensor, x,
                                                  group=get_dp_group().device_group)
