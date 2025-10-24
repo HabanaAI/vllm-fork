@@ -644,7 +644,6 @@ Specified using `--task generate`.
 
 !!! note
     For Qwen2.5-Omni and Qwen3-Omni, reading audio from video pre-processing (`--mm-processor-kwargs '{"use_audio_in_video": true}'`) is currently work in progress and not yet supported.
- 
 
 ### Pooling Models
 
