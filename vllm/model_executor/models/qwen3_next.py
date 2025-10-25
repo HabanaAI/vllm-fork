@@ -123,7 +123,7 @@ def torch_chunk_gated_delta_rule(
     for i in range(1, chunk_size):
         row = attn[..., i, :i].contiguous()
         sub = attn[..., :i, :]
-        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)[...,  :i]
+        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)[..., :i]
     attn = attn + eye_constant
     value = attn @ v_beta
     k_cumdecay = attn @ (k_beta * g_exp.unsqueeze(-1))
@@ -147,11 +147,11 @@ def torch_chunk_gated_delta_rule(
         q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
         v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
         v_new = v_i - v_prime
-        attn_inter = qg[:,:,i] @ last_recurrent_state
-        core_attn_out[:, :, i] = attn_inter + attn[:,:,i] @ v_new
+        attn_inter = qg[:, :, i] @ last_recurrent_state
+        core_attn_out[:, :, i] = attn_inter + attn[:, :, i] @ v_new
         last_recurrent_state = (
             last_recurrent_state * g_exp[:, :, i, -1, None, None] +
-            k_term[:,:,i].transpose(-1, -2) @ v_new)
+            k_term[:, :, i].transpose(-1, -2) @ v_new)
 
     if not output_final_state:
         last_recurrent_state = None
