@@ -144,9 +144,8 @@ def torch_chunk_gated_delta_rule(
 
     # for each chunk
     for i in range(0, tot_len // chunk_size):
-        q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
         v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
-        v_new = v_i - v_prime
+        v_new = value[:, :, i] - v_prime
         attn_inter = qg[:, :, i] @ last_recurrent_state
         core_attn_out[:, :, i] = attn_inter + attn[:, :, i] @ v_new
         last_recurrent_state = (
