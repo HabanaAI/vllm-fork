@@ -68,6 +68,7 @@ def torch_chunk_gated_delta_rule(
     value,
     g,
     beta,
+    eye_constant,
     chunk_size=64,
     initial_state=None,
     output_final_state=True,
@@ -113,42 +114,44 @@ def torch_chunk_gated_delta_rule(
 
     # chunk decay
     g = g.cumsum(dim=-1)
+    g_exp = g.exp()
     decay_mask = ((g.unsqueeze(-1) -
                    g.unsqueeze(-2)).tril().exp().float()).tril()
     attn = -((torch.matmul(k_beta.contiguous(),
                            key.transpose(-1, -2).contiguous())) *
              decay_mask).masked_fill(mask, 0)
     for i in range(1, chunk_size):
-        row = attn[..., i, :i].clone()
-        sub = attn[..., :i, :i].clone()
-        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)
-    attn = attn + torch.eye(chunk_size, dtype=attn.dtype, device=attn.device)
+        row = attn[..., i, :i].contiguous()
+        sub = attn[..., :i, :]
+        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)[...,  :i]
+    attn = attn + eye_constant
     value = attn @ v_beta
-    k_cumdecay = attn @ (k_beta * g.exp().unsqueeze(-1))
+    k_cumdecay = attn @ (k_beta * g_exp.unsqueeze(-1))
     last_recurrent_state = (torch.zeros(batch_size, num_heads, k_head_dim,
                                         v_head_dim).to(value) if initial_state
                             is None else initial_state.to(value))
     core_attn_out = torch.zeros_like(value)
-    mask = torch.triu(torch.ones(chunk_size,
+    mask = torch.tril(torch.ones(chunk_size,
                                  chunk_size,
                                  dtype=torch.bool,
                                  device=query.device),
-                      diagonal=1)
+                      diagonal=0)
+    mask = mask.view(1, 1, 1, chunk_size, chunk_size)
+    attn = (query @ key.transpose(-1, -2)) * decay_mask * mask
+    qg = query * g_exp[..., None]
+    delta_g_exp = (g[:, :, :, -1, None] - g).exp()[..., None]
+    k_term = (key * delta_g_exp)
 
     # for each chunk
     for i in range(0, tot_len // chunk_size):
         q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
-        attn = (q_i @ k_i.transpose(-1, -2) *
-                decay_mask[:, :, i]).masked_fill_(mask, 0)
         v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
         v_new = v_i - v_prime
-        attn_inter = (q_i * g[:, :, i, :, None].exp()) @ last_recurrent_state
-        core_attn_out[:, :, i] = attn_inter + attn @ v_new
+        attn_inter = qg[:,:,i] @ last_recurrent_state
+        core_attn_out[:, :, i] = attn_inter + attn[:,:,i] @ v_new
         last_recurrent_state = (
-            last_recurrent_state * g[:, :, i, -1, None, None].exp() +
-            (k_i *
-             (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(
-                 -1, -2) @ v_new)
+            last_recurrent_state * g_exp[:, :, i, -1, None, None] +
+            k_term[:,:,i].transpose(-1, -2) @ v_new)
 
     if not output_final_state:
         last_recurrent_state = None
@@ -456,6 +459,11 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                                      dtype=torch.float32,
                                      device=self.conv1d.weight.device)
 
+        self.chunk_size = 64
+        self.eye_constant = torch.eye(self.chunk_size,
+                                      dtype=torch.float32,
+                                      device=self.conv1d.weight.device)
+
         # time step projection (discretization)
         # instantiate once and copy inv_dt in init_weights of PretrainedModel
         self.dt_bias = nn.Parameter(
@@ -660,6 +668,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     value_non_spec,
                     g=g,
                     beta=beta,
+                    eye_constant=self.eye_constant,
+                    chunk_size=self.chunk_size,
                     initial_state=None,
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
