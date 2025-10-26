@@ -1,0 +1,1 @@
+{"method": "HOOKS","mode": "MEASURE","observer": "maxabs","allowlist": {"types": [], "names":  []},"blocklist": {"types": [], "names":  []},"quantize_weight": false,"dump_stats_path": "/root/vllm-hpu-extension/calibration/inc/meta-llama-3.3-70b-instruct/g3/inc_output"}
