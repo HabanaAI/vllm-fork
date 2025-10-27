@@ -230,17 +230,19 @@ HPU_SIZE=2
      -t $HPU_SIZE
 ```
 
-For Qwen3-235B-A22B, the original bfloat16 weights can not fit into 4 Gaudi2 HPUs. It is recommended to use [Qwen3-235B-A22B-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-FP8) to do the calibration with 8 HPUs and then unify the calibration data for 4 HPUs as follow:
+For Qwen3-235B-A22B, the original bfloat16 weights can not fit into 4 Gaudi2 HPUs. It is recommended to do the calibration with 8 HPUs and then unify the calibration data for 4 HPUs as follow:
 
 ``` bash
 bash calibrate_model.sh \
-     -m /models/Qwen3-235B-A22B-FP8 \
+     -m /models/Qwen3-235B-A22B \
      -d NeelNanda/pile-10k \
      -o quantization \
      -t 8 -r 4 -u
 ```
 
 Then the resault measurement data from the calibration could be used to run fp8 inference with 8 or 4 HPUs.
+> [!TIP]
+> **To run fp8 inference with 4 HPUs using Qwen3-235B-A22B bfloat16 weights**: The weights have to be loaded to host memory first by adding `-e "--weights-load-device cpu"` to the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` or by setting `weights_load_device='cpu'` for the LLM engine.
 
 The `-x <TP_SIZE_WITH_PP>` must set to run the model with pipeline parallelism (PP), with the `TP_SIZE_WITH_PP` means the TP size when PP is enabled. Take GLM-4.5-FP8 with TP=4 and PP=2 as an example:
 
