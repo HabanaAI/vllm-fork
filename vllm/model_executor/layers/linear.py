@@ -1366,6 +1366,9 @@ class RowParallelLinear(LinearBase):
     def forward(
         self, input_
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
+        x_shape = input_.shape
+        if len(x_shape) > 2:
+            input_ = input_.reshape(-1, x_shape[-1])
         input_parallel = self.resolve_input(input_)
 
         # Matrix multiply.
@@ -1380,6 +1383,8 @@ class RowParallelLinear(LinearBase):
             output = tensor_model_parallel_all_reduce(output_parallel)
         else:
             output = output_parallel
+        if len(x_shape) > 2:
+            output = output.reshape(*x_shape[0:-1], -1)
 
         output_bias = self.bias if self.skip_bias_add else None
 
