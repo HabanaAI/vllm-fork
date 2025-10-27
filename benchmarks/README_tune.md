@@ -18,7 +18,10 @@ pip install optuna-dashboard
 The following command is an example of tuning configuration of VLLM_PROMPT_BS_BUCKET_MAX, decode batch size and block size with offline benchmark for Llama-3.1-8B on 1x HPU.
 
 ```bash
-PT_HPU_ENABLE_LAZY_COLLECTIVES=true VLLM_EXPONENTIAL_BUCKETING=false PT_HPU_LAZY_MODE=1 PT_HPU_WEIGHT_SHARING=0 python tune_benchmark_offline.py --prompt-bs-bucket-max-range 2 4 2 --decode-bs-range 100 400 50 --input-len 1024 --output-len 1024 --num-trials 5 --benchmark-throughput-cmd "python benchmark_throughput.py --model meta-llama/Meta-Llama-3.1-8B-Instruct --dataset-name random --num-prompts 800 --tensor_parallel_size 1" --time-out 600 --task-name tune_llama3.1_8b_offline --tune-block-size
+PT_HPU_ENABLE_LAZY_COLLECTIVES=true VLLM_EXPONENTIAL_BUCKETING=false PT_HPU_LAZY_MODE=1 PT_HPU_WEIGHT_SHARING=0 python tune_benchmark_offline.py \
+--prompt-bs-bucket-max-range 2 4 2 --decode-bs-range 100 400 50 --input-len 1024 --output-len 1024 --num-trials 5 \
+--benchmark-throughput-cmd "python benchmark_throughput.py --model meta-llama/Meta-Llama-3.1-8B-Instruct --dataset-name random --num-prompts 800 --tensor_parallel_size 1" \
+--time-out 600 --task-name tune_llama3.1_8b_offline --tune-block-size
 ```
 If successful, we would see the following output:
 
@@ -83,7 +86,7 @@ precision on 4x HPUs with the objective of best throughput and shorter warmup ti
 
 ```bash
 QUANT_CONFIG=/root/software/quant/llama3.3-70b/maxabs_quant_g3.json RUNTIME_SCALE_PATCHING=1 PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
-DISABLE_PROMPT_LOGPROBS=1 VLLM_PROMPT_USE_FUSEDSDPA=1 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1 \
+VLLM_PROMPT_USE_FUSEDSDPA=1 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1 \
 VLLM_EXPONENTIAL_BUCKETING=false  PT_HPU_LAZY_MODE=1 PT_HPU_WEIGHT_SHARING=0 VLLM_PROMPT_SEQ_BUCKET_MAX=132096 \
 VLLM_PROMPT_SEQ_BUCKET_STEP=2048 python tune_benchmark_online.py --prompt-bs-bucket-min-range 1 2 1 \
 --prompt-bs-bucket-step-range 1 2 1 --prompt-bs-bucket-max-range 1 4 1 --prompt-seq-bucket-min-range 49152 98304 2048  \
