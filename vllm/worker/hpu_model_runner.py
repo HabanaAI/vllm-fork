@@ -17,11 +17,6 @@ import time
 from array import array
 from contextlib import suppress
 from enum import Enum, IntEnum
-
-if os.getenv("QUANT_CONFIG", None) is not None:
-    from neural_compressor.torch.quantization import finalize_calibration
-else:
-    finalize_calibration = None
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -3600,9 +3595,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         from neural_compressor.torch.quantization import finalize_calibration
         finalize_calibration(self.model.model)
 
-    def shutdown_inc(self,
-                     suppress=suppress,
-                     finalize_calibration=finalize_calibration):
+    def shutdown_inc(self, suppress=suppress):
         global shutdown_inc_called
         if shutdown_inc_called:
             return
@@ -3614,6 +3607,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 and self.inc_initialized_successfully and
                                 not getattr(self, "_is_inc_finalized", False))
         if can_finalize_inc:
+            from neural_compressor.torch.quantization import (
+                finalize_calibration)
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
 
