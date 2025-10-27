@@ -87,33 +87,17 @@ set_common_env(){
     export HCCL_SOCKET_IFNAME=${HCCL_SOCKET_IFNAME:-"${default_ifname}"}
 }
 
-# set max_num_batched_tokens and max_model_len based on input/output ranges
+# set max_num_batched_tokens based on max_model_len
 set_length(){
-    max_num_batched_tokens=$(( $input_max + $output_max ))
+    max_num_batched_tokens=$max_model_len
     if [ "$max_num_batched_tokens" -lt $PREFERED_BATCHED_TOKENS ]; then
         max_num_batched_tokens=$PREFERED_BATCHED_TOKENS
     fi
     # Ceiling max_num_batched_tokens to a multiple of BLOCK_SIZE
     max_num_batched_tokens=$( ceil $max_num_batched_tokens $BLOCK_SIZE )
 
-    if [ "$max_num_prefill_seqs" == "" ]; then
-        # Ceiling input_min to a multiple of BLOCK_SIZE
-        input_min_ceil=$( ceil $input_min $BLOCK_SIZE )
-        max_num_prefill_seqs=$(( $PREFERED_BATCHED_TOKENS / $input_min_ceil ))
-        max_num_prefill_seqs=$( max $max_num_prefill_seqs 1 )
-    fi
-    if [ "$max_num_prefill_seqs" -gt "$max_num_seqs" ]; then
-        max_num_prefill_seqs=$max_num_seqs
-        echo "Warning: max_num_prefill_seqs is set to max_num_seqs: $max_num_seqs"
-    fi
-
-    max_model_len=$(( $input_max + $output_max ))
     # Ceiling max_model_len to a multiple of BLOCK_SIZE
     max_model_len=$( ceil $max_model_len $BLOCK_SIZE )
-
-    if [ "$input_min" == "$input_max" ]; then
-        disable_zero_padding=true
-    fi
 }
 
 # set up numactl for the selected module IDs
@@ -264,15 +248,12 @@ set_dtype(){
     esac
 }
 
-# set up linear bucketing based on input/output range and max_num_batched_tokens
+# set up linear bucketing based on max_model_len and max_num_batched_tokens
 set_bucketing(){
     export VLLM_EXPONENTIAL_BUCKETING=false
 
     max_num_batched_tokens=${max_num_batched_tokens:-8192}
     max_num_seqs=${max_num_seqs:-128}
-    input_min=${input_min:-1024}
-    input_max=${input_max:-1024}
-    output_max=${output_max:-2048}
     block_size=${BLOCK_SIZE:-128}
 
     prompt_bs_step=1
@@ -284,8 +265,8 @@ set_bucketing(){
     export VLLM_PROMPT_BS_BUCKET_LIMIT=${VLLM_PROMPT_BS_BUCKET_LIMIT:-$max_padding_ratio}
 
     prompt_seq_step=$block_size
-    prompt_seq_min=$( ceil $input_min $prompt_seq_step )
-    prompt_seq_max=$( ceil $input_max $prompt_seq_step )
+    prompt_seq_min=1
+    prompt_seq_max=$( ceil $max_model_len $prompt_seq_step )
     export VLLM_PROMPT_SEQ_BUCKET_MIN=${VLLM_PROMPT_SEQ_BUCKET_MIN:-$prompt_seq_min}
     export VLLM_PROMPT_SEQ_BUCKET_STEP=${VLLM_PROMPT_SEQ_BUCKET_STEP:-$prompt_seq_step}
     export VLLM_PROMPT_SEQ_BUCKET_MAX=${VLLM_PROMPT_SEQ_BUCKET_MAX:-$prompt_seq_max}
@@ -301,9 +282,9 @@ set_bucketing(){
     export VLLM_DECODE_BS_BUCKET_LIMIT=${VLLM_DECODE_BS_BUCKET_LIMIT:-$max_padding_ratio}
 
     decode_block_step=$block_size
-    decode_block_min=$( ceil_div $input_min $block_size )
+    decode_block_min=1
     decode_block_min=$( max $decode_block_min $decode_block_step )
-    max_context_len=$(( $input_max + $output_max ))
+    max_context_len=$max_model_len
     max_context_blocks=$( ceil_div $max_context_len $block_size )
     decode_block_max=$(( $max_context_blocks * $decode_bs_max ))
     decode_block_max=$( ceil $decode_block_max $decode_block_step )
