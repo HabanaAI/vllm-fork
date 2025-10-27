@@ -1132,6 +1132,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_size=self.block_size,
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_model_len=self.max_model_len)
+        # Generate prompt buckets for pooler runner
+        if self.vllm_config.model_config.runner_type == "pooling":
+            self.bucketing_manager.generate_prompt_buckets()
+
         self.graphed_buckets: Set[Any] = set()
         self.multimodal_buckets: List[int] = [
         ]  #TODO: Move to HPUBucketingContext
@@ -2951,6 +2955,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             embed_dim = 1176
             if 'qwen3_vl' in self.get_model().config.model_type:
                 embed_dim = 1536
+            elif 'ernie4_5_moe_vl' in self.get_model().config.model_type:
+                # channels * patch_size * patch_size
+                vision_feat_dim = (getattr(vision_config, "in_chans", 0) * \
+                                   getattr(vision_config, "patch_size", 0) ** 2)
+                if vision_feat_dim > 0:
+                    embed_dim = vision_feat_dim  # 588
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
                 embed_dim)  # TODO: figure out the variable name
@@ -2973,7 +2983,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "num_crops": torch.zeros([img_args], dtype=torch.int32)
             }
 
-        image_token_id = self.get_model().config.image_token_id
+        if 'ernie4_5_moe_vl' in self.get_model().config.model_type:
+            image_token_id = self.get_model().config.im_patch_id
+        else:
+            image_token_id = self.get_model().config.image_token_id
         prompt_token_ids_image = [image_token_id] * num_image_tokens
         prompt_token_ids = [0] * (
             seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image

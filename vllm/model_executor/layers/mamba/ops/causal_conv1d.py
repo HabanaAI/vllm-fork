@@ -97,8 +97,7 @@ def causal_conv1d_update(x: torch.Tensor,
                                          index=conv_state_indices)
     new_conv_state = torch.concat([prev_conv_state, x], dim=1)
 
-    output = (new_conv_state *
-              weight.squeeze(1).transpose(0, 1).unsqueeze(0)).sum(dim=1)
+    output = (new_conv_state * weight.unsqueeze(0)).sum(dim=1)
     if bias is not None:
         output.add_(bias)
     output = F.silu(output).unsqueeze(1)

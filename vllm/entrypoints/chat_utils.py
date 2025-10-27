@@ -513,6 +513,8 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
                 return "<|begin_of_image|><|endoftext|><|end_of_image|>"
             if model_type == "glm4v":
                 return "<|begin_of_image|><|image|><|end_of_image|>"
+            if model_type in {"ernie4_5_moe_vl", "ernie4_5_vl"}:
+                return f"Picture {current_count}:<|IMAGE_START|><|image@placeholder|><|IMAGE_END|>" # noqa: E501
             if model_type in ("phi3_v", "phi4mm"):
                 return f"<|image_{current_count}|>"
             if model_type in ("minicpmo", "minicpmv"):
