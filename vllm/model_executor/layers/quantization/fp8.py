@@ -406,8 +406,8 @@ class Fp8LinearMethod(LinearMethodBase):
 
             # If using w8a8, torch._scaled_mm needs per tensor, so
             # requantize the logical shards as a single weight.
-            if (not self.use_marlin and 
-               self.quant_config.per_quant_way != "per_channel"):
+            if (not self.use_marlin
+                    and self.quant_config.per_quant_way != "per_channel"):
                 # Dequant -> Quant with max scale so we can run per tensor.
                 if current_platform.is_fp8_fnuz():
                     weight, weight_scale, input_scale = \
