@@ -42,7 +42,6 @@ from transformers.models.qwen3_omni_moe.processing_qwen3_omni_moe import (
     Qwen3OmniMoeProcessor)
 from transformers.models.whisper import WhisperFeatureExtractor
 
-from vllm.attention.backends.registry import _Backend
 from vllm.attention.layer import check_upstream_fa_availability
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import VllmConfig
@@ -64,7 +63,7 @@ from vllm.multimodal.parse import AudioProcessorItems, MultiModalDataItems
 from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         PlaceholderFeaturesInfo,
                                         PromptReplacement, PromptUpdate)
-from vllm.platforms import current_platform
+from vllm.platforms import _Backend, current_platform
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import MultiModalEmbeddings, SupportsMultiModal, SupportsPP
@@ -79,8 +78,8 @@ from .qwen2_5_vl import (Qwen2_5_VisionAttention,
                          Qwen2_5_VisionRotaryEmbedding, Qwen2_5_VLImageInputs,
                          Qwen2_5_VLProcessingInfo, Qwen2_5_VLVideoInputs)
 from .qwen3_moe import Qwen3MoeForCausalLM, Qwen3MoeModel
-from .utils import (AutoWeightsLoader, WeightsMapper,
-                    _merge_multimodal_embeddings, maybe_prefix)
+from .utils import (AutoWeightsLoader, WeightsMapper, maybe_prefix,
+                    merge_multimodal_embeddings)
 from .vision import get_vit_attn_backend
 
 try:
@@ -602,7 +601,7 @@ class Qwen3Omni_VisionTransformerStaticShape(Qwen3Omni_VisionTransformer):
 
         pos_embeds = self.fast_pos_embed_interpolate(grid_thw)
         hidden_states = hidden_states + pos_embeds
-        rotary_pos_emb = self.rot_pos_emb(grid_thw)
+        rotary_pos_emb = self.rot_pos_emb(grid_thw).to(device=self.device)
         attention_mask = torch.ones(hidden_states.size(0),
                                     1).to(device=self.device)
 
@@ -830,7 +829,6 @@ class Qwen3OmniMoeThinkerMultiModalProcessor(
         prompt: str,
         mm_data: Mapping[str, object],
         mm_kwargs: Mapping[str, object],
-        tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
         mm_data = dict(mm_data)
         audios = mm_data.pop("audios", [])
@@ -861,17 +859,14 @@ class Qwen3OmniMoeThinkerMultiModalProcessor(
             # TODO(Isotr0py): Remove this patch after upstream fix PR
             # released and Transformers version update:
             # https://github.com/huggingface/transformers/pull/41473
-            if (
-                Version(TRANSFORMERS_VERSION) < Version("4.58.0")
-                and "truncation" not in mm_kwargs
-            ):
+            if (Version(TRANSFORMERS_VERSION) < Version("4.58.0")
+                    and "truncation" not in mm_kwargs):
                 mm_kwargs["truncation"] = False
 
         hf_inputs = super()._call_hf_processor(
             prompt=prompt,
             mm_data=mm_data,
             mm_kwargs=mm_kwargs,
-            tok_kwargs=tok_kwargs,
         )
 
         if ("audio_feature_lengths" in hf_inputs
@@ -885,9 +880,8 @@ class Qwen3OmniMoeThinkerMultiModalProcessor(
                              hop_length == 0 else
                              (audio_length // hop_length - 1))
                 if mm_kwargs.get("truncation", False):
-                    num_frame = min(
-                        num_frame, feature_extractor.n_samples // hop_length
-                    )
+                    num_frame = min(num_frame,
+                                    feature_extractor.n_samples // hop_length)
                 audio_num_frames.append(num_frame)
             hf_inputs["feature_attention_mask"] = [
                 torch.ones(num_frame) for num_frame in audio_num_frames
@@ -935,6 +929,7 @@ class Qwen3OmniMoeThinkerMultiModalProcessor(
                                                      use_audio_in_video)
             (
                 prompt_ids,
+                prompt,
                 mm_placeholders,
             ) = self._apply_prompt_updates(
                 prompt_ids,
@@ -953,16 +948,17 @@ class Qwen3OmniMoeThinkerMultiModalProcessor(
                 mm_item_counts,
             )
         else:
-            prompt_ids, mm_placeholders = self._apply_prompt_updates(
+            prompt_ids, prompt, mm_placeholders = self._apply_prompt_updates(
                 prompt_ids,
                 mm_prompt_updates,
+                mm_item_counts,
             )
             self._validate_mm_placeholders(
                 mm_placeholders,
                 mm_item_counts,
             )
 
-        return prompt_ids, mm_placeholders
+        return prompt_ids, prompt, mm_placeholders
 
     def get_updates_use_audio_in_video(
         self,
@@ -1336,6 +1332,9 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
         self.config.architectures = [
             "Qwen3OmniMoeThinkerForConditionalGeneration"
         ]
+        thinker_config.audio_token_index = thinker_config.audio_token_id
+        thinker_config.image_token_index = thinker_config.image_token_id
+        thinker_config.video_token_index = thinker_config.video_token_id
         self.text_dim = thinker_config.text_config.hidden_size
         self.multimodal_config = multimodal_config
 
@@ -1527,7 +1526,7 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
             deepstack_input_embeds = inputs_embeds.new_zeros(
                 inputs_embeds.size(0), inputs_embeds.shape[1],
                 multiscale_len * inputs_embeds.size(1))
-            deepstack_input_embeds = _merge_multimodal_embeddings(
+            deepstack_input_embeds = merge_multimodal_embeddings(
                 inputs_embeds=deepstack_input_embeds,
                 multimodal_embeddings=multimodal_embeddings_multiscale,
                 is_multimodal=is_vision,
@@ -1535,6 +1534,11 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
             deepstack_input_embeds = (deepstack_input_embeds.view(
                 inputs_embeds.shape[0], inputs_embeds.shape[1], multiscale_len,
                 visual_dim))
+        inputs_embeds = merge_multimodal_embeddings(
+            inputs_embeds=inputs_embeds,
+            multimodal_embeddings=multimodal_embeddings,
+            is_multimodal=is_multimodal,
+        )
         if deepstack_input_embeds is None:
             deepstack_input_embeds = torch.zeros(inputs_embeds.size(0),
                                                  inputs_embeds.size(1),
@@ -1543,12 +1547,6 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
                                                  dtype=inputs_embeds.dtype)
         inputs_embeds = torch.cat([inputs_embeds, deepstack_input_embeds],
                                   dim=2)
-
-        inputs_embeds = _merge_multimodal_embeddings(
-            inputs_embeds=inputs_embeds,
-            multimodal_embeddings=multimodal_embeddings,
-            is_multimodal=is_multimodal,
-        )
 
         return inputs_embeds
 
@@ -1610,13 +1608,13 @@ class Qwen3OmniMoeThinkerForConditionalGeneration(
                 embeddings = torch.cat(embeddings)
                 embeddings, embeddings_multiscale = embeddings.split(
                     [visual_dim, visual_dim * multiscale_len], dim=-1)
-                deepstack_input_embeds = _merge_multimodal_embeddings(
+                deepstack_input_embeds = merge_multimodal_embeddings(
                     input_ids,
                     deepstack_input_embeds,
                     embeddings_multiscale,
                     placeholder_token_id=placeholder_token_id,
                 )
-            inputs_embeds = _merge_multimodal_embeddings(
+            inputs_embeds = merge_multimodal_embeddings(
                 input_ids, inputs_embeds, embeddings, placeholder_token_id)
 
         if use_deepstack and deepstack_input_embeds is not None:
