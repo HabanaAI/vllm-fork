@@ -96,7 +96,17 @@ while getopts hw:t:m:a:d:q:i:p:o:b:g:u:e:l:c:sf flag; do
     u) # gpu-memory-utilization
         gpu_memory_utilization=$OPTARG ;;
     e) # extra vLLM server parameters
-        IFS=" " read -r -a extra_params <<< "$OPTARG" ;;
+        IFS=" " read -r -a extra_params <<< "$OPTARG"
+        for ((i=0; i<${#extra_params[@]}; i++)); do
+            if [[ "${extra_params[$i]}" == "--mm-processor-kwargs" ]]; then
+                found_mm_processor_kwargs=true
+                break
+            fi
+        done
+        if [ "$found_mm_processor_kwargs" != true ]; then
+            extra_params+=("--mm-processor-kwargs" "max_pixels=1003520")
+        fi
+        ;;
     l) # limit of the padding ratio
         max_padding_ratio=$OPTARG
         # make sure max_padding_ratio is a float and in [0.0, 0.5]
@@ -189,7 +199,6 @@ python3 -m vllm.entrypoints.openai.api_server \
     --trust-remote-code \
     --seed 2025 \
     --distributed_executor_backend "${dist_backend}" \
-    --mm_processor_kwargs "max_pixels=1003520" \
     "${extra_params[@]}")
 
 echo "Start a vLLM server for ${model_name} on Gaudi $DEVICE_NAME with command:" |& tee -a "${log_file}"
