@@ -1,0 +1,17 @@
+{
+    "mode": "QUANTIZE",
+    "observer": "maxabs",
+    "scale_method": "maxabs_hw",
+    "allowlist": {
+        "types": [],
+        "names": []
+    },
+    "blocklist": {
+        "types": [],
+        "names": [
+            ".*vision_model.*",
+            ".*multi_modal_projector.*"
+        ]
+    },
+    "dump_stats_path": "vllm-hpu-extension-quant/llama-4-maverick-17b-128e-instruct/g3-final-ep8/inc_output"
+}
