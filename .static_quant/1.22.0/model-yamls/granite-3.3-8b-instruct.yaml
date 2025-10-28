@@ -1,0 +1,182 @@
+iapiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  annotations:
+    opendatahub.io/recommended-accelerators: '["habana.ai/gaudi"]'
+    opendatahub.io/runtime-version: v0.7.2
+    openshift.io/display-name: vLLM Intel Gaudi Accelerator ServingRuntime for KServe
+    opendatahub.io/apiProtocol: REST
+  labels:
+    opendatahub.io/dashboard: "true"
+  name: vllm-gaudi-runtime
+  namespace: default
+spec:
+  annotations:
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8080"
+  builtInAdapter:
+    modelLoadingTimeoutMillis: 300000
+  containers:
+    - command: ["/bin/bash"]
+      args:
+        - "-c"
+        - |
+          set -ex
+          git clone https://github.com/HabanaAI/vllm-fork.git
+          cd vllm-fork
+          git checkout v0.9.0.1+Gaudi-1.22.0
+          pip install -r requirements-hpu.txt
+          pip install -e .
+          vllm serve /mnt/models \
+                --port 8080 \
+                --served-model-name="{{.Name}}" \
+                --max-num-seqs=8 \
+                --max-model-len=131072 \
+                --block-size=128 \
+                --disable-log-requests \
+                --disable-log-stats \
+                --use-padding-aware-scheduling \
+                --gpu-memory-utilization=0.9 \
+                --trust-remote-code \
+                --enable-auto-tool-choice \
+                --tool-call-parser=granite 
+      env:
+        - name: HF_HOME
+          value: /tmp/hf_home
+        - name: VLLM_SKIP_WARMUP
+          value: "False"
+        - name: MAX_SEQUENCE_LENGTH
+          value: "131072"
+        - name: MAX_NUM_SEQS
+          value: "8"
+        - name: VLLM_GRAPH_RESERVED_MEM
+          value: "0.10"
+        - name: VLLM_PROMPT_USE_FUSEDSDPA
+          value: "1"
+        - name: PT_HPUGRAPH_DISABLE_TENSOR_CACHE
+          value: "1"
+        - name: VLLM_ENGINE_ITERATION_TIMEOUT_S
+          value: "3600"
+        - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+          value: "1"
+        - name: MAX_NEW_TOKENS
+          value: "8192"
+        - name: DISABLE_PROMPT_LOGPROBS
+          value: "true"
+        - name: DEFAULT_INCLUDE_STOP_SEQS
+          value: "false"
+        - name: ENFORCE_EAGER
+          value: "false"
+        - name: ENABLE_AUTO_TOOL_CHOICE
+          value: "true"
+        - name: TOOL_CALL_PARSER
+          value: granite3_json
+        - name: VLLM_RPC_TIMEOUT
+          value: "10000000"
+        - name: VLLM_PROMPT_BS_BUCKET_MAX
+          value: "8"
+        - name: VLLM_PROMPT_BS_BUCKET_MIN
+          value: "1"
+        - name: VLLM_PROMPT_BS_BUCKET_STEP
+          value: "1"
+        - name: VLLM_PROMPT_SEQ_BUCKET_MAX
+          value: "131072"
+        - name: VLLM_PROMPT_SEQ_BUCKET_MIN
+          value: "4096"
+        - name: VLLM_PROMPT_SEQ_BUCKET_STEP
+          value: "1024"
+        - name: VLLM_DECODE_BS_BUCKET_MAX
+          value: "8"
+        - name: VLLM_DECODE_BS_BUCKET_MIN
+          value: "1"
+        - name: VLLM_DECODE_BS_BUCKET_STEP
+          value: "1"
+        - name: VLLM_DECODE_BLOCK_BUCKET_MAX
+          value: "448"
+        - name: VLLM_DECODE_BLOCK_BUCKET_MIN
+          value: "256"
+        - name: VLLM_DECODE_BLOCK_BUCKET_STEP
+          value: "128"
+        - name: NUM_GPUS
+          value: "1"
+        - name: VLLM_EXPONENTIAL_BUCKETING
+          value: "true"
+        - name: HUGGINGFACE_HUB_CACHE
+          value: /mnt/models/
+        - name: HF_MODULES_CACHE
+          value: /tmp/huggingface/modules
+        - name: PORT
+          value: "8080"
+        - name: MAX_LOG_LEN
+          value: "100"
+        - name: GPRC_PORT
+          value: "8033"
+        - name: ENABLE_VLLM_LOG_REQUESTS
+          value: "FALSE"
+        - name: VLLM_TARGET_DEVICE
+          value: hpu
+        - name: PT_HPU_LAZY_MODE
+          value: "1"
+        - name: HABANA_VISIBLE_DEVICES
+          value: all
+        - name: OMPI_MCA_btl_vader_single_copy_mechanism
+          value: none
+        - name: PT_HPU_ENABLE_LAZY_COLLECTIVES
+          value: "true"
+        - name: VLLM_DELAYED_SAMPLING
+          value: "true"
+        - name: VLLM_FUSED_BLOCK_SOFTMAX
+          value: "true"
+      #image: quay.io/modh/vllm:rhoai-2.19-gaudi
+      image: vault.habana.ai/gaudi-docker/1.22.1/ubuntu24.04/habanalabs/pytorch-installer-2.7.1:latest
+      name: kserve-container
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      resources:
+        requests:
+          memory: "200Gi"
+          cpu: "32"
+          habana.ai/gaudi: 1
+        limits:
+          memory: "250Gi"
+          cpu: "64"
+          habana.ai/gaudi: 1
+          hugepages-2Mi: 32Gi
+  multiModel: false
+  supportedModelFormats:
+    - autoSelect: true
+      name: vLLM
+
+---
+
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: granite-3-3-8b-instruct
+  namespace: default
+  annotations:
+    serving.kserve.io/deploymentMode: "RawDeployment"
+    opendatahub.io/disable-webhook: "true"
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: vLLM
+      # Option 1: Use PVC model storage
+      storageUri: "pvc://data-pvc/granite-3.3-8b-instruct"
+      # Option 2: Download from Hugging Face
+      # storageUri: "hf://meta-llama/Llama-3.3-8B-Instruct"
+      runtime: vllm-gaudi-runtime
+      resources:
+        requests:
+          memory: "200Gi"
+          cpu: "32"
+          habana.ai/gaudi: 1
+          hugepages-2Mi: 32Gi
+        limits:
+          memory: "250Gi"
+          cpu: "64"
+          habana.ai/gaudi: 1
+          hugepages-2Mi: 32Gi
+
