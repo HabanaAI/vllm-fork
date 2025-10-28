@@ -272,9 +272,8 @@ set_bucketing(){
     export VLLM_PROMPT_SEQ_BUCKET_MAX=${VLLM_PROMPT_SEQ_BUCKET_MAX:-$prompt_seq_max}
     export VLLM_PROMPT_SEQ_BUCKET_LIMIT=${VLLM_PROMPT_SEQ_BUCKET_LIMIT:-$max_padding_ratio}
 
-    decode_bs_step=$( ceil_div $max_num_seqs 16 )
-    decode_bs_step=$( min $decode_bs_step 16 )
     decode_bs_min=1
+    decode_bs_step=2
     decode_bs_max=$( ceil $max_num_seqs $decode_bs_step )
     export VLLM_DECODE_BS_BUCKET_MIN=${VLLM_DECODE_BS_BUCKET_MIN:-$decode_bs_min}
     export VLLM_DECODE_BS_BUCKET_STEP=${VLLM_DECODE_BS_BUCKET_STEP:-$decode_bs_step}
@@ -282,7 +281,7 @@ set_bucketing(){
     export VLLM_DECODE_BS_BUCKET_LIMIT=${VLLM_DECODE_BS_BUCKET_LIMIT:-$max_padding_ratio}
 
     decode_block_min=1
-    decode_block_step=2
+    decode_block_step=$block_size
     decode_block_min=$( max $decode_block_min $decode_block_step )
     max_context_blocks=$( ceil_div $max_model_len $block_size )
     decode_block_max=$(( $max_context_blocks * $decode_bs_max ))
