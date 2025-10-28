@@ -284,7 +284,6 @@ set_bucketing(){
     decode_block_min=1
     decode_block_step=2
     decode_block_min=$( max $decode_block_min $decode_block_step )
-    max_context_len=$max_model_len
     max_context_blocks=$( ceil_div $max_model_len $block_size )
     decode_block_max=$(( $max_context_blocks * $decode_bs_max ))
     decode_block_max=$( ceil $decode_block_max $decode_block_step )
