@@ -4,16 +4,18 @@
 This is used to set up vLLM service on Intel(R) Gaudi(R) accelerator. Please refer to [Hardware and Network Requirements](https://docs.habana.ai/en/latest/Installation_Guide/Platform_Readiness.html#) to check your hardware readiness.
 
 ### Set CPU to Performance Mode
-Please change the CPU setting to be performance optimization mode in BIOS setup and execute the command below in OS to make sure get the best CPU performance.
+Please change the CPU setting to be performance optimization mode, enable CPU P-state and disable CPU C6-state in BIOS setup. Execute the command below in OS to make sure get the best CPU performance.
 
 ```
 sudo echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+sudo sysctl -w vm.nr_hugepages=15000
+sudo echo 0 > /proc/sys/kernel/numa_balancing
 ```
 
 ## Software Requirements
 * The supported OS are in [Supported Configurations and Components](https://docs.habana.ai/en/latest/Support_Matrix/Support_Matrix.html#support-matrix)
-* Refer to [Driver and Software Installation](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html) to install the Intel(R) Gaudi(R) driver and software stack (>= 1.20.1) on each node. Make sure `habanalabs-container-runtime` is installed.
-* Refer to [Firmware Upgrade](https://docs.habana.ai/en/latest/Installation_Guide/Firmware_Upgrade.html) to upgrade the Gaudi(R) firmware to 1.20.1 version on each node.
+* Refer to [Driver and Software Installation](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html) to install the Intel(R) Gaudi(R) driver and software stack (>= 1.21.3) on each node. Make sure `habanalabs-container-runtime` is installed.
+* Refer to [Firmware Upgrade](https://docs.habana.ai/en/latest/Installation_Guide/Firmware_Upgrade.html) to upgrade the Gaudi(R) firmware to 1.20.1 version or newer version on each node.
 * Refer to [Configure Container Runtime](https://docs.habana.ai/en/latest/Installation_Guide/Additional_Installation/Docker_Installation.html#configure-container-runtime) to configure the `habana` container runtime on each node.
 
 ## Install vLLM
@@ -101,14 +103,12 @@ Options:
 -q  Path to the quantization config file, str, default=None
     default=./quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'
     The environment variable 'QUANT_CONFIG' will override this option.
--i  Input range, str, format='input_min,input_max', default='4,1024'
+-x  max-model-len for vllm, int, default=16384
     Make sure the range cover all the possible lengths from the benchmark/client.
 -p  Max number of the prefill sequences, int, default=1
     Used to control the max batch size for prefill to balance the TTFT and throughput.
     The default value of 1 is used to optimize the TTFT.
     Set to '' to optimize the throughput for short prompts.
--o  Output range, str, format='output_min,output_max', default='4,2048'
-    Make sure the range cover all the possible lengths from the benchmark/client.
 -b  max-num-seqs for vLLM, int, default=128
     Used to control the max batch size for decoding phase.
     It is recommended to set this value according to the 'Maximum concurrency'
@@ -134,7 +134,7 @@ Options:
 -h  Help info
 ```
 
-Here is a recommended example to start vLLM service on Qwen2-72B-Instruct model with 4 cards. Intel(R) Gaudi(R) module ID 0,1,2,3 are selected, input length range is 800 ~ 1024, output length range is 400 ~ 512, data type is BF16 and the vLLM service port is 30001.
+Here is a recommended example to start vLLM service on Qwen2-72B-Instruct model with 4 cards. Intel(R) Gaudi(R) module ID 0,1,2,3 are selected, max model length is 32768, data type is BF16 and the vLLM service port is 30001.
 The model weight are the standard models files which can be downloaded from [HuggingFace](https://huggingface.co/) or [ModelScope](https://www.modelscope.cn/)
 
 ``` bash
@@ -144,8 +144,7 @@ bash start_gaudi_vllm_server.sh \
     -m 0,1,2,3 \
     -a 127.0.0.1:30001 \
     -d bfloat16 \
-    -i 800,1024 \
-    -o 400,512 \
+    -x 16384 \
     -b 128
 ```
 
@@ -170,7 +169,7 @@ bash benchmark_serving_range.sh # to benchmark with specified input/output range
 bash benchmark_serving_sharegpt.sh # to benchmark with ShareGPT dataset
 ```
 
-> The input/output ranges passed to `start_gaudi_vllm_server.sh` must cover the following benchmark ranges to get expected performance.
+> The max-model-len passed to `start_gaudi_vllm_server.sh` must cover the following benchmark ranges to get expected performance.
 
 > The parameters in the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` must be modified to match the ones passed to `start_gaudi_vllm_server.sh`.
 
@@ -282,9 +281,8 @@ bash start_gaudi_vllm_server.sh \
     -m 0,1 \
     -a "127.0.0.1:30001" \
     -d fp8 \
-    -i 800,1024 \
-    -o 400,512 \
     -b 128 \
+    -x 16384 \
     -c /vllm_cache/Qwen2.5-32B-Instruct/
 ```
 
@@ -378,9 +376,8 @@ bash start_gaudi_vllm_server.sh \
     -m 0,1,2,3 \
     -a "127.0.0.1:30001" \
     -d bfloat16 \
-    -i 800,1024 \
-    -o 400,512 \
     -b 128 \
+    -x 16384 \
     -c /data/Qwen2-72B-cache
 ```
 
@@ -394,9 +391,8 @@ bash start_gaudi_vllm_server.sh \
     -m 0,1,2,3 \
     -a "127.0.0.1:30001" \
     -d bfloat16 \
-    -i 800,1024 \
-    -o 400,512 \
     -b 128 \
+    -x 16384 \
     -s
 ```
 
@@ -427,7 +423,7 @@ Please follow the [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-h
 
 ## Tuning vLLM on Gaudi
 ### Setup the bucketing
-The `set_bucketing()` from `utils.sh` is used to setup the bucketing parameters according to the input/output range, max_num_batched_tokens and max_num_seqs etc. The settings could also be override by manually set the corresponding ENVs. Please refer to [bucketing mechanism](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#bucketing-mechanism) for more details.
+The `set_bucketing()` from `utils.sh` is used to setup the bucketing parameters according to the max_model_len, max_num_batched_tokens and max_num_seqs etc. The settings could also be override by manually set the corresponding ENVs. Please refer to [bucketing mechanism](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#bucketing-mechanism) for more details.
 
 ### Tuning the device memory usage
 The environment variables `VLLM_GRAPH_RESERVED_MEM`, `VLLM_GRAPH_PROMPT_RATIO` and `VLLM_GPU_MEMORY_UTILIZATION` could be used to tune the detailed usage of device memory, please refer to [HPU Graph capture](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#hpu-graph-capture) for more details.
@@ -462,11 +458,11 @@ The following 4 ENVs are used to control the device profiling:
 > Please use the `-f` flag or `export VLLM_PROFILER_ENABLED=True` to enable the high-level vLLM profile and to choose the preferred steps to profile.
 
 # Releases
-## aice/v1.21.0
+## aice/v1.22.0
 vllm-fork:
-https://github.com/HabanaAI/vllm-fork/tree/aice/v1.21.0
+https://github.com/HabanaAI/vllm-fork/tree/aice/v1.22.0
 vllm-hpu-extension:
-https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.21.0
+https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.22.0
 ## Valided models
 * DeepSeek-R1-Distill-Llama-70B (bf16 and fp8)
 * DeepSeek-R1-Distill-Qwen-32B (bf16 and fp8)
@@ -488,6 +484,7 @@ https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.21.0
 * Qwen2.5-1.5B-Instruct (bf16)
 * QwQ-32B (bf16)
 * Llama4 (bf16 and fp8)
+* GLM-4.5 (bf16 and fp8)
 * multimodal models:
   - Qwen2.5 Omni
   - Qwen2-VL-7B-Instruct
