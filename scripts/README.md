@@ -144,7 +144,7 @@ bash start_gaudi_vllm_server.sh \
     -m 0,1,2,3 \
     -a 127.0.0.1:30001 \
     -d bfloat16 \
-    -x 32768 \
+    -x 16384 \
     -b 128
 ```
 
@@ -282,6 +282,7 @@ bash start_gaudi_vllm_server.sh \
     -a "127.0.0.1:30001" \
     -d fp8 \
     -b 128 \
+    -x 16384 \
     -c /vllm_cache/Qwen2.5-32B-Instruct/
 ```
 
@@ -376,6 +377,7 @@ bash start_gaudi_vllm_server.sh \
     -a "127.0.0.1:30001" \
     -d bfloat16 \
     -b 128 \
+    -x 16384 \
     -c /data/Qwen2-72B-cache
 ```
 
@@ -390,6 +392,7 @@ bash start_gaudi_vllm_server.sh \
     -a "127.0.0.1:30001" \
     -d bfloat16 \
     -b 128 \
+    -x 16384 \
     -s
 ```
 
