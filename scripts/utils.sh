@@ -89,15 +89,15 @@ set_common_env(){
 
 # set max_num_batched_tokens based on max_model_len
 set_length(){
+    # Ceiling max_model_len to a multiple of BLOCK_SIZE
+    max_model_len=$( ceil $max_model_len $BLOCK_SIZE )
+
     max_num_batched_tokens=$max_model_len
     if [ "$max_num_batched_tokens" -lt $PREFERED_BATCHED_TOKENS ]; then
         max_num_batched_tokens=$PREFERED_BATCHED_TOKENS
     fi
     # Ceiling max_num_batched_tokens to a multiple of BLOCK_SIZE
     max_num_batched_tokens=$( ceil $max_num_batched_tokens $BLOCK_SIZE )
-
-    # Ceiling max_model_len to a multiple of BLOCK_SIZE
-    max_model_len=$( ceil $max_model_len $BLOCK_SIZE )
 }
 
 # set up numactl for the selected module IDs
@@ -264,9 +264,9 @@ set_bucketing(){
     export VLLM_PROMPT_BS_BUCKET_MAX=${VLLM_PROMPT_BS_BUCKET_MAX:-$prompt_bs_max}
     export VLLM_PROMPT_BS_BUCKET_LIMIT=${VLLM_PROMPT_BS_BUCKET_LIMIT:-$max_padding_ratio}
 
+    prompt_seq_min=$block_size
     prompt_seq_step=$block_size
-    prompt_seq_min=1
-    prompt_seq_max=$( ceil $max_model_len $prompt_seq_step )
+    prompt_seq_max=$max_model_len
     export VLLM_PROMPT_SEQ_BUCKET_MIN=${VLLM_PROMPT_SEQ_BUCKET_MIN:-$prompt_seq_min}
     export VLLM_PROMPT_SEQ_BUCKET_STEP=${VLLM_PROMPT_SEQ_BUCKET_STEP:-$prompt_seq_step}
     export VLLM_PROMPT_SEQ_BUCKET_MAX=${VLLM_PROMPT_SEQ_BUCKET_MAX:-$prompt_seq_max}
@@ -281,11 +281,11 @@ set_bucketing(){
     export VLLM_DECODE_BS_BUCKET_MAX=${VLLM_DECODE_BS_BUCKET_MAX:-$decode_bs_max}
     export VLLM_DECODE_BS_BUCKET_LIMIT=${VLLM_DECODE_BS_BUCKET_LIMIT:-$max_padding_ratio}
 
-    decode_block_step=$block_size
     decode_block_min=1
+    decode_block_step=2
     decode_block_min=$( max $decode_block_min $decode_block_step )
     max_context_len=$max_model_len
-    max_context_blocks=$( ceil_div $max_context_len $block_size )
+    max_context_blocks=$( ceil_div $max_model_len $block_size )
     decode_block_max=$(( $max_context_blocks * $decode_bs_max ))
     decode_block_max=$( ceil $decode_block_max $decode_block_step )
     export VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN:-$decode_block_min}
