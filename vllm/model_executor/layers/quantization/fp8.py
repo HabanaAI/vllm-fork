@@ -476,7 +476,7 @@ class Fp8LinearMethod(LinearMethodBase):
             )
 
         if current_platform.is_hpu(
-        ) and self.quant_config.activation_scheme == "static":
+        ) and self.quant_config.activation_scheme in ACTIVATION_SCHEMES:
             return hpu_ops.apply_fp8_linear_hpu(
                 input=x,
                 weight=layer.weight,
