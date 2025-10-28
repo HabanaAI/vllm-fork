@@ -1579,7 +1579,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_tokens.append(prompt_tokens)
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
-            input_positions.append(list(range(context_len, seq_len)))
+            if "RobertaEmbeddingModel" in str(type(self.model.model)):
+                padding_idx = getattr(self.model.model.model.embeddings, "padding_idx", 1)
+                tokens_cpu = torch.tensor(prompt_tokens, dtype=torch.long, device="cpu").clone().contiguous()
+                mask = tokens_cpu.ne(padding_idx).to(torch.int32)
+                incremental_indices = (torch.cumsum(mask, dim=0).to(torch.int32) * mask)
+                pos_cpu = incremental_indices.to(torch.int64) + padding_idx
+                if seq_len < pos_cpu.numel():
+                    pos_cpu[seq_len:] = 0
+                pos_hpu = pos_cpu.to("hpu", non_blocking=False)
+                input_positions.append(pos_hpu.tolist())
+            else:
+                input_positions.append(list(range(context_len, seq_len)))
 
             seq_data_mrope_positions: Optional[List[List[int]]] = None
 
