@@ -28,7 +28,10 @@ async def listen_for_disconnect(request: Request) -> None:
     while True:
         message = await request.receive()
         if message["type"] == "http.disconnect":
-            if request.app.state.enable_server_load_tracking:
+            if getattr(request.app.state, "enable_server_load_tracking",
+                       False):
+                if not hasattr(request.app.state, "server_load_metrics"):
+                    request.app.state.server_load_metrics = 0
                 # on timeout/cancellation the BackgroundTask in load_aware_call
                 # cannot decrement the server load metrics.
                 # Must be decremented by with_cancellation instead.
