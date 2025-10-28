@@ -110,6 +110,17 @@ prometheus_multiproc_dir: tempfile.TemporaryDirectory
 # Cannot use __name__ (https://github.com/vllm-project/vllm/pull/4765)
 logger = init_logger('vllm.entrypoints.openai.api_server')
 
+# Deprecation notice
+logger.warning(
+    "Starting from v1.23.0, the vLLM fork will reach end-of-life (EOL) and be "
+    "deprecated in v1.24.0, remaining functional only for legacy use cases "
+    "until then. \nAt the same time, the vllm-gaudi plugin will be "
+    "production-ready in v1.23.0 and will become the default by v1.24.0.\n"
+    "This plugin integrates Intel Gaudi with vLLM for optimized LLM inference "
+    "and is intended for future deployments.\nWe strongly suggest preparing a "
+    "migration path toward the plugin version: https://github.com/vllm-project/vllm-gaudi"
+)
+
 _running_tasks: set[asyncio.Task] = set()
 
 
