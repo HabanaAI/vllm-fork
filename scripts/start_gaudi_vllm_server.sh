@@ -9,7 +9,7 @@ Help() {
     # Display Help
     echo "Start a vLLM server for a huggingface model on Gaudi."
     echo
-    echo "Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:q:i:p:o:b:g:u:e:l:c:sf] [-h]"
+    echo "Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:q:x:p:b:g:u:e:l:c:sf] [-h]"
     echo "Options:"
     echo "-w  Weights of the model, str, could be model id in huggingface or local path."
     echo "    DO NOT change the model name as some of the parameters depend on it."
@@ -24,14 +24,11 @@ Help() {
     echo "-q  Path to the quantization config file, str, default=None"
     echo "    default=$BASH_DIR/quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'"
     echo "    The environment variable 'QUANT_CONFIG' will override this option."
-    echo "-i  Input range, str, format='input_min,input_max', default='4,1024'"
-    echo "    Make sure the range cover all the possible lengths from the benchmark/client."
+    echo "-x  max-model-len for vllm, int, default=16384"
     echo "-p  Max number of the prefill sequences, int, default=${PREFERED_PREFILL_BS}"
     echo "    Used to control the max batch size for prefill to balance the TTFT and throughput."
     echo "    The default value of 1 is used to optimize the TTFT."
     echo "    Set to '' to optimize the throughput for short prompts."
-    echo "-o  Output range, str, format='output_min,output_max', default='4,2048'"
-    echo "    Make sure the range cover all the possible lengths from the benchmark/client."
     echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_DECODING_BS}"
     echo "    Used to control the max batch size for decoding phase."
     echo "    It is recommended to set this value according to the 'Maximum concurrency'"
@@ -59,7 +56,7 @@ Help() {
 }
 
 # Get the options
-while getopts hw:t:m:a:d:q:i:p:o:b:g:u:e:l:c:sf flag; do
+while getopts hw:t:m:a:d:q:x:p:b:g:u:e:l:c:sf flag; do
     case $flag in
     h) # display Help
         Help
@@ -79,16 +76,10 @@ while getopts hw:t:m:a:d:q:i:p:o:b:g:u:e:l:c:sf flag; do
         dtype=$OPTARG ;;
     q) # get quantization config
         quant_config=$OPTARG ;;
-    i) # input range
-        input_min=${OPTARG%%,*}
-        input_max=${OPTARG##*,}
-        ;;
+    x) # max model length
+        max_model_len=$OPTARG ;;
     p) # max number of prefill sequences
         max_num_prefill_seqs=$OPTARG ;;
-    o) # output range
-        output_min=${OPTARG%%,*}
-        output_max=${OPTARG##*,}
-        ;;
     b) # batch size
         max_num_seqs=$OPTARG ;;
     g) # max-seq-len-to-capture
@@ -136,11 +127,8 @@ host=${host:-"127.0.0.1"}
 port=${port:-"30001"}
 dtype=${dtype:-"bfloat16"}
 quant_config=${quant_config:-""}
-input_min=${input_min:-"4"}
-input_max=${input_max:-"1024"}
+max_model_len=${max_model_len:-"16384"}
 max_num_prefill_seqs=${max_num_prefill_seqs-${PREFERED_PREFILL_BS}}
-output_min=${output_min:-"4"}
-output_max=${output_max:-"2048"}
 max_num_seqs=${max_num_seqs:-$PREFERED_DECODING_BS}
 max_seq_len_to_capture=${max_seq_len_to_capture:-$PREFERED_SEQ_LEN_TO_CAPTURE}
 gpu_memory_utilization=${gpu_memory_utilization:-"0.9"}
@@ -161,11 +149,10 @@ fi
 echo "Starting vllm server for ${model_name} from ${weights_path} with:"
 echo "    device: ${num_hpu} HPUs with module_ids=${module_ids}"
 echo "    URL: ${host}:${port}"
-echo "    input_range: [${input_min}, ${input_max}]"
-echo "    output_range: [${output_min}, ${output_max}]"
 echo "    max_num_seqs: ${max_num_seqs}"
+echo "    max_model_len: ${max_model_len}"
 
-case_name=serve_${model_name}_${dtype}_${DEVICE_NAME}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)
+case_name=serve_${model_name}_${dtype}_${DEVICE_NAME}_len${max_model_len}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)
 log_file="${case_name}.log"
 
 set_config
