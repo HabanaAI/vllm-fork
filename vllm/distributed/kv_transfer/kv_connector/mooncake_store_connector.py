@@ -247,7 +247,8 @@ class MooncakeStoreConnector(KVConnectorBase):
         assert len(input_tokens_list) == len(kv_caches_send_list)
         assert len(input_tokens_list) == len(hidden_states_list)
         for idx, input_tokens in enumerate(input_tokens_list):
-            store_key_prefix = self.tensor_hash(input_tokens)
+            store_key_prefix = self.hash_list(input_tokens) if isinstance(
+                input_tokens, list) else self.tensor_hash(input_tokens)
             store_kvcache_key = f"{store_key_prefix}_{self.rank % self.tp_size}"
             store_hidden_key = f"{store_key_prefix}_hidden_{self.rank % self.tp_size}"
 
@@ -509,5 +510,13 @@ class MooncakeStoreConnector(KVConnectorBase):
         """Calculate the hash value of the tensor."""
         tensor_bytes = tensor.clone().detach().cpu().numpy().tobytes()
         hash_object = hashlib.blake2b(tensor_bytes)
+        hash_hex = hash_object.hexdigest()
+        return int(hash_hex[:16], 16)
+
+    @staticmethod
+    def hash_list(input):
+        import numpy as np
+        input_bytes = np.array(input).tobytes()
+        hash_object = hashlib.blake2b(input_bytes)
         hash_hex = hash_object.hexdigest()
         return int(hash_hex[:16], 16)

@@ -439,19 +439,40 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
                 k_cache = self.latent_cache_k_nodeq(latent_vec_k, kv_cache[0],
                                                     block_indices,
                                                     block_offsets)
-            v_cache = None
+        else:
+            k_cache = None
 
         if is_prefill:
-            return self._forward_prefill(q, k_c_normed, k_pe, attn_metadata,
-                                         batch_size)
+            return self._forward_prefill(q, latent_vec_k, k_cache,
+                                         attn_metadata, batch_size)
         else:
-            return self._forward_decode(q_nope, q_pe, (k_cache, v_cache), attn_metadata,
+            return self._forward_decode(q_nope, q_pe, k_cache, attn_metadata,
                                         batch_size)
 
-    def _forward_prefill(self, q: torch.Tensor, k_c_normed: torch.Tensor,
-                         k_pe: torch.Tensor,
+    def _forward_prefill(self, q: torch.Tensor, latent_vec_k: torch.Tensor,
+                         k_cache: torch.Tensor,
                          attn_metadata: HPUAttentionMetadata,
                          batch_size: int) -> torch.Tensor:
+        latent_vec_k = latent_vec_k.view(batch_size, -1,
+                                         latent_vec_k.shape[-1])
+        # get prefix cache
+        if attn_metadata.block_list is not None:
+            # Cannot use fetch_from_cache for chunked prefill for
+            # avoiding contiguous_pa path. If the flag is correct for
+            # chunked prefill or prefix cache, we can use it
+            # past = self.latent_cache_k.fetch_from_cache(
+            #     k_cache, attn_metadata.block_list)
+            past = k_cache.index_select(0, attn_metadata.block_list)
+            # past is in the shape of (num_blocks, block_size, head_size)
+            # reshape to (batch_size, seq_len, head_size)
+            past = past.reshape(batch_size, -1, past.shape[-1])
+            latent_vec_k = torch.concat((past, latent_vec_k), dim=1)
+
+        # get k_c_normed and k_pe back for past and current
+        k_c_normed, k_pe = latent_vec_k.split(
+            [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+        k_pe = k_pe.view(-1, 1, self.qk_rope_head_dim)
+
         kv_nope = self.kv_b_proj(k_c_normed)[0]\
             .view(-1, self.num_heads, self.qk_nope_head_dim + self.v_head_dim)
         k_nope, v = kv_nope\
@@ -488,14 +509,14 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         return self.o_proj(attn_output)[0]
 
     def _forward_decode(self, q_nope: torch.Tensor, q_pe: torch.Tensor,
-                        kv_cache: torch.Tensor,
+                        k_cache: torch.Tensor,
                         attn_metadata: HPUAttentionMetadata,
                         batch_size: int) -> torch.Tensor:
         q = torch.cat([q_nope, q_pe], dim=-1)
 
         output = flat_pa_mla(
             query=q,
-            key_cache=kv_cache[0],
+            key_cache=k_cache,
             value_cache=None,
             block_list=attn_metadata.block_list,
             block_mapping=attn_metadata.block_mapping,
