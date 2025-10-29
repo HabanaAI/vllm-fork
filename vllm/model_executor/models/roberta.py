@@ -124,19 +124,6 @@ class RobertaEmbedding(CustomOp):
                 pos_list.append(position_ids[offset])
                 token_list.append(input_ids[offset])
 
-            for index, (positions, tokens, seq_len) in enumerate(
-                    zip(pos_list, token_list, seq_lens)):
-                # Verify assumption that incoming position are
-                # always a sequence from 0 to N.
-                expected_pos = torch.arange(positions.size()[0],
-                                            dtype=torch.long,
-                                            device=inputs_embeds.device)
-                valid_input_mask = expected_pos < seq_len
-                expected_pos = expected_pos * valid_input_mask
-                assert torch.equal(positions, expected_pos)
-                position_ids[index] = create_position_ids_from_input_ids_hpu(
-                    tokens, self.padding_idx, seq_len)
-
         # Position embeddings.
         position_embeddings = self.position_embeddings(position_ids)
         if token_type_ids is None:
@@ -206,37 +193,6 @@ class RobertaEmbedding(CustomOp):
     ) -> torch.Tensor:
         return self.forward_native(input_ids, seq_lens, position_ids,
                                    token_type_ids)
-
-
-# Adapted from transformers
-def create_position_ids_from_input_ids_hpu(input_ids,
-                                           padding_idx,
-                                           seq_len,
-                                           past_key_values_length=0):
-    """
-    Replace non-padding symbols with their position numbers.
-    Position numbers begin at padding_idx+1. Padding symbols
-    are ignored. This is modified from fairseq's `utils.make_positions`.
-
-    Args:
-        x: torch.Tensor x:
-
-    Returns: torch.Tensor
-    """
-    # The series of casts and type-conversions here are carefully
-    # balanced to both work with ONNX export and XLA.
-    valid_input_mask = torch.arange(input_ids.size()[0],
-                                    dtype=torch.int,
-                                    device=input_ids.device)
-    valid_input_mask = valid_input_mask < seq_len
-
-    mask = input_ids.ne(padding_idx).int()
-
-    incremental_indices = (torch.cumsum(mask, dim=0).type_as(mask) +
-                           past_key_values_length) * mask
-
-    return (incremental_indices.long() + padding_idx) * valid_input_mask
-
 
 # Adapted from transformers
 class RobertaClassificationHead(nn.Module):
