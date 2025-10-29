@@ -244,8 +244,8 @@ def _uses_mrope(config: PretrainedConfig) -> bool:
 
 def uses_mrope(config: PretrainedConfig) -> bool:
     """Detect if the model with this config uses M-ROPE."""
-    return (_uses_mrope(config) or _uses_mrope(config.get_text_config())
-            or thinker_uses_mrope(config))
+    return config is not None and (_uses_mrope(config) or _uses_mrope(
+        config.get_text_config()) or thinker_uses_mrope(config))
 
 
 def is_thinker(config: PretrainedConfig) -> bool:
