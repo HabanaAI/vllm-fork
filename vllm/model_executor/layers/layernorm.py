@@ -8,6 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import vllm.envs as envs
+from vllm.distributed.communication_op import tensor_model_parallel_all_reduce
+from vllm.distributed.parallel_state import (
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+)
 from vllm.model_executor.custom_op import CustomOp
 from vllm.platforms import current_platform
 
@@ -358,3 +363,51 @@ class RMSNormGated(nn.Module):
         hidden_states = hidden_states * F.silu(gate.to(torch.float32))
 
         return hidden_states.to(input_dtype)
+
+
+class MiniMaxText01RMSNormTP(CustomOp):
+    name = "MiniMaxText01RMSNormTP"
+
+    def __init__(self, hidden_size: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.tp_world = get_tensor_model_parallel_world_size()
+        self.tp_rank = get_tensor_model_parallel_rank()
+        self.weight = nn.Parameter(torch.ones(int(hidden_size / self.tp_world)))
+
+        self.weight.weight_loader = self.weight_loader
+        self.variance_epsilon = eps
+        return
+
+    @staticmethod
+    def weight_loader(
+        param: nn.Parameter,
+        loaded_weight: torch.Tensor,
+    ) -> None:
+        tp_world = get_tensor_model_parallel_world_size()
+        tp_rank = get_tensor_model_parallel_rank()
+
+        shard_size = loaded_weight.shape[0] // tp_world
+        shard = slice(tp_rank * shard_size, (tp_rank + 1) * shard_size)
+        param.data.copy_(loaded_weight[shard])
+        return
+
+    def _forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        orig_dtype = x.dtype
+        x = x.to(torch.float32)
+        variance = x.pow(2).mean(dim=-1, keepdim=True, dtype=torch.float32)
+        if self.tp_world > 1:
+            variance = tensor_model_parallel_all_reduce(variance) / self.tp_world
+        x = x * torch.rsqrt(variance + self.variance_epsilon)
+        x = (x * self.weight).to(orig_dtype)
+        return x
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        residual: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        assert residual is None, "RMSNorm does not support residual connection."
+        return self._forward(x)

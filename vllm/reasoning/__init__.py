@@ -6,6 +6,7 @@ from .deepseek_r1_reasoning_parser import DeepSeekR1ReasoningParser
 from .glm4_moe_reasoning_parser import Glm4MoeModelReasoningParser
 from .granite_reasoning_parser import GraniteReasoningParser
 from .hunyuan_a13b_reasoning_parser import HunyuanA13BReasoningParser
+from .minimax_m2_reasoning_parser import MiniMaxM2ReasoningParser
 from .qwen3_reasoning_parser import Qwen3ReasoningParser
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "HunyuanA13BReasoningParser",
     "Qwen3ReasoningParser",
     "Glm4MoeModelReasoningParser",
+    "MiniMaxM2ReasoningParser",
 ]
