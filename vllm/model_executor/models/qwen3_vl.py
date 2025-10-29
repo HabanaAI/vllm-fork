@@ -1136,7 +1136,6 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "model"):
         super().__init__()
         config: Qwen3VLConfig = vllm_config.model_config.hf_config
-        quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
 
         self.config = config
@@ -1151,7 +1150,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         self.visual = qwen3_visionTransformer(
             config.vision_config,
             norm_eps=getattr(config, "rms_norm_eps", 1e-6),
-            quant_config=self._maybe_ignore_quant_config(quant_config),
+            quant_config=None,
             prefix=maybe_prefix(prefix, "visual"),
         )
 
