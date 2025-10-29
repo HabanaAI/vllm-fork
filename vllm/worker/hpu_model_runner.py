@@ -912,8 +912,8 @@ def FindMambaIndexForDecode(
     seq_list: List[int],
 ):
     diff = list(set(mamba_dict.keys()) - set(seq_list))
-    for idx in range(len(diff)):
-        mamba_dict.pop(diff[idx])
+    for idx in diff:
+        mamba_dict.pop(idx)
     return list(mamba_dict.values())
 
 
@@ -1695,7 +1695,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             if self._is_fla_model():
                 mamba_cache_bs = self.max_num_seqs + \
-                    max(8, self.max_num_seqs) + 1
+                    max(8, self.max_num_seqs) + self.max_num_prefill_seqs
                 mamba_prefill_index = FindMambaIndexForPrefill(
                     self.mamba_cache_table, seq_id, mamba_cache_bs)
                 mamba_prefill_indices.append(mamba_prefill_index)
