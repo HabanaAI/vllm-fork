@@ -1,6 +1,6 @@
 # Tool Calling
 
-vLLM currently supports named function calling, as well as the `auto` and `none` options for the `tool_choice` field in the chat completion API. The `tool_choice` option `required` is **not yet supported** but [on the roadmap](gh-issue:13002).
+vLLM currently supports named function calling, as well as the `auto`, `required` (as of `vllm>=0.8.3`) and `none` options for the `tool_choice` field in the chat completion API.
 
 ## Quickstart
 
@@ -90,6 +90,12 @@ For best results, we recommend ensuring that the expected output format / schema
 
 To use a named function, you need to define the functions in the `tools` parameter of the chat completion request, and
 specify the `name` of one of the tools in the `tool_choice` parameter of the chat completion request.
+
+## Required Function Calling
+
+vLLM supports the `tool_choice='required'` option in the chat completion API. Similar to the named function calling, it also uses guided decoding, so this is enabled by default and will work with any supported model. The required guided decoding features (JSON schema with `anyOf`) are currently only supported in the V0 engine with the guided decoding backend `outlines`. However, support for alternative decoding backends are on the [roadmap](https://docs.vllm.ai/en/latest/getting_started/v1_user_guide.html#feature-model) for the V1 engine.
+
+When tool_choice='required' is set, the model is guaranteed to generate one or more tool calls based on the specified tool list in the `tools` parameter. The number of tool calls depends on the user's query. The output format strictly follows the schema defined in the `tools` parameter.
 
 ## Automatic Function Calling
 
@@ -208,6 +214,31 @@ AI21's Jamba-1.5 models are supported.
 * `ai21labs/AI21-Jamba-1.5-Large`
 
 Flags: `--tool-call-parser jamba`
+
+### DeepSeek-V3 Models (`deepseek_v3`)
+
+Supported models:
+
+* `deepseek-ai/DeepSeek-V3-0324` (use with <gh-file:examples/tool_chat_template_deepseekv3.jinja>)
+* `deepseek-ai/DeepSeek-R1-0528` (use with <gh-file:examples/tool_chat_template_deepseekr1.jinja>)
+
+Flags: `--tool-call-parser deepseek_v3 --chat-template {see_above}`
+
+### DeepSeek-V3.1 Models (`deepseek_v31`)
+
+Supported models:
+
+* `deepseek-ai/DeepSeek-V3.1` (use with <gh-file:examples/tool_chat_template_deepseekv31.jinja>)
+
+Flags: `--tool-call-parser deepseek_v31 --chat-template {see_above}`
+
+### Kimi-K2 Models (`kimi_k2`)
+
+Supported models:
+
+* `moonshotai/Kimi-K2-Instruct`
+
+Flags: `--tool-call-parser kimi_k2`
 
 ### Models with Pythonic Tool Calls (`pythonic`)
 
