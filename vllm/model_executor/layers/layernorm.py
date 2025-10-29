@@ -10,9 +10,7 @@ import torch.nn.functional as F
 import vllm.envs as envs
 from vllm.distributed.communication_op import tensor_model_parallel_all_reduce
 from vllm.distributed.parallel_state import (
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size,
-)
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from vllm.model_executor.custom_op import CustomOp
 from vllm.platforms import current_platform
 
@@ -372,7 +370,8 @@ class MiniMaxText01RMSNormTP(CustomOp):
         super().__init__()
         self.tp_world = get_tensor_model_parallel_world_size()
         self.tp_rank = get_tensor_model_parallel_rank()
-        self.weight = nn.Parameter(torch.ones(int(hidden_size / self.tp_world)))
+        self.weight = nn.Parameter(torch.ones(int(hidden_size /
+                                                  self.tp_world)))
 
         self.weight.weight_loader = self.weight_loader
         self.variance_epsilon = eps
@@ -399,7 +398,8 @@ class MiniMaxText01RMSNormTP(CustomOp):
         x = x.to(torch.float32)
         variance = x.pow(2).mean(dim=-1, keepdim=True, dtype=torch.float32)
         if self.tp_world > 1:
-            variance = tensor_model_parallel_all_reduce(variance) / self.tp_world
+            variance = tensor_model_parallel_all_reduce(
+                variance) / self.tp_world
         x = x * torch.rsqrt(variance + self.variance_epsilon)
         x = (x * self.weight).to(orig_dtype)
         return x

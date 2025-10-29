@@ -11,44 +11,16 @@ from typing import Annotated, Any, ClassVar, Literal, Optional, Union
 import regex as re
 import torch
 from fastapi import HTTPException, UploadFile
-from openai.types.responses import (
-    ResponseCodeInterpreterCallCodeDeltaEvent,
-    ResponseCodeInterpreterCallCodeDoneEvent,
-    ResponseCodeInterpreterCallCompletedEvent,
-    ResponseCodeInterpreterCallInProgressEvent,
-    ResponseCodeInterpreterCallInterpretingEvent,
-    ResponseContentPartAddedEvent,
-    ResponseContentPartDoneEvent,
-    ResponseFunctionToolCall,
-    ResponseInputItemParam,
-    ResponseOutputItem,
-    ResponseOutputItemAddedEvent,
-    ResponseOutputItemDoneEvent,
-    ResponsePrompt,
-    ResponseReasoningItem,
-    ResponseReasoningTextDeltaEvent,
-    ResponseReasoningTextDoneEvent,
-    ResponseStatus,
-    ResponseWebSearchCallCompletedEvent,
-    ResponseWebSearchCallInProgressEvent,
-    ResponseWebSearchCallSearchingEvent,
-)
-from openai.types.responses import (
-    ResponseCompletedEvent as OpenAIResponseCompletedEvent,
-)
-from openai.types.responses import ResponseCreatedEvent as OpenAIResponseCreatedEvent
-from openai.types.responses import (
-    ResponseInProgressEvent as OpenAIResponseInProgressEvent,
-)
-from openai.types.responses.response_reasoning_item import (
-    Content as ResponseReasoningTextContent,
-)
-from openai_harmony import Message as OpenAIHarmonyMessage
-from openai.types.responses.response import IncompleteDetails, ToolChoice
+from openai.types.responses import (ResponseFunctionToolCall,
+                                    ResponseInputItemParam, ResponsePrompt,
+                                    ResponseReasoningItem)
+from openai.types.responses.response import ToolChoice
 from openai.types.responses.tool import Tool
 from openai.types.shared import Metadata, Reasoning
+from openai_harmony import Message as OpenAIHarmonyMessage
 from pydantic import (BaseModel, ConfigDict, Field, TypeAdapter,
-                      ValidationInfo, field_validator, model_validator)
+                      ValidationError, ValidationInfo, field_validator,
+                      model_validator)
 from typing_extensions import TypeAlias
 
 from vllm import envs
@@ -56,20 +28,17 @@ from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
                                          random_tool_call_id)
 from vllm.logger import init_logger
 from vllm.pooling_params import PoolingParams
-from vllm.sampling_params import (
-    BeamSearchParams,
-    GuidedDecodingParams,
-    RequestOutputKind,
-    SamplingParams,
-    StructuredOutputsParams,
-)
+from vllm.sampling_params import (BeamSearchParams, GuidedDecodingParams,
+                                  RequestOutputKind, SamplingParams,
+                                  StructuredOutputsParams)
 from vllm.sequence import Logprob
 from vllm.utils import random_uuid, resolve_obj_by_qualname
 
 try:  # For older openai versions (< 1.100.0)
     from openai.types.responses import ResponseTextConfig
 except ImportError:  # For newer openai versions (>= 1.100.0)
-    from openai.types.responses import ResponseFormatTextConfig as ResponseTextConfig
+    from openai.types.responses import (
+        ResponseFormatTextConfig as ResponseTextConfig)
 
 logger = init_logger(__name__)
 
@@ -274,28 +243,26 @@ def get_logits_processors(processors: Optional[LogitsProcessors],
     return None
 
 
-ResponseInputOutputItem: TypeAlias = (
-    ResponseInputItemParam | ResponseReasoningItem | ResponseFunctionToolCall
-)
+ResponseInputOutputItem: TypeAlias = (ResponseInputItemParam
+                                      | ResponseReasoningItem
+                                      | ResponseFunctionToolCall)
 
 
 class ResponsesRequest(OpenAIBaseModel):
     # Ordered by official OpenAI API documentation
     # https://platform.openai.com/docs/api-reference/responses/create
     background: bool | None = False
-    include: (
-        list[
-            Literal[
-                "code_interpreter_call.outputs",
-                "computer_call_output.output.image_url",
-                "file_search_call.results",
-                "message.input_image.image_url",
-                "message.output_text.logprobs",
-                "reasoning.encrypted_content",
-            ],
-        ]
-        | None
-    ) = None
+    include: (list[
+        Literal[
+            "code_interpreter_call.outputs",
+            "computer_call_output.output.image_url",
+            "file_search_call.results",
+            "message.input_image.image_url",
+            "message.output_text.logprobs",
+            "reasoning.encrypted_content",
+        ],
+    ]
+              | None) = None
     input: str | list[ResponseInputOutputItem]
     instructions: str | None = None
     max_output_tokens: int | None = None
@@ -306,7 +273,8 @@ class ResponsesRequest(OpenAIBaseModel):
     previous_response_id: str | None = None
     prompt: ResponsePrompt | None = None
     reasoning: Reasoning | None = None
-    service_tier: Literal["auto", "default", "flex", "scale", "priority"] = "auto"
+    service_tier: Literal["auto", "default", "flex", "scale",
+                          "priority"] = "auto"
     store: bool | None = True
     stream: bool | None = False
     temperature: float | None = None
@@ -324,8 +292,7 @@ class ResponsesRequest(OpenAIBaseModel):
         description=(
             "The request_id related to this request. If the caller does "
             "not set it, a random_uuid will be generated. This id is used "
-            "through out the inference process and return in response."
-        ),
+            "through out the inference process and return in response."),
     )
     mm_processor_kwargs: dict[str, Any] | None = Field(
         default=None,
@@ -336,8 +303,7 @@ class ResponsesRequest(OpenAIBaseModel):
         description=(
             "The priority of the request (lower means earlier handling; "
             "default: 0). Any priority other than 0 will raise an error "
-            "if the served model does not use priority scheduling."
-        ),
+            "if the served model does not use priority scheduling."),
     )
     cache_salt: str | None = Field(
         default=None,
@@ -347,8 +313,7 @@ class ResponsesRequest(OpenAIBaseModel):
             "environments. The salt should be random, protected from "
             "access by 3rd parties, and long enough to be "
             "unpredictable (e.g., 43 characters base64-encoded, corresponding "
-            "to 256 bit). Not supported by vLLM engine V0."
-        ),
+            "to 256 bit). Not supported by vLLM engine V0."),
     )
 
     enable_response_messages: bool = Field(
@@ -356,8 +321,7 @@ class ResponsesRequest(OpenAIBaseModel):
         description=(
             "Dictates whether or not to return messages as part of the "
             "response object. Currently only supported for"
-            "non-background and gpt-oss only. "
-        ),
+            "non-background and gpt-oss only. "),
     )
     # similar to input_messages / output_messages in ResponsesResponse
     # we take in previous_input_messages (ie in harmony format)
@@ -384,12 +348,10 @@ class ResponsesRequest(OpenAIBaseModel):
         default_sampling_params = default_sampling_params or {}
         if (temperature := self.temperature) is None:
             temperature = default_sampling_params.get(
-                "temperature", self._DEFAULT_SAMPLING_PARAMS["temperature"]
-            )
+                "temperature", self._DEFAULT_SAMPLING_PARAMS["temperature"])
         if (top_p := self.top_p) is None:
             top_p = default_sampling_params.get(
-                "top_p", self._DEFAULT_SAMPLING_PARAMS["top_p"]
-            )
+                "top_p", self._DEFAULT_SAMPLING_PARAMS["top_p"])
         stop_token_ids = default_sampling_params.get("stop_token_ids")
 
         # Structured output
@@ -398,11 +360,9 @@ class ResponsesRequest(OpenAIBaseModel):
             response_format = self.text.format
             if (
                 response_format.type == "json_schema"
-                and response_format.schema_ is not None
-            ):
+                and response_format.schema_ is not None):
                 structured_outputs = StructuredOutputsParams(
-                    json=response_format.schema_
-                )
+                    json=response_format.schema_)
             elif response_format.type == "json_object":
                 raise NotImplementedError("json_object is not supported")
 
@@ -411,11 +371,11 @@ class ResponsesRequest(OpenAIBaseModel):
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
-            logprobs=self.top_logprobs if self.is_include_output_logprobs() else None,
+            logprobs=self.top_logprobs
+            if self.is_include_output_logprobs() else None,
             stop_token_ids=stop_token_ids,
-            output_kind=(
-                RequestOutputKind.DELTA if self.stream else RequestOutputKind.FINAL_ONLY
-            ),
+            output_kind=(RequestOutputKind.DELTA
+                         if self.stream else RequestOutputKind.FINAL_ONLY),
             structured_outputs=structured_outputs,
         )
 
@@ -423,17 +383,16 @@ class ResponsesRequest(OpenAIBaseModel):
         """Check if the request includes output logprobs."""
         if self.include is None:
             return False
-        return (
-            isinstance(self.include, list)
-            and "message.output_text.logprobs" in self.include
-        )
+        return (isinstance(self.include, list)
+                and "message.output_text.logprobs" in self.include)
 
     @model_validator(mode="before")
     def validate_background(cls, data):
         if not data.get("background"):
             return data
         if not data.get("store", True):
-            raise ValueError("background can only be used when `store` is true")
+            raise ValueError(
+                "background can only be used when `store` is true")
         return data
 
     @model_validator(mode="before")
@@ -448,9 +407,9 @@ class ResponsesRequest(OpenAIBaseModel):
             if not envs.VLLM_USE_V1:
                 raise ValueError(
                     "Parameter 'cache_salt' is not supported with "
-                    "this instance of vLLM, which uses engine V0."
-                )
-            if not isinstance(data["cache_salt"], str) or not data["cache_salt"]:
+                    "this instance of vLLM, which uses engine V0.")
+            if not isinstance(data["cache_salt"],
+                              str) or not data["cache_salt"]:
                 raise ValueError(
                     "Parameter 'cache_salt' must be a non-empty string if provided."
                 )
@@ -489,8 +448,7 @@ class ResponsesRequest(OpenAIBaseModel):
                     # Let Pydantic handle validation for malformed function calls
                     logger.debug(
                         "Failed to parse function_call to ResponseFunctionToolCall, "
-                        "leaving for Pydantic validation"
-                    )
+                        "leaving for Pydantic validation")
                     processed_input.append(item)
             else:
                 processed_input.append(item)
