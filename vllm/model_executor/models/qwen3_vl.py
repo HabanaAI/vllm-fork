@@ -643,7 +643,7 @@ class Qwen3_VisionTransformerStaticShape(Qwen3_VisionTransformer):
                 htcore.mark_step()
 
                 post_embed_size = curr_img_size // self.spatial_merge_unit
-                results += [hidden_states[:post_embed_size, :]]
+                results += [hidden_states[:post_embed_size, :].clone()]
 
         results_cat = torch.concat(results)
         image_embeds = results_cat
