@@ -158,18 +158,12 @@ if [ "$quant_config" != "" ] || [ "$QUANT_CONFIG" != "" ]; then
 fi
 
 if [ "$json_path" != "" ]; then
-    input_min=4
-    input_max=1024
-    output_min=4
-    output_max=2048
+    max_model_len=4096
     IO_FLAGS=(--dataset-name "sharegpt" --dataset-path "$json_path")
     echo "Benchmarking throughput for ${model_name} from ${weights_path} using ${num_prompts} random prompts from ${json_path} with max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
     case_name="benchmark_throughput_${model_name}_${dtype}_${DEVICE_NAME}_sharegpt_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)"
 elif [ "$range_ratio" == "0.0" ]; then
-    input_min=$input_len
-    input_max=$input_len
-    output_min=$output_len
-    output_max=$output_len
+    max_model_len=$(( $input_len + $output_len))
     disable_zero_padding=true
     IO_FLAGS=(--input-len "$input_len" --output-len "$output_len")
     echo "Benchmarking throughput for ${model_name} from ${weights_path} using ${num_prompts} fixed-length prompts with input_len=${input_len}, output_len=${output_len}, max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
@@ -179,6 +173,7 @@ else
     input_max=$(bc <<< "($input_len * ( 1 + $range_ratio) + 0.5) / 1")
     output_min=$(bc <<< "($output_len * ( 1 - $range_ratio) + 0.5) / 1")
     output_max=$(bc <<< "($output_len * ( 1 + $range_ratio) + 0.5) / 1")
+    max_model_len=$(( ($input_max + $output_max) ))
     IO_FLAGS=(--dataset-name "random" --input-len "$input_len" --output-len "$output_len" --random-range-ratio "$range_ratio")
     echo "Benchmarking throughput for ${model_name} from ${weights_path} using ${num_prompts} random-length prompts with input_range=[${input_min}, ${input_max}], output_range=[${output_min}, ${output_max}], max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
     case_name="benchmark_throughput_${model_name}_${dtype}_${DEVICE_NAME}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)"
