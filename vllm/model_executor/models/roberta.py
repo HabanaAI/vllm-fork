@@ -107,14 +107,7 @@ class RobertaEmbedding(CustomOp):
                 offset += seq_len
 
             offset = 0
-            for positions, tokens, seq_len in zip(pos_list, token_list,
-                                                  seq_lens):
-                # Verify assumption that incoming position are
-                # always a sequence from 0 to N.
-                expected_pos = torch.arange(positions.size()[0],
-                                            dtype=torch.long,
-                                            device=inputs_embeds.device)
-                assert torch.equal(positions, expected_pos)
+            for tokens, seq_len in zip(token_list, seq_lens):
                 position_ids[0][offset:offset +
                                 seq_len] = create_position_ids_from_input_ids(
                                     tokens, self.padding_idx)
@@ -124,16 +117,8 @@ class RobertaEmbedding(CustomOp):
                 pos_list.append(position_ids[offset])
                 token_list.append(input_ids[offset])
 
-            for index, (positions, tokens, seq_len) in enumerate(
-                    zip(pos_list, token_list, seq_lens)):
-                # Verify assumption that incoming position are
-                # always a sequence from 0 to N.
-                expected_pos = torch.arange(positions.size()[0],
-                                            dtype=torch.long,
-                                            device=inputs_embeds.device)
-                valid_input_mask = expected_pos < seq_len
-                expected_pos = expected_pos * valid_input_mask
-                assert torch.equal(positions, expected_pos)
+            for index, (tokens, seq_len) in enumerate(
+                    zip(token_list, seq_lens)):
                 position_ids[index] = create_position_ids_from_input_ids_hpu(
                     tokens, self.padding_idx, seq_len)
 
