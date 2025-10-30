@@ -68,6 +68,7 @@ def torch_chunk_gated_delta_rule(
     value,
     g,
     beta,
+    eye_constant,
     chunk_size=64,
     initial_state=None,
     output_final_state=True,
@@ -113,42 +114,43 @@ def torch_chunk_gated_delta_rule(
 
     # chunk decay
     g = g.cumsum(dim=-1)
+    g_exp = g.exp()
     decay_mask = ((g.unsqueeze(-1) -
                    g.unsqueeze(-2)).tril().exp().float()).tril()
     attn = -((torch.matmul(k_beta.contiguous(),
                            key.transpose(-1, -2).contiguous())) *
              decay_mask).masked_fill(mask, 0)
     for i in range(1, chunk_size):
-        row = attn[..., i, :i].clone()
-        sub = attn[..., :i, :i].clone()
-        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)
-    attn = attn + torch.eye(chunk_size, dtype=attn.dtype, device=attn.device)
+        row = attn[..., i, :i].contiguous()
+        sub = attn[..., :i, :]
+        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)[..., :i]
+    attn = attn + eye_constant
     value = attn @ v_beta
-    k_cumdecay = attn @ (k_beta * g.exp().unsqueeze(-1))
+    k_cumdecay = attn @ (k_beta * g_exp.unsqueeze(-1))
     last_recurrent_state = (torch.zeros(batch_size, num_heads, k_head_dim,
                                         v_head_dim).to(value) if initial_state
                             is None else initial_state.to(value))
     core_attn_out = torch.zeros_like(value)
-    mask = torch.triu(torch.ones(chunk_size,
+    mask = torch.tril(torch.ones(chunk_size,
                                  chunk_size,
                                  dtype=torch.bool,
                                  device=query.device),
-                      diagonal=1)
+                      diagonal=0)
+    mask = mask.view(1, 1, 1, chunk_size, chunk_size)
+    attn = (query @ key.transpose(-1, -2)) * decay_mask * mask
+    qg = query * g_exp[..., None]
+    delta_g_exp = (g[:, :, :, -1, None] - g).exp()[..., None]
+    k_term = (key * delta_g_exp)
 
     # for each chunk
     for i in range(0, tot_len // chunk_size):
-        q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
-        attn = (q_i @ k_i.transpose(-1, -2) *
-                decay_mask[:, :, i]).masked_fill_(mask, 0)
         v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
-        v_new = v_i - v_prime
-        attn_inter = (q_i * g[:, :, i, :, None].exp()) @ last_recurrent_state
-        core_attn_out[:, :, i] = attn_inter + attn @ v_new
+        v_new = value[:, :, i] - v_prime
+        attn_inter = qg[:, :, i] @ last_recurrent_state
+        core_attn_out[:, :, i] = attn_inter + attn[:, :, i] @ v_new
         last_recurrent_state = (
-            last_recurrent_state * g[:, :, i, -1, None, None].exp() +
-            (k_i *
-             (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(
-                 -1, -2) @ v_new)
+            last_recurrent_state * g_exp[:, :, i, -1, None, None] +
+            k_term[:, :, i].transpose(-1, -2) @ v_new)
 
     if not output_final_state:
         last_recurrent_state = None
@@ -391,10 +393,12 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             input_size=self.conv_kernel_size,
             output_size=self.conv_dim,
             bias=False,
+            params_dtype=torch.float32,
             quant_config=None,
             prefix=f"{prefix}.conv1d",
         )
         self.conv1d.weight.data = self.conv1d.weight.data.unsqueeze(1)
+        self.conv1d_weight = None
 
         # projection of the input hidden states
         self.projection_size_qkvz = self.key_dim * 2 + self.value_dim * 2
@@ -429,8 +433,15 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 ], self.tp_size, self.tp_rank)
             })
 
-        mamba_cache_bs = vllm_config.scheduler_config.max_num_seqs + \
-            max(8, vllm_config.scheduler_config.max_num_seqs) + 1
+        max_prefill_bs = vllm_config.scheduler_config.max_num_prefill_seqs
+        max_decode_bs = vllm_config.scheduler_config.max_num_seqs
+
+        mamba_cache_bs = max_decode_bs + max(8, max_decode_bs)
+        if max_prefill_bs is not None:
+            mamba_cache_bs += max_prefill_bs
+        else:
+            mamba_cache_bs += max_decode_bs
+
         conv_state_shape = (
             mamba_cache_bs,
             self.conv_kernel_size - 1,
@@ -446,6 +457,11 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         self.ssm_state = torch.empty(temporal_state_shape,
                                      dtype=torch.float32,
                                      device=self.conv1d.weight.device)
+
+        self.chunk_size = 64
+        self.eye_constant = torch.eye(self.chunk_size,
+                                      dtype=torch.float32,
+                                      device=self.conv1d.weight.device)
 
         # time step projection (discretization)
         # instantiate once and copy inv_dt in init_weights of PretrainedModel
@@ -575,8 +591,11 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
         mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
 
-        conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
-            0, 1).contiguous().float()
+        if self.conv1d_weight is None:
+            self.conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
+                0, 1).flatten().reshape(self.conv_kernel_size,
+                                        self.conv_dim // self.tp_size).float()
+            del self.conv1d.weight
 
         if attn_metadata.is_prompt:
             bs, seq_len, qkv_dim = mixed_qkv.shape
@@ -593,7 +612,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                                        (0, 0, self.conv_kernel_size - 1, 0))
             for idx in range(self.conv_kernel_size):
                 qkv_slice = mixed_qkv_with_pad[:, idx:(idx + seq_len), :]
-                conv1d_weight_slice = conv1d_weight[idx]
+                conv1d_weight_slice = self.conv1d_weight[idx]
                 qkv_conv = qkv_slice * conv1d_weight_slice
                 if idx == 0:
                     mixed_qkv_non_spec = qkv_conv
@@ -606,7 +625,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
                 mixed_qkv,
                 conv_state,
-                conv1d_weight,
+                self.conv1d_weight,
                 self.conv1d.bias,
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
@@ -648,6 +667,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     value_non_spec,
                     g=g,
                     beta=beta,
+                    eye_constant=self.eye_constant,
+                    chunk_size=self.chunk_size,
                     initial_state=None,
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
