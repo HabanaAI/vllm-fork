@@ -3215,12 +3215,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler.start('internal', 'warmup')
         start_mem = HabanaMemoryProfiler.current_device_memory_usage()
         start_time = time.perf_counter()
-        pt_compile_only_mode = os.getenv('PT_COMPILE_ONLY_MODE',
-                                         'true').strip().lower() in ['true', '1']
 
         compile_only_mode_context = functools.partial(bc.env_setting,
                                                       "PT_COMPILE_ONLY_MODE",
-                                                      pt_compile_only_mode)
+                                                      True)
         can_use_compile_only_mode = True
         try:
             with compile_only_mode_context():

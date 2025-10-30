@@ -117,8 +117,8 @@ class RobertaEmbedding(CustomOp):
                 pos_list.append(position_ids[offset])
                 token_list.append(input_ids[offset])
 
-            for index, (tokens, seq_len) in enumerate(
-                    zip(token_list, seq_lens)):
+            for index, (tokens,
+                        seq_len) in enumerate(zip(token_list, seq_lens)):
                 position_ids[index] = create_position_ids_from_input_ids_hpu(
                     tokens, self.padding_idx, seq_len)
 
