@@ -244,7 +244,10 @@ class RotaryEmbedding(CustomOp):
             self.prepare_cos_sin(positions, offsets)
         if self.recompute_cos_sin:
             self.prepare_cos_sin(positions, offsets, recompute_cos_sin=True)
-        num_tokens = positions.shape[0] * positions.shape[1]
+        if len(positions.shape)  == 1:
+            num_tokens = positions.shape[0]
+        else:
+            num_tokens = positions.shape[0] * positions.shape[1]
         # HPU RoPE kernel requires hidden dimension for cos and sin to be equal
         # to query hidden dimension, so the original tensors need to be
         # expanded

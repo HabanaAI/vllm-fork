@@ -444,7 +444,7 @@ class EngineArgs:
                             help='Number of tensor parallel replicas.')
         parser.add_argument(
             '--enable-expert-parallel',
-            default=True,
+            default=False,
             help='Use expert parallelism instead of tensor parallelism '
             'for MoE layers.')
         parser.add_argument(
@@ -1276,6 +1276,8 @@ class EngineArgs:
                 "SelfAttnBlockSpaceManager (i.e. block manager v2),"
                 " please file an issue with detailed information.")
 
+        if self.enable_chunked_prefill:
+            self.use_padding_aware_scheduling = False
         scheduler_config = SchedulerConfig(
             runner_type=model_config.runner_type,
             max_num_batched_tokens=self.max_num_batched_tokens,
