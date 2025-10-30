@@ -1333,6 +1333,7 @@ model_example_map = {
 
 MODELS_NEED_VIDEO_METADATA = [
     "glm4_1v",
+    "glm4_5v",
     "qwen3_vl",
     "qwen3_vl_moe",
 ]
