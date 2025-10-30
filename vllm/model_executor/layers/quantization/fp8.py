@@ -69,12 +69,12 @@ class Fp8Config(QuantizationConfig):
         activation_scheme: str = "dynamic",
         ignored_layers: Optional[list[str]] = None,
         weight_block_size: Optional[list[int]] = None,
-        per_quant_way: Optional[str] = "per_tensor",
+        quant_scheme: Optional[str] = "tensor",
     ) -> None:
         super().__init__()
 
         self.is_checkpoint_fp8_serialized = is_checkpoint_fp8_serialized
-        self.per_quant_way = per_quant_way
+        self.quant_scheme = quant_scheme
         if activation_scheme not in ACTIVATION_SCHEMES:
             raise ValueError(
                 f"Unsupported activation scheme {activation_scheme}")
@@ -119,12 +119,12 @@ class Fp8Config(QuantizationConfig):
         ignored_layers = cls.get_from_keys_or(config, ["ignored_layers"], None)
         weight_block_size = cls.get_from_keys_or(config, ["weight_block_size"],
                                                  None)
-        per_quant_way = cls.get_from_keys_or(config, ["per_quant_way"], None)
+        quant_scheme = cls.get_from_keys_or(config, ["quant_scheme"], None)
         return cls(is_checkpoint_fp8_serialized=is_checkpoint_fp8_serialized,
                    activation_scheme=activation_scheme,
                    ignored_layers=ignored_layers,
                    weight_block_size=weight_block_size,
-                   per_quant_way=per_quant_way)
+                   quant_scheme=quant_scheme)
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["QuantizeMethodBase"]:
@@ -280,7 +280,7 @@ class Fp8LinearMethod(LinearMethodBase):
         if self.quant_config.is_checkpoint_fp8_serialized:
             # WEIGHT SCALE
             if not self.block_quant:
-                if (self.quant_config.per_quant_way == "per_channel"):
+                if (self.quant_config.quant_scheme == "channel"):
                     scale = ChannelQuantScaleParameter(
                         data=torch.empty(output_size_per_partition,
                                          dtype=torch.float32),
@@ -407,7 +407,7 @@ class Fp8LinearMethod(LinearMethodBase):
             # If using w8a8, torch._scaled_mm needs per tensor, so
             # requantize the logical shards as a single weight.
             if (not self.use_marlin
-                    and self.quant_config.per_quant_way != "per_channel"):
+                    and self.quant_config.quant_scheme != "channel"):
                 # Dequant -> Quant with max scale so we can run per tensor.
                 if current_platform.is_fp8_fnuz():
                     weight, weight_scale, input_scale = \
@@ -510,7 +510,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def __init__(self, quant_config: Fp8Config):
         from vllm.model_executor.layers.fused_moe import fused_experts
         self.quant_config = quant_config
-        self.per_quant_way = self.quant_config.per_quant_way
+        self.quant_scheme = self.quant_config.quant_scheme
         self.block_quant = self.quant_config.weight_block_size is not None
 
         # For GPUs that lack FP8 hardware support, we can leverage the Marlin
@@ -608,7 +608,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         if not self.block_quant:
             # Allocate 2 scales for w1 and w3 respectively.
             # They will be combined to a single scale after weight loading.
-            if (self.per_quant_way == "per_channel"):
+            if (self.quant_scheme == "channel"):
                 w13_weight_scale = torch.nn.Parameter(torch.ones(
                     num_experts,
                     2 * intermediate_size_per_partition,
@@ -655,7 +655,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         if self.block_quant:
             extra_weight_attrs.update(
                 {"quant_method": FusedMoeWeightScaleSupported.BLOCK.value})
-        elif self.per_quant_way == "per_channel":
+        elif self.quant_scheme == "channel":
             extra_weight_attrs.update(
                 {"quant_method": FusedMoeWeightScaleSupported.CHANNEL.value})
         else:
