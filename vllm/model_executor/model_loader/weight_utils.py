@@ -471,6 +471,16 @@ def safetensors_weights_iterator(
         with safe_open(st_file, framework="pt") as f:
             for name in f.keys():  # noqa: SIM118
                 param = f.get_tensor(name)
+                if current_platform.is_hpu(
+                ) and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
+                    fp8_e4m3fnuz_max = torch.finfo(torch.float8_e4m3fnuz).max
+                    fp8_e4m3fn_max = torch.finfo(torch.float8_e4m3fn).max
+                    if param.dtype == torch.float8_e4m3fn:
+                        param = (param.float() * fp8_e4m3fnuz_max /
+                                 fp8_e4m3fn_max).to(torch.float8_e4m3fnuz)
+                    elif param.dtype == torch.float32 and "scale" in name.split(
+                            ".")[-1]:
+                        param = param * fp8_e4m3fn_max / fp8_e4m3fnuz_max
                 yield name, param
 
 
@@ -522,6 +532,17 @@ def fastsafetensors_weights_iterator(
                 keys = list(fb.key_to_rank_lidx.keys())
                 for k in keys:
                     t = fb.get_tensor(k)
+                    if current_platform.is_hpu(
+                    ) and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
+                        fp8_e4m3fnuz_max = torch.finfo(
+                            torch.float8_e4m3fnuz).max
+                        fp8_e4m3fn_max = torch.finfo(torch.float8_e4m3fn).max
+                        if t.dtype == torch.float8_e4m3fn:
+                            t = (t.float() * fp8_e4m3fnuz_max /
+                                 fp8_e4m3fn_max).to(torch.float8_e4m3fnuz)
+                        elif t.dtype == torch.float32 and "scale" in k.split(
+                                ".")[-1]:
+                            t = t * fp8_e4m3fn_max / fp8_e4m3fnuz_max
                     yield k, t
             finally:
                 fb.close()
@@ -790,30 +811,6 @@ def maybe_remap_kv_scale_name(name: str, params_dict: dict) -> Optional[str]:
 
     # If there were no matches, return the untouched param name
     return name
-
-
-def gaudi_weight_wrapper(weight_loader):
-    """Wrapper for Gaudi weight conversion."""
-
-    fp8_e4m3fnuz_max = torch.finfo(torch.float8_e4m3fnuz).max
-    fp8_e4m3fn_max = torch.finfo(torch.float8_e4m3fn).max
-
-    def wrapper(*args, **kwargs):
-        # args[0] is parameter, args[1] is loaded_weight
-        # weights will be always in fp8, but scales will be in fp32,
-        # so we can detect it by dtype
-        loaded_weight = args[1]
-        if loaded_weight.dtype == torch.float8_e4m3fn:
-            loaded_weight.data = (loaded_weight.data.float() *
-                                  fp8_e4m3fnuz_max / fp8_e4m3fn_max).to(
-                                      torch.float8_e4m3fn)
-        else:
-            loaded_weight.data = (loaded_weight.data * fp8_e4m3fn_max /
-                                  fp8_e4m3fnuz_max)
-        args = (args[0], loaded_weight) + args[2:]
-        weight_loader(*args, **kwargs)
-
-    return wrapper
 
 
 def with_thread_limits():
