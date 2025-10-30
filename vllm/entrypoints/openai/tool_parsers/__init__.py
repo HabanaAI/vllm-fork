@@ -12,7 +12,6 @@ from .internlm2_tool_parser import Internlm2ToolParser
 from .jamba_tool_parser import JambaToolParser
 from .llama4_pythonic_tool_parser import Llama4PythonicToolParser
 from .llama_tool_parser import Llama3JsonToolParser
-from .minimax_m2_tool_parser import MinimaxM2ToolParser
 from .mistral_tool_parser import MistralToolParser
 from .phi4mini_tool_parser import Phi4MiniJsonToolParser
 from .pythonic_tool_parser import PythonicToolParser
@@ -35,5 +34,4 @@ __all__ = [
     "Glm4MoeModelToolParser",
     "HunyuanA13BToolParser",
     "SeedOssToolParser",
-    "MinimaxM2ToolParser",
 ]
