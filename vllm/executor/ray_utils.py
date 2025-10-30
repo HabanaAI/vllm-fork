@@ -295,6 +295,7 @@ def initialize_ray_cluster(
                 "A new instance will be launched with current node resources.")
             ray.init(address=ray_address, num_gpus=parallel_config.world_size)
     else:
+        print(parallel_config)
         ray.init(address=ray_address,
                  runtime_env=parallel_config.ray_runtime_env)
 
