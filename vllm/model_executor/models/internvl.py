@@ -1052,7 +1052,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             prefix=maybe_prefix(prefix, "vision_model"),
         )
 
-        if hasattr(config, "tie_word_embeddings") and hasattr(config.text_config, "tie_word_embeddings"):
+        if hasattr(config, "tie_word_embeddings") and hasattr(
+                config.text_config, "tie_word_embeddings"):
             config.text_config.tie_word_embeddings = config.tie_word_embeddings
 
         self.language_model = init_vllm_registered_model(
@@ -1187,8 +1188,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
         image_token_id = kwargs["image_token_id"]
         assert isinstance(image_token_id, torch.Tensor)
-        # self.img_context_token_id = image_token_id.flatten().unique().item()  # Graph mode does not support unique() op
-        self.img_context_token_id = image_token_id[0]  # Assume image_token_id is unique
+        self.img_context_token_id = \
+            image_token_id[0]  # Assume image_token_id is unique
 
         if pixel_values_flat is not None:
             if not isinstance(pixel_values_flat, (torch.Tensor, list)):
@@ -1207,6 +1208,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                 pixel_values_flat=self._validate_pixel_values(
                     pixel_values_flat),
                 num_patches=image_num_patches,
+                bypass_hpu_graphs=kwargs.get("bypass_hpu_graphs"),
             )
 
         raise AssertionError("This line should be unreachable.")
@@ -1232,7 +1234,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
         video_token_id = kwargs["video_token_id"]
         assert isinstance(video_token_id, torch.Tensor)
-        self.video_context_token_id = video_token_id.flatten().unique().item()
+        self.video_context_token_id = video_token_id[0]
 
         if pixel_values_flat_video is not None:
             if not isinstance(pixel_values_flat_video, (torch.Tensor, list)):
@@ -1252,6 +1254,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                 pixel_values_flat=self._validate_pixel_values(
                     pixel_values_flat_video),
                 num_patches=video_num_patches,
+                bypass_hpu_graphs=kwargs.get("bypass_hpu_graphs"),
             )
 
         raise AssertionError("This line should be unreachable.")
@@ -1305,7 +1308,6 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
         # The result multimodal_embeddings is tuple of tensors, with each
         # tensor correspoending to a multimodal data item (image or video).
-        # multimodal_embeddings: tuple[torch.Tensor, ...] = ()
         multimodal_embeddings: list[torch.Tensor] = []
         # NOTE: It is important to iterate over the keys in this dictionary
         # to preserve the order of the modalities.
