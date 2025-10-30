@@ -1155,6 +1155,20 @@ class EngineArgs:
             is not None) else ParallelConfig.data_parallel_rpc_port
 
         data_parallel_backend = self.data_parallel_backend
+        ray_runtime_env = None
+        try:
+            import ray
+            is_ray_initialized = ray.is_initialized()
+        except:
+            is_ray_initialized = False
+
+        if is_ray_initialized:
+            # Ray Serve LLM calls `create_engine_config` in the context
+            # of a Ray task, therefore we check is_ray_initialized()
+            # as opposed to is_in_ray_actor().
+            import ray
+            ray_runtime_env = ray.get_runtime_context().runtime_env
+            logger.info("Using ray runtime env: %s", ray_runtime_env)
 
         parallel_config = ParallelConfig(
             pipeline_parallel_size=self.pipeline_parallel_size,
@@ -1168,6 +1182,7 @@ class EngineArgs:
             max_parallel_loading_workers=self.max_parallel_loading_workers,
             disable_custom_all_reduce=self.disable_custom_all_reduce,
             ray_workers_use_nsight=self.ray_workers_use_nsight,
+            ray_runtime_env=ray_runtime_env,
             placement_group=placement_group,
             distributed_executor_backend=self.distributed_executor_backend,
             worker_cls=self.worker_cls,
