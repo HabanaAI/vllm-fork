@@ -1159,7 +1159,7 @@ class EngineArgs:
         try:
             import ray
             is_ray_initialized = ray.is_initialized()
-        except:
+        except ImportError:
             is_ray_initialized = False
 
         if is_ray_initialized:
