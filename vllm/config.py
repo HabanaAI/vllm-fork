@@ -57,6 +57,7 @@ from vllm.utils import (DEFAULT_MAX_NUM_BATCHED_TOKENS,
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
+    from ray.runtime_env import RuntimeEnv
     from ray.util.placement_group import PlacementGroup
 
     from vllm.executor.executor_base import ExecutorBase
@@ -68,6 +69,7 @@ if TYPE_CHECKING:
     ConfigType = type[DataclassInstance]
 else:
     PlacementGroup = Any
+    RuntimeEnv = Any
     ExecutorBase = Any
     QuantizationConfig = Any
     BaseModelLoader = Any
@@ -2109,6 +2111,9 @@ class SchedulerConfig:
     """Maximum number of prefill sequences to be
     processed in a single iteration. Used only with padding-aware
     scheduling."""
+
+    ray_runtime_env: Optional["RuntimeEnv"] = None
+    """Ray runtime environment to pass to distributed workers."""
 
     use_padding_aware_scheduling: bool = False
     """If True, scheduler will consider padded
