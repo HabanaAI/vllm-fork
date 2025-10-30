@@ -26,7 +26,6 @@ from vllm.model_executor.layers.quantization.utils.marlin_utils_fp8 import (
     prepare_moe_fp8_layer_for_marlin)
 from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
     all_close_1d, normalize_e4m3fn_to_e4m3fnuz, per_tensor_dequantize)
-from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.scalar_type import scalar_types
@@ -142,9 +141,6 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         params_dtype = torch.float8_e4m3fn
 
         # WEIGHTS
-        if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-            extra_weight_attrs["weight_loader"] = gaudi_weight_wrapper(
-                extra_weight_attrs.get("weight_loader"))
         w13_weight = torch.nn.Parameter(torch.empty(
             num_experts,
             2 * intermediate_size_per_partition,
