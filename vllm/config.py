@@ -1771,6 +1771,9 @@ class ParallelConfig:
 
     ray_workers_use_nsight: bool = False
     """Whether to profile Ray workers with nsight, see https://docs.ray.io/en/latest/ray-observability/user-guides/profiling.html#profiling-nsight-profiler."""
+    
+    ray_runtime_env: Optional["RuntimeEnv"] = None
+    """Ray runtime environment to pass to distributed workers."""
 
     placement_group: Optional["PlacementGroup"] = None
     """ray distributed model workers placement group."""
@@ -2111,9 +2114,6 @@ class SchedulerConfig:
     """Maximum number of prefill sequences to be
     processed in a single iteration. Used only with padding-aware
     scheduling."""
-
-    ray_runtime_env: Optional["RuntimeEnv"] = None
-    """Ray runtime environment to pass to distributed workers."""
 
     use_padding_aware_scheduling: bool = False
     """If True, scheduler will consider padded
