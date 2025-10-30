@@ -10,7 +10,6 @@ import tempfile
 import time
 from collections import defaultdict
 from collections.abc import Generator
-from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
@@ -811,59 +810,3 @@ def maybe_remap_kv_scale_name(name: str, params_dict: dict) -> Optional[str]:
 
     # If there were no matches, return the untouched param name
     return name
-
-
-def with_thread_limits():
-    """
-    Decorator to temporarily set OMP_NUM_THREADS and PyTorch threads,
-    and restore them after the function call.
-    
-    Args:
-        div_omp: divide CPU cores by this for OMP_NUM_THREADS
-        div_torch: divide CPU cores by this for torch.set_num_threads
-    """
-
-    def decorator(func):
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if not (current_platform.is_hpu()
-                    and envs.VLLM_HPU_CONVERT_TO_FP8UZ):
-                return func(*args, **kwargs)
-
-            world_size = 1
-            if torch.distributed.is_initialized():
-                world_size = torch.distributed.get_world_size()
-            world_size = min(world_size, 8)
-
-            div_omp = world_size
-            div_torch = world_size
-
-            # Save original settings
-            old_omp = os.environ.get("OMP_NUM_THREADS", None)
-            old_torch = torch.get_num_threads()
-            import psutil
-            num_cores = len(psutil.Process().cpu_affinity() or [0])
-
-            # Set new limits
-            os.environ["OMP_NUM_THREADS"] = str(max(1, num_cores // div_omp))
-            torch.set_num_threads(max(1, num_cores // div_torch))
-            logger.warning_once(
-                "Setting OMP_NUM_THREADS to %s and torch.set_num_threads to %s "
-                "for %s available CPU cores and world size %s",
-                os.environ["OMP_NUM_THREADS"], torch.get_num_threads(),
-                num_cores, world_size)
-            try:
-                # Call the actual function
-                return func(*args, **kwargs)
-            finally:
-                # Restore original settings
-                if old_omp is None:
-                    os.environ.pop("OMP_NUM_THREADS", None)
-                else:
-                    os.environ["OMP_NUM_THREADS"] = old_omp
-                torch.set_num_threads(old_torch)
-
-        return wrapper
-
-    return decorator
