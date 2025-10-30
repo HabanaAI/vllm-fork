@@ -375,7 +375,7 @@ git clone https://www.modelscope.cn/models/deepseek-ai/DeepSeek-R1-Distill-Llama
 [参照 1.4 章节](#14-安装-vllm) 使用 vLLM aice/v1.22.0 版本安装到容器里。
 
 启动 vLLM  
-进入启动脚本目录，启动 vLLM。如下命令表示在 module ID 0,1,2,3（`-t 4 -m 0,1,2,3`）上使用 4 卡跑 Deepseek-R1-Distill-Llama-70B 模型，最大支持并发 128（`-b 128`），支持输入 token 长度 800 到 4096（`-i 800,4096`），输出 token 长度范围 800 到 2048（`-o 800,2048`），精度 BF16（`-d bfloat16`），服务端口 30001（` -a 127.0.0.1:30001`），预热缓存目录 `/data/70B_warmup_cache`（`-c /data/70B_warmup_cache`）：
+进入启动脚本目录，启动 vLLM。如下命令表示在 module ID 0,1,2,3（`-t 4 -m 0,1,2,3`）上使用 4 卡跑 Deepseek-R1-Distill-Llama-70B 模型，最大支持并发 128（`-b 128`），支持输入 token 长度 800 到 4096（`-i 800,4096`），输出 token 长度范围 800 到 2048（`-o 800,2048`），精度 BF16（`-d bfloat16`），服务端口 30001（`-a 127.0.0.1:30001`），预热缓存目录 `/data/70B_warmup_cache`（`-c /data/70B_warmup_cache`）：
 
 ```bash
 cd vllm-fork/scripts
@@ -545,7 +545,8 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --port 8000 \
     --host 127.0.0.1 \
     --dtype bfloat16 \
-    --limit-mm-per-prompt '{"video":5, "image":5}'
+    --limit-mm-per-prompt video=5,image=5 \
+    --mm_processor_kwargs max_pixels=1003520
 ```
 
 **Qwen2-Audio**: Support Audio inputs
@@ -556,7 +557,8 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --port 8000 \
     --host 127.0.0.1 \
     --dtype bfloat16 \
-    --limit-mm-per-prompt '{"audio":5}'
+    --limit-mm-per-prompt audio=5 \
+    --mm_processor_kwargs max_pixels=1003520
 ```
 
 **Qwen2.5-VL**: Support Image and Video inputs
@@ -567,7 +569,8 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --port 8000 \
     --host 127.0.0.1 \
     --dtype bfloat16 \
-    --limit-mm-per-prompt '{"video":5, "image":5}'
+    --limit-mm-per-prompt video=5,image=5 \
+    --mm_processor_kwargs max_pixels=1003520
 ```
 
 **Qwen2.5-Omni**: Support Image, Video and Audio inputs
@@ -578,10 +581,24 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --port 8000 \
     --host 127.0.0.1 \
     --dtype bfloat16 \
-    --limit-mm-per-prompt '{"audio":5, "video":5, "image":5}'
+    --limit-mm-per-prompt audio=5,video=5,image=5 \
+    --mm_processor_kwargs max_pixels=1003520
+```
+
+**Qwen3-VL**: Support Image and Video inputs
+
+```bash
+PT_HPU_LAZY_MODE=1 vllm serve \
+    Qwen/Qwen3-VL-30B-A3B-Instruct \
+    --port 8000 \
+    --host 127.0.0.1 \
+    --dtype bfloat16 \
+    --limit-mm-per-prompt video=5,image=5 \
+    --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
 ```
 
 - `--limit-mm-per-prompt` 设置每个 prompt 中每种多模态数据的最大个数
+- `--mm_processor_kwargs max_pixels=1003520` 限制输入图片最大尺寸。超过的图片会被保持宽高比例缩小。
 
 #### 3.4.2 client 端请求格式样例
 
@@ -598,7 +615,30 @@ python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
     -c audio
 ```
 
-#### 3.4.3 问题解答
+#### 3.4.3 FP8 dynamic quant
+**转换模型**\
+首先把模型下载到本地 \
+
+```bash
+git clone https://github.com/HabanaAI/vllm-hpu-extension.git -b aice/v1.22.0
+cd vllm-hpu-extension/scripts
+python dynamic_quant_multimodal_for_gaudi2.py \
+    -i /data/Qwen3-VL-30B-A3B-Instruct \
+    -o /data/Qwen3-VL-30B-A3B-Instruct-FP8-G2-Dynamic
+```
+
+**启动服务**\
+
+```bash
+PT_HPU_LAZY_MODE=1 vllm serve \
+    /data/Qwen3-VL-30B-A3B-Instruct-FP8-G2-Dynamic \
+    --port 8000 \
+    --host 127.0.0.1 \
+    --limit-mm-per-prompt video=5,image=5 \
+    --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
+```
+
+#### 3.4.4 问题解答
 
 - 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
 - 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。
