@@ -10,6 +10,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 import math
+import os
 from collections.abc import Iterable
 from functools import partial
 
@@ -24,6 +25,10 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from .clip import CLIPEncoder, CLIPVisionEmbeddings
 
+from vllm.platforms import current_platform
+is_hpu = current_platform.is_hpu()
+if is_hpu:
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 class MLPBlock(nn.Module):
     def __init__(
@@ -297,6 +302,10 @@ class RelPosAttention(nn.Module):
             self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, head_dim))
             self.rel_pos_w = nn.Parameter(torch.zeros(2 * input_size[1] - 1, head_dim))
 
+        self.softmax_mode = 'fp32' if os.environ.get(
+            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
+                                                             ] else 'None'
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, H, W, _ = x.shape
         # qkv with shape (3, B, nHead, H * W, C)
@@ -326,11 +335,10 @@ class RelPosAttention(nn.Module):
             attn_bias = (rel_h + rel_w).view(
                 B, self.num_heads, rel_h.size(2), rel_h.size(3) * rel_w.size(4)
             )
-            x = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_bias
-            )
+
+            x = FusedSDPA.apply(q, k, v, attn_bias, 0.0, False, None, self.softmax_mode)
         else:
-            x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            x = FusedSDPA.apply(q, k, v, None, 0.0, False, None, self.softmax_mode)
 
         x = (
             x.view(B, self.num_heads, H, W, -1)
@@ -625,7 +633,6 @@ class DeepCLIPVisionTransformer(nn.Module):
             quant_config=quant_config,
             num_hidden_layers_override=num_hidden_layers_override,
             prefix=f"{prefix}.encoder",
-            attn_cls=MultiHeadAttention,
         )
 
         num_hidden_layers = config.num_hidden_layers

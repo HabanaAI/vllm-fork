@@ -44,7 +44,7 @@ class ModelRequestData(NamedTuple):
     stop_token_ids: Optional[list[int]] = None
     chat_template: Optional[str] = None
     lora_requests: Optional[list[LoRARequest]] = None
-    sampling_params: SamplingParams | None = None
+    sampling_params: Optional[SamplingParams] = None
 
 
 # NOTE: The default `max_num_seqs` and `max_model_len` may result in OOM on
@@ -132,15 +132,12 @@ def load_deepseek_vl2(question: str, image_urls: list[str]) -> ModelRequestData:
 
 
 def load_deepseek_ocr(question: str, image_urls: list[str]) -> ModelRequestData:
-    from vllm.model_executor.models.deepseek_ocr import NGramPerReqLogitsProcessor
-
     model_name = "deepseek-ai/DeepSeek-OCR"
 
     engine_args = EngineArgs(
         model=model_name,
         max_num_seqs=2,
         limit_mm_per_prompt={"image": len(image_urls)},
-        logits_processors=[NGramPerReqLogitsProcessor],
     )
 
     placeholder = "<image>\n" * len(image_urls)
@@ -904,8 +901,12 @@ def run_generate(model, question: str, image_urls: list[str], seed: Optional[int
     engine_args = asdict(req_data.engine_args) | {"seed": args.seed}
     llm = LLM(**engine_args)
 
-    sampling_params = SamplingParams(
-        temperature=0.0, max_tokens=256, stop_token_ids=req_data.stop_token_ids
+    sampling_params = (
+        SamplingParams(
+            temperature=0.0, max_tokens=256, stop_token_ids=req_data.stop_token_ids
+        )
+        if req_data.sampling_params is None
+        else req_data.sampling_params
     )
 
     outputs = llm.generate(
@@ -936,12 +937,8 @@ def run_chat(model: str, question: str, image_urls: list[str], seed: Optional[in
     engine_args = asdict(req_data.engine_args) | {"seed": seed}
     llm = LLM(**engine_args)
 
-    sampling_params = (
-        SamplingParams(
-            temperature=0.0, max_tokens=256, stop_token_ids=req_data.stop_token_ids
-        )
-        if req_data.sampling_params is None
-        else req_data.sampling_params
+    sampling_params = SamplingParams(
+        temperature=0.0, max_tokens=256, stop_token_ids=req_data.stop_token_ids
     )
     outputs = llm.chat(
         [

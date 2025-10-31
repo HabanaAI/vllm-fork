@@ -4,14 +4,13 @@
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Callable, Optional
 
 import torch
 import torch.nn as nn
 from transformers import BatchFeature, CLIPVisionConfig
 
 from vllm.config import VllmConfig
-from vllm.config.multimodal import BaseDummyOptions
 from vllm.model_executor.models.interfaces import (
     MultiModalEmbeddings,
     SupportsMultiModal,
@@ -53,13 +52,10 @@ from vllm.transformers_utils.processors.deepseek_ocr import (
     DeepseekOCRProcessor,
     count_tiles,
 )
-from vllm.transformers_utils.tokenizer import cached_tokenizer_from_config
-from vllm.utils.tensor_schema import TensorSchema, TensorShape
-from vllm.v1.sample.logits_processor import (
-    AdapterLogitsProcessor,
-    RequestLogitsProcessor,
-)
+from vllm.model_executor.sampling_metadata import SamplingMetadata
 
+from vllm.transformers_utils.tokenizer import cached_tokenizer_from_config
+from vllm.tensor_schema import TensorSchema, TensorShape
 from .deepencoder import DeepCLIPVisionTransformer, build_sam_vit_b
 from .deepseek_vl2 import MlpProjector
 
@@ -127,56 +123,6 @@ class NoRepeatNGramLogitsProcessor:
         return logits
 
 
-class NGramPerReqLogitsProcessor(AdapterLogitsProcessor):
-    """Example of overriding the wrapper class `__init__()` in order to utilize
-    info about the device type"""
-
-    def __init__(
-        self, vllm_config: VllmConfig, device: torch.device, is_pin_memory: bool
-    ):
-        super().__init__(vllm_config, device, is_pin_memory)
-
-    def is_argmax_invariant(self) -> bool:
-        return True
-
-    def new_req_logits_processor(
-        self,
-        params: SamplingParams,
-    ) -> RequestLogitsProcessor | None:
-        ngram_size = params.extra_args and params.extra_args.get("ngram_size")
-        window_size = params.extra_args and params.extra_args.get("window_size", 100)
-        whitelist_token_ids = params.extra_args and params.extra_args.get(
-            "whitelist_token_ids", None
-        )
-        if ngram_size is None:
-            return None
-        if not isinstance(ngram_size, int) or ngram_size <= 0:
-            raise ValueError(
-                f"`ngram_size` has to be a strictly positive integer, got {ngram_size}."
-            )
-        if not isinstance(window_size, int) or window_size <= 0:
-            raise ValueError(
-                "`window_size` has to be a strictly positive integer, "
-                f"got {window_size}."
-            )
-        if whitelist_token_ids is not None and not isinstance(
-            whitelist_token_ids, Iterable
-        ):
-            raise ValueError(
-                "`whitelist_token_ids` has to be a set of integers, "
-                f"got {whitelist_token_ids}."
-            )
-        else:
-            whitelist_token_ids = (
-                set(whitelist_token_ids) if whitelist_token_ids else None
-            )
-        return NoRepeatNGramLogitsProcessor(
-            ngram_size=ngram_size,
-            window_size=window_size,
-            whitelist_token_ids=whitelist_token_ids,
-        )
-
-
 class DeepseekOCRProcessingInfo(BaseProcessingInfo):
     def get_hf_config(self):
         return self.ctx.get_hf_config(DeepseekVLV2Config)
@@ -239,7 +185,7 @@ class DeepseekOCRDummyInputsBuilder(BaseDummyInputsBuilder[DeepseekOCRProcessing
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions] | None = None,
+        mm_options: Mapping[str, object] | None = None,
     ) -> MultiModalDataDict:
         num_images = mm_counts.get("image", 0)
 
@@ -262,7 +208,7 @@ class DeepseekOCRMultiModalProcessor(
         prompt: str,
         mm_data: Mapping[str, object],
         mm_kwargs: Mapping[str, object],
-        tok_kwargs: Mapping[str, object],
+#        tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
         if mm_data:
             processed_outputs = self.info.ctx.call_hf_processor(
@@ -373,8 +319,8 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
         self.projector_config = config.projector_config
         self.text_config = config.text_config
 
-        model_config = vllm_config.model_config
-        tokenizer = cached_tokenizer_from_config(model_config)
+        self.model_config = vllm_config.model_config
+        tokenizer = cached_tokenizer_from_config(self.model_config)
         self.image_token_id = tokenizer.vocab[_IMAGE_TOKEN]
 
         self.sam_model = build_sam_vit_b()
@@ -435,23 +381,54 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
         pixel_values = kwargs.pop("pixel_values", None)
         images_spatial_crop = kwargs.pop("images_spatial_crop", None)
         images_crop = kwargs.pop("images_crop", None)
+        model_dtype = self.model_config.dtype
 
         if pixel_values is None or torch.sum(pixel_values).item() == 0:
             return None
 
-        if pixel_values is not None:
-            base_size = self.vision_config.image_size
-            return DeepseekOCRImagePixelInputs(
-                type="pixel_values",
-                data=pixel_values,
-                images_crop=images_crop,
-                images_spatial_crop=images_spatial_crop,
-                resolve_bindings={
-                    "base_size": base_size,
-                },
-            )
+        # Should not happen and should raise here, after
+        # our warmup is ready.
+        if images_spatial_crop is None:
+            return None
 
-        raise AssertionError("This line should be unreachable.")
+        if pixel_values.dtype != model_dtype:
+            pixel_values = pixel_values.to(model_dtype)
+
+        # The upstream deepseek ocr model does not consider batch size.
+        # But we always get batch size as the first dim. So split it.
+        batch_sz = pixel_values.shape[0]
+        assert batch_sz >= 1
+        if images_spatial_crop is not None:
+            assert batch_sz == images_spatial_crop.shape[0]
+        if images_crop is not None:
+            assert batch_sz == images_crop.shape[0]
+            if images_crop.dtype != model_dtype:
+                images_crop = images_crop.to(model_dtype)
+
+        ret_list = []
+        have_image_data = False
+        for i in range(batch_sz):
+            base_size = self.vision_config.image_size
+            if pixel_values[i] is not None:
+                pixel_input = DeepseekOCRImagePixelInputs(
+                    type="pixel_values",
+                    data=pixel_values[i],
+                    images_crop=images_crop[i] if images_crop is not None else None,
+                    images_spatial_crop=images_spatial_crop[i] \
+                        if images_spatial_crop is not None else None,
+                    resolve_bindings={
+                        "base_size": base_size,
+                    },
+                )
+                ret_list.append(pixel_input)
+                have_image_data = True
+            else:
+                ret_list.append(None)
+
+        if have_image_data:
+            return ret_list
+        else:
+            return None
 
     def _encode_global_features(self, image_tensor: torch.Tensor) -> torch.Tensor:
         global_features_1 = self.sam_model(image_tensor)
@@ -562,11 +539,17 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
     def get_multimodal_embeddings(
         self, **kwargs: object
     ) -> MultiModalEmbeddings | None:
-        image_input = self._parse_and_validate_image_input(**kwargs)
-        if image_input is None:
+        image_input_list = self._parse_and_validate_image_input(**kwargs)
+        if image_input_list is None:
             return None
-        vision_embeddings = self._process_image_input(image_input)
-        return vision_embeddings
+
+        all_vision_embeddings = [None] * len(image_input_list)
+        for index, image_input in enumerate(image_input_list):
+            if image_input is not None:
+                vision_embeddings = self._process_image_input(image_input)
+                all_vision_embeddings[index] = vision_embeddings
+
+        return all_vision_embeddings
 
     def forward(
         self,
@@ -588,10 +571,57 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
     ) -> torch.Tensor | None:
-        return self.language_model.compute_logits(hidden_states)
+        return self.language_model.compute_logits(hidden_states, sampling_metadata)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)
         autoloaded_weights = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
         return autoloaded_weights
+
+    def _get_text_embeddings(
+        self,
+        input_ids: torch.Tensor,
+        get_input_embeddings: Callable[[torch.Tensor], torch.Tensor],
+    ) -> torch.Tensor:
+        return get_input_embeddings(input_ids)
+
+    def get_input_embeddings(
+        self,
+        input_ids: torch.Tensor,
+        multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
+    ) -> torch.Tensor:
+        """
+        Apply token embeddings to `input_ids`.
+
+        If `multimodal_embeddings` is passed, scatter them into
+        `input_ids` according to the mask `is_multimodal`.
+
+        In case the multi-modal token IDs exceed the vocabulary size of
+        the language model, you can set `handle_oov_mm_token=False`
+        to avoid calling the language model's `get_input_embeddings` method
+        on those tokens. Note however that doing so increases memory usage
+        as an additional buffer is needed to hold the input embeddings.
+        """
+        from .utils import _merge_multimodal_embeddings
+
+        inputs_embeds = self._get_text_embeddings(
+            input_ids,
+            self.get_language_model().get_input_embeddings,
+        )
+
+        if multimodal_embeddings is None or len(multimodal_embeddings) == 0:
+            return inputs_embeds
+
+        is_multimodal = (input_ids == self.image_token_id)
+        return _merge_multimodal_embeddings(inputs_embeds, is_multimodal, multimodal_embeddings)
+
+    def prepare_attn_masks(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        mask_dtype: torch.dtype,
+        **kwargs,
+    ):
+        return kwargs

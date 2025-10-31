@@ -30,7 +30,7 @@ class ModelRequestData(NamedTuple):
     prompts: list[str]
     stop_token_ids: Optional[list[int]] = None
     lora_requests: Optional[list[LoRARequest]] = None
-    sampling_params: list[SamplingParams] | None = None
+    sampling_params: Optional[list[SamplingParams]] = None
 
 
 # NOTE: The default `max_num_seqs` and `max_model_len` may result in OOM on
@@ -150,17 +150,17 @@ def run_deepseek_vl2(questions: list[str], modality: str) -> ModelRequestData:
         prompts=prompts,
     )
 
-def run_deepseek_ocr(questions: list[str], modality: str) -> ModelRequestData:
-    from vllm.model_executor.models.deepseek_ocr import NGramPerReqLogitsProcessor
 
+def run_deepseek_ocr(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
 
     model_name = "deepseek-ai/DeepSeek-OCR"
 
     engine_args = EngineArgs(
         model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
         limit_mm_per_prompt={modality: 1},
-        logits_processors=[NGramPerReqLogitsProcessor],
     )
 
     # deepseek-ocr use plain prompt template
@@ -173,7 +173,7 @@ def run_deepseek_ocr(questions: list[str], modality: str) -> ModelRequestData:
     sampling_params = [
         SamplingParams(
             temperature=0.0,
-            max_tokens=8192,
+            max_tokens=512,
             # ngram logit processor args
             extra_args=dict(
                 ngram_size=30,
