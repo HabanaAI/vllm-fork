@@ -2,11 +2,12 @@
 from argparse import Namespace
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.mm_arg_utils import MMAsyncEngineArgs
 from vllm.engine.multiprocessing.mm_client import MMLLMEngineClient
 from vllm.engine.multiprocessing.mm_engine import run_mm_engine
@@ -36,11 +37,20 @@ async def build_async_engine_client(
     # Context manager to handle engine_client lifecycle
     # Ensures everything is shutdown and cleaned up on error/exit
     logger.info("Building mm_api_server async engine client.")
-    engine_args = MMAsyncEngineArgs.from_cli_args(args)
+
+    # Parse per-model parameters from CLI arguments
+    from vllm.utils import FlexibleArgumentParser
+    engine_args = MMAsyncEngineArgs.from_cli_args(
+        cast(FlexibleArgumentParser, args))
+
+    # Log model parameters for debugging
+    if hasattr(engine_args, 'model_params') and engine_args.model_params:
+        logger.info("Loaded per-model configurations: %s",
+                    engine_args.model_params)
 
     async with api_server.build_async_engine_client_from_engine_args(
-            engine_args, args.disable_frontend_multiprocessing,
-            client_config) as engine:
+            cast(AsyncEngineArgs, engine_args),
+            args.disable_frontend_multiprocessing, client_config) as engine:
         yield engine
 
 

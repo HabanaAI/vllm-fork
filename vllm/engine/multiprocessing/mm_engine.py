@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import copy
 import pickle
 import signal
 import time
@@ -63,10 +64,15 @@ class MMLLMEngine(MQLLMEngine):
         kwargs.pop('is_multi_models_engine', None)
         engine_args = kwargs.pop('engine_args', None)
 
+        # Store per-model configurations
+        self.model_params = getattr(engine_args, 'model_params',
+                                    {}) if engine_args else {}
+
         self.engine_config = {
             'args': args,
             'kwargs': kwargs,
-            'engine_args': engine_args
+            'engine_args': engine_args,
+            'model_params': self.model_params
         }
         # get configs from args and kwargs, determine how many models to load
         original_vllm_config_list = kwargs.get('vllm_config')
@@ -259,7 +265,27 @@ class MMLLMEngine(MQLLMEngine):
                 if model not in models:
                     start = time.perf_counter()
                     print('start new model', model)
-                    engine_args = self.engine_config['engine_args']
+
+                    # Get base engine args and apply model-specific config
+                    engine_args = copy.deepcopy(
+                        self.engine_config['engine_args'])
+
+                    # Apply model-specific configuration if available
+                    if self.engine_config.get(
+                            'model_params'
+                    ) and model in self.engine_config['model_params']:
+                        model_config = self.engine_config['model_params'][
+                            model]
+                        logger.info(
+                            "Applying model-specific config for %s: %s", model,
+                            model_config)
+
+                        for param_name, param_value in model_config.items():
+                            if hasattr(engine_args, param_name):
+                                setattr(engine_args, param_name, param_value)
+                                logger.info("  Set %s = %s ", param_name,
+                                            param_value)
+
                     engine_args.model = model
                     engine_args.tokenizer = model
                     engine_args.models = None
