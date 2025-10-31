@@ -458,7 +458,7 @@ def run_tarsier(questions: list[str], modality: str) -> ModelRequestData:
 
 # InternVL
 def run_internvl(questions: list[str], modality: str) -> ModelRequestData:
-    model_name = "OpenGVLab/InternVL3-2B"
+    model_name = "OpenGVLab/InternVL3_5-8B"
 
     engine_args = EngineArgs(
         model=model_name,
