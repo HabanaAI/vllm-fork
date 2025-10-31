@@ -3,10 +3,12 @@
 
 import asyncio
 import os
+from contextlib import nullcontext
 from typing import Any, Callable, List, Optional, Union
 
 import cloudpickle
 
+import vllm.envs as envs
 from vllm.executor.executor_base import DistributedExecutorBase
 from vllm.executor.multiproc_worker_utils import (
     ProcessWorkerWrapper, ResultHandler, WorkerMonitor,
@@ -127,7 +129,8 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
                           max_concurrent_workers=self.parallel_config.
                           max_parallel_loading_workers)
         self.driver_exec_model = make_async(self.driver_worker.execute_model)
-        self.pp_locks: Optional[List[asyncio.Lock]] = None
+        self.pp_locks: Optional[List[Union[asyncio.Lock,
+                                           nullcontext[Any]]]] = None
         self.shutdown_workers = True
 
     def shutdown(self):
@@ -213,15 +216,28 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
         if not self.tp_driver_workers:
             return await self.driver_exec_model(execute_model_req)
 
+        from vllm.platforms import current_platform
         if self.pp_locks is None:
             # This locks each pipeline parallel stage so multiple virtual
             # engines can't execute on the same stage at the same time
             # We create the locks here to avoid creating them in the constructor
             # which uses a different asyncio loop.
+            lock_type: Union[type[asyncio.Lock], type[nullcontext[Any]]]
+            if current_platform.is_hpu():
+                #NOTE(Tanner): HPU manages its own locks
+                # to maximize PP concurrency.
+                lock_type = nullcontext
+            else:
+                lock_type = asyncio.Lock
+
             self.pp_locks = [
-                asyncio.Lock()
+                lock_type()
                 for _ in range(self.parallel_config.pipeline_parallel_size)
             ]
+
+        if current_platform.is_hpu():
+            execute_model_req = self.prepare_execute_model_req_patch(
+                execute_model_req)
 
         tasks = [
             asyncio.create_task(

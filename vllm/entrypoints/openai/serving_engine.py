@@ -350,7 +350,7 @@ class OpenAIServing:
                     engine_prompt,
                     pooling_params,
                     request_id_item,
-                    model=ctx.request.model,
+                    model=getattr(ctx.request, "model", None),
                     lora_request=ctx.lora_request,
                     trace_headers=trace_headers,
                     priority=getattr(ctx.request, "priority", 0),
