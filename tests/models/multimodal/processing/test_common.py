@@ -306,6 +306,8 @@ def _test_processing_correctness_one(
     "h2oai/h2ovl-mississippi-800m",
     "OpenGVLab/InternVL2-1B",
     "OpenGVLab/InternVL3-1B",
+    "Kwai-Keye/Keye-VL-8B-Preview",
+    "Kwai-Keye/Keye-VL-1_5-8B",
     "HuggingFaceM4/Idefics3-8B-Llama3",
     "HuggingFaceTB/SmolVLM2-2.2B-Instruct",
     "moonshotai/Kimi-VL-A3B-Instruct",

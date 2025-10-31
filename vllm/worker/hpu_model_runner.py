@@ -2929,7 +2929,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # Using the largest bucket
             img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
 
-        if self.model_is_mrope:
+        if self.get_model().config.model_type == 'KeyeVL1_5' \
+            or self.get_model().config.model_type == 'KeyeVL' :
+            pixel_values = torch.randn(10584, 3, 14, 14)
+            image_grid_thw = torch.tensor([[1, 84, 126]])
+            merge_length = self.get_model(
+            ).config.vision_config.spatial_merge_size**2
+            num_image_tokens = int(image_grid_thw.prod()) // merge_length
+            multi_modal_data = {
+                "pixel_values": pixel_values,
+                "image_grid_thw": image_grid_thw,
+            }
+        elif self.model_is_mrope:
             if not hasattr(self.get_model().config, "vision_config"):
                 raise ValueError("Expect mrope model to have vision_config")
             vision_config = self.get_model().config.vision_config
@@ -2960,7 +2971,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             assert pixel_values.shape[0] % 64 == 0, (
                 f"pixel_values must be sliced in 64 chunks, "
                 f"got: {pixel_values.shape}")
-
             multi_modal_data = {
                 "pixel_values": pixel_values,
                 "image_grid_thw": image_grid_thw,
