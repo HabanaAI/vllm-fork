@@ -445,6 +445,7 @@ class InternVisionModel(nn.Module):
         self,
         pixel_values: Optional[torch.Tensor] = None,
         pixel_embeds: Optional[torch.Tensor] = None,
+        **kwargs: object,
     ) -> torch.FloatTensor:
         if pixel_values is None and pixel_embeds is None:
             raise ValueError(

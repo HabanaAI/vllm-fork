@@ -121,3 +121,6 @@ class HpuPlatform(Platform):
     def supports_v1(cls, model_config: ModelConfig) -> bool:
         # V1 support on HPU is experimental
         return True
+
+    def is_sleep_mode_available(self) -> bool:
+        return True
