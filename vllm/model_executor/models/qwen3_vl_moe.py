@@ -37,6 +37,7 @@ from vllm.distributed import get_pp_group
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
+from vllm.model_executor.layers.quantization.fp8 import Fp8Config
 from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
@@ -220,10 +221,14 @@ class Qwen3MoeLLMModel(Qwen3MoeModel):
                     is_expert_weight = True
                     name_mapped = name.replace(weight_name, param_name)
                     if is_fused_expert:
-                        if 'scale' not in name:
+                        quant_config = self.vllm_config.quant_config
+                        is_dynamic_channel = \
+                          (isinstance(quant_config, Fp8Config) and
+                            quant_config.quant_scheme == "channel")
+                        if not is_dynamic_channel or 'scale' not in name:
                             loaded_weight = loaded_weight.transpose(
                                 -1, -2)  # no bias
-                        if 'gate_up_proj_scale' in name:
+                        if is_dynamic_channel and 'gate_up_proj_scale' in name:
                             loaded_weight = loaded_weight.unsqueeze(-1)
                         if "experts.gate_up_proj" in name:
                             loaded_weight = loaded_weight.chunk(2, dim=-2)
@@ -321,6 +326,7 @@ class Qwen3VLMoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super(Qwen3VLForConditionalGeneration, self).__init__()
         config: Qwen3VLMoeConfig = vllm_config.model_config.hf_config
+        quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
 
         self.config = config
@@ -335,7 +341,7 @@ class Qwen3VLMoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
         self.visual = qwen3_visionTransformer(
             config.vision_config,
             norm_eps=getattr(config, "rms_norm_eps", 1e-6),
-            quant_config=None,
+            quant_config=self._maybe_ignore_quant_config(quant_config),
             prefix=maybe_prefix(prefix, "visual"),
         )
 
