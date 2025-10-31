@@ -407,10 +407,13 @@ class HpuModelAdapter(torch.nn.Module):
         # This is to ensure that we keeps
         # the static and dynamic parts distinct.
         if htorch.utils.internal.is_lazy():
-            if self.model_is_mrope and hasattr(self.model, 'visual'):
+            if self.model_is_mrope and hasattr(self.model, 'visual') and \
+               model_config is not None and \
+               model_config.model_type != "glm4v_moe":
                 logger.info("[Multimodal] Wrapping Visual Model")
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
+
             if self.model_is_mrope and hasattr(self.model, 'audio_tower'):
                 logger.info("[Multimodal] Wrapping Audio Model")
                 self.model.audio_tower = htorch.hpu.wrap_in_hpu_graph(
