@@ -143,35 +143,35 @@ def rotate_half(x, interleaved=False):
                          "... d two -> ... (d two)",
                          two=2)
 
+
 def apply_rotary_pos_emb_hpu(
-    q: torch.Tensor,
-    k: torch.Tensor,
-    cos: torch.Tensor,
-    sin: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor,
+        sin: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     # Determine rotary dimension from cos/sin shape
     ro_dim = cos.shape[-1] * 2
 
-    # Split into rotated and pass-through parts  
-    q_rot = q[..., :ro_dim]  
-    q_pass = q[..., ro_dim:]  
-    k_rot = k[..., :ro_dim]  
-    k_pass = k[..., ro_dim:]  
-    
-    # Prepare cos/sin (remove the chunking)  
-    cos_full = cos  
-    sin_full = sin 
+    # Split into rotated and pass-through parts
+    q_rot = q[..., :ro_dim]
+    q_pass = q[..., ro_dim:]
+    k_rot = k[..., :ro_dim]
+    k_pass = k[..., ro_dim:]
+
+    # Prepare cos/sin (remove the chunking)
+    cos_full = cos
+    sin_full = sin
     # cos_half = cos.chunk(2, dim=-1)[0].contiguous()
     # sin_half = sin.chunk(2, dim=-1)[0].contiguous()
-    from habana_frameworks.torch.hpex.kernels import apply_rotary_pos_emb
-    q_rot = apply_rotary_emb_torch(q_rot.float(), cos_full.float(), sin_full.float()).type_as(q)  
-    k_rot = apply_rotary_emb_torch(k_rot.float(), cos_full.float(), sin_full.float()).type_as(k)  
-    
-    # Concatenate rotated and pass-through parts  
-    q_embed = torch.cat([q_rot, q_pass], dim=-1)  
-    k_embed = torch.cat([k_rot, k_pass], dim=-1)  
-    
+    q_rot = apply_rotary_emb_torch(q_rot.float(), cos_full.float(),
+                                   sin_full.float()).type_as(q)
+    k_rot = apply_rotary_emb_torch(k_rot.float(), cos_full.float(),
+                                   sin_full.float()).type_as(k)
+
+    # Concatenate rotated and pass-through parts
+    q_embed = torch.cat([q_rot, q_pass], dim=-1)
+    k_embed = torch.cat([k_rot, k_pass], dim=-1)
+
     return q_embed, k_embed
+
 
 def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
     """
@@ -182,7 +182,6 @@ def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
     head_dim = x.shape[-1]
     cos_dim = cos.shape[-1]
 
-    
     if cos_dim == head_dim:
         ro_dim = head_dim
         expand_pattern = "... d -> ... 1 d"  # don't double
@@ -196,8 +195,10 @@ def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
 
     assert ro_dim <= head_dim
 
-    cos = repeat(cos, expand_pattern if not interleaved else "... d -> ... 1 (d 2)")
-    sin = repeat(sin, expand_pattern if not interleaved else "... d -> ... 1 (d 2)")
+    cos = repeat(cos,
+                 expand_pattern if not interleaved else "... d -> ... 1 (d 2)")
+    sin = repeat(sin,
+                 expand_pattern if not interleaved else "... d -> ... 1 (d 2)")
     return torch.cat(
         [
             x[..., :ro_dim] * cos +
@@ -286,7 +287,8 @@ class Siglip2Attention(nn.Module):
         if self.use_rope:
             cos, sin = position_embeddings
             queries, keys = apply_rotary_pos_emb_hpu(queries.unsqueeze(0),
-                                                 keys.unsqueeze(0), cos, sin)
+                                                     keys.unsqueeze(0), cos,
+                                                     sin)
             queries = queries.squeeze(0)
             keys = keys.squeeze(0)
 
