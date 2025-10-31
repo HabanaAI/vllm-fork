@@ -26,8 +26,8 @@
 # limitations under the License.
 """Inference-only GLM-4V model compatible with HuggingFace weights."""
 
-import os
 import math
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
 from typing import Any, Callable, Literal, Optional, TypedDict, Union
@@ -84,7 +84,6 @@ is_hpu = current_platform.is_hpu()
 if is_hpu:
     import habana_frameworks.torch.core as htcore
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
-
 
 logger = init_logger(__name__)
 
@@ -173,6 +172,7 @@ class Glm4vVideoEmbeddingInputs(TypedDict):
 Glm4vVideoInputs = Union[Glm4vVideoPixelInputs, Glm4vVideoEmbeddingInputs]
 
 # === Vision Encoder === #
+
 
 class AttentionLongSequence:
 
@@ -302,7 +302,8 @@ class Glm4vVisionAttention(nn.Module):
                 f"GLM-4V does not support {self.attn_backend} backend now.")
 
         self.softmax_mode = 'fp32' if os.environ.get(
-            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1' ] else 'None'
+            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
+                                                             ] else 'None'
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -341,7 +342,8 @@ class Glm4vVisionAttention(nn.Module):
             rotary_pos_emb: torch.Tensor,
             max_seqlen: Optional[int] = None,  # Only used for Flash Attention
             seqlens: Optional[list[int]] = None,  # Only used for xFormers
-            fullattn_mask: Optional[torch.Tensor] = None, # Only used for gaudi
+            fullattn_mask: Optional[
+                torch.Tensor] = None,  # Only used for gaudi
     ) -> torch.Tensor:
         # [s, b, c] --> [s, b, head * 3 * head_dim]
         x, _ = self.qkv(x)
@@ -379,22 +381,24 @@ class Glm4vVisionAttention(nn.Module):
                                       "(b s) ... -> b s ...",
                                       b=batch_size)
         elif self.attn_backend == _Backend.TORCH_SDPA and is_hpu:
-            assert cu_seqlens.shape[0] <= 3, "Only support one image plus padding"
+            assert cu_seqlens.shape[
+                0] <= 3, "Only support one image plus padding"
             assert fullattn_mask is not None, \
                 "Should call to here from Glm4vVisionTransformerStaticShape"
 
-            q1, k1, v1 = (rearrange(x, "b s h d -> b h s d") for x in [q, k, v])
+            q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
+                          for x in [q, k, v])
             (batch_size, _, seq_len_N_t, _) = q1.shape
             (batch_size, _, seq_len_N_s, _) = k1.shape
             mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
             attn_mask = fullattn_mask.reshape(
-                    batch_size, 1, seq_len_N_t, seq_len_N_s,
-                    -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
+                batch_size, 1, seq_len_N_t, seq_len_N_s,
+                -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
             assert attn_mask.shape == mask_shape
 
             if q1.shape[2] <= 65536:  # need to investigate this crosspoint
-                fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0,
-                                                False, None, self.softmax_mode)
+                fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0, False,
+                                            None, self.softmax_mode)
             else:
                 fused_out = AttentionLongSequence.forward(
                     q1, k1, v1, attn_mask, 64, self.softmax_mode)
@@ -467,13 +471,13 @@ class Glm4vVisionBlock(nn.Module):
         )
 
     def forward(
-            self,
-            x: torch.Tensor,
-            cu_seqlens: torch.Tensor,
-            rotary_pos_emb: torch.Tensor,
-            max_seqlen: Optional[int] = None,  # Only used for Flash Attention
-            seqlens: Optional[list[int]] = None,  # Only used for xFormers
-            fullattn_mask: Optional[torch.Tensor] = None,
+        self,
+        x: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor,
+        max_seqlen: Optional[int] = None,  # Only used for Flash Attention
+        seqlens: Optional[list[int]] = None,  # Only used for xFormers
+        fullattn_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         x = x + self.attn(
             self.norm1(x),
@@ -874,6 +878,7 @@ class Glm4vVisionTransformer(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
+
 class Glm4vVisionTransformerStaticShape(Glm4vVisionTransformer):
     """
     Here we overwrite some of the methods of Glm4vVisionTransformer
@@ -886,6 +891,7 @@ class Glm4vVisionTransformerStaticShape(Glm4vVisionTransformer):
     the forward method ro run with HPU_Graphs, whereas the
     pre_attn and post_attn methods are allow to be dynamic.
     """
+
     def pad_multimodal_data(self, pixel_values, image_grid_thw,
                             vision_buckets):
         desired_number_of_pixels = vision_buckets.get_multimodal_bucket(
@@ -907,30 +913,35 @@ class Glm4vVisionTransformerStaticShape(Glm4vVisionTransformer):
 
         # ensure W and H can be divided to self.spatial_merge_size
         if padding_len % (self.spatial_merge_size**2) != 0:
-            raise ValueError("The padding length is not aligned to {self.spatial_merge_size}**2")
+            raise ValueError("The padding length is not aligned to "
+                             "{self.spatial_merge_size}**2")
 
         algined_padding_len = padding_len // (self.spatial_merge_size**2)
         padding_h = algined_padding_len * self.spatial_merge_size
         padding_w = padding_len // padding_h
-        while padding_w  < 8 and ((padding_h // 2) % self.spatial_merge_size) == 0:
+        while padding_w < 8 and ((padding_h // 2) %
+                                 self.spatial_merge_size) == 0:
             padding_w *= 2
             padding_h //= 2
 
         image_grid_thw = torch.cat([
             image_grid_thw,
-            torch.tensor([[1, padding_w, padding_h]], device=image_grid_thw.device)
+            torch.tensor([[1, padding_w, padding_h]],
+                         device=image_grid_thw.device)
         ])
 
         assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
         return pixel_values, image_grid_thw
 
-    def forward(self,
-                x: torch.Tensor,
-                cu_seqlens: torch.Tensor,
-                rotary_pos_emb: torch.Tensor,
-                max_seqlen: Optional[int] = None,  # Only used for Flash Attention
-                fullattn_mask: Optional[torch.Tensor] = None, # Only used for Gaudi
-                ) -> torch.Tensor:
+    def forward(
+            self,
+            x: torch.Tensor,
+            cu_seqlens: torch.Tensor,
+            rotary_pos_emb: torch.Tensor,
+            max_seqlen: Optional[int] = None,  # Only used for Flash Attention
+            fullattn_mask: Optional[
+                torch.Tensor] = None,  # Only used for Gaudi
+    ) -> torch.Tensor:
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             htcore.mark_step()
@@ -941,7 +952,6 @@ class Glm4vVisionTransformerStaticShape(Glm4vVisionTransformer):
                                 fullattn_mask=fullattn_mask)
 
         return hidden_states
-
 
     def create_block_diagonal_attention_mask_outerprod(self, indices):
         maxsize = indices[-1]
@@ -984,29 +994,32 @@ class Glm4vVisionTransformerStaticShape(Glm4vVisionTransformer):
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
-        # cu_seqlens is 1 Dim tensor, [0, w1xH1, w1xH1*2, ...,  w1xH1*T, W2xH2, ...]
+        # cu_seqlens is 1 Dim tensor, like:
+        # [0, w1xH1, w1xH1*2, ...,  w1xH1*T, W2xH2, ...]
 
         max_seqlen, seqlens = self.compute_attn_mask_seqlen(cu_seqlens)
         # seqlens is a list of cu_seqlens values
 
         hidden_states = self.embeddings(hidden_states, seqlens, grid_thw,
-            image_type_ids[:, 0], image_type_ids[:, 1])
+                                        image_type_ids[:, 0],
+                                        image_type_ids[:, 1])
         # Add a pos embed on hidden_states, shape unchanged
 
         return (hidden_states, rotary_pos_emb, cu_seqlens, max_seqlen)
 
     def post_attn(self, hidden_states: torch.Tensor):
         hidden_states = self.post_layernorm(hidden_states)
-        hidden_states = hidden_states.view(-1, self.spatial_merge_size, self.spatial_merge_size,
-                   hidden_states.shape[-1])
+        hidden_states = hidden_states.view(-1, self.spatial_merge_size,
+                                           self.spatial_merge_size,
+                                           hidden_states.shape[-1])
         hidden_states = hidden_states.permute(0, 3, 1, 2)
 
-        hidden_states = self.downsample(hidden_states).view(-1, self.out_hidden_size)
+        hidden_states = self.downsample(hidden_states).view(
+            -1, self.out_hidden_size)
 
         hidden_states = self.merger(hidden_states)
 
         return hidden_states
-
 
     def get_image_embeds(
         self,
@@ -1016,7 +1029,8 @@ class Glm4vVisionTransformerStaticShape(Glm4vVisionTransformer):
     ) -> torch.Tensor:
         # first, align the image to 64
         num_patches = pixel_values.shape[0]
-        assert num_patches % (self.spatial_merge_size**2) == 0, " Patches num not align."
+        assert num_patches % (self.spatial_merge_size**
+                              2) == 0, " Patches num not align."
 
         offset = 0
         results = []
@@ -1024,16 +1038,23 @@ class Glm4vVisionTransformerStaticShape(Glm4vVisionTransformer):
             img_shape = grid_thw[img_idx, :].unsqueeze(0)
             curr_img_size = img_shape.prod()
 
-            pixel_values_curr_img = pixel_values[offset:offset + curr_img_size, :]
+            pixel_values_curr_img = pixel_values[offset:offset +
+                                                 curr_img_size, :]
             offset += curr_img_size
 
-            pixel_values_curr_img_padded, img_shape_padded = self.pad_multimodal_data(
-                pixel_values_curr_img, img_shape, vision_buckets=vision_buckets)
-            pixel_values_curr_img_padded, rot_pos_emb, cu_seqlens, max_seqlen = \
+            pixel_values_curr_img_padded, img_shape_padded = \
+                self.pad_multimodal_data(
+                    pixel_values_curr_img,
+                    img_shape,
+                    vision_buckets=vision_buckets)
+            pixel_values_curr_img_padded, rot_pos_emb, \
+                cu_seqlens, max_seqlen = \
                 self.pre_attn(pixel_values_curr_img_padded, img_shape_padded)
 
-            fullatt_block_attn_mask = self.create_block_diagonal_attention_mask_outerprod(cu_seqlens)
-            assert pixel_values_curr_img_padded.shape[0] == cu_seqlens[-1] == rot_pos_emb.shape[0]
+            fullatt_block_attn_mask = \
+                self.create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+            assert pixel_values_curr_img_padded.shape[0] == cu_seqlens[
+                -1] == rot_pos_emb.shape[0]
 
             htcore.mark_step()
 
@@ -1047,11 +1068,13 @@ class Glm4vVisionTransformerStaticShape(Glm4vVisionTransformer):
             image_embeds = self.post_attn(hidden_states)
 
             # slice image_embeds to remove the padded parts
-            pad_index = img_shape_padded[0].prod() // (self.spatial_merge_size**2)
+            pad_index = img_shape_padded[0].prod() // (self.spatial_merge_size
+                                                       **2)
             results += [image_embeds[:pad_index, :]]
 
         results_cat = torch.concat(results)
         return results_cat
+
 
 class Glm4vProcessingInfo(BaseProcessingInfo):
 
@@ -1634,7 +1657,8 @@ class Glm4vForConditionalGeneration(nn.Module, SupportsMultiModal,
         else:
             pixel_values = image_input["pixel_values"].type(self.visual.dtype)
             if is_hpu:
-                assert isinstance(self.visual, Glm4vVisionTransformerStaticShape)
+                assert isinstance(self.visual,
+                                  Glm4vVisionTransformerStaticShape)
                 image_embeds = self.visual.get_image_embeds(
                     pixel_values,
                     grid_thw=grid_thw,
@@ -1663,14 +1687,16 @@ class Glm4vForConditionalGeneration(nn.Module, SupportsMultiModal,
             pixel_values_videos = video_input["pixel_values_videos"].type(
                 self.visual.dtype)
             if is_hpu:
-                assert isinstance(self.visual, Glm4vVisionTransformerStaticShape)
+                assert isinstance(self.visual,
+                                  Glm4vVisionTransformerStaticShape)
                 video_embeds = self.visual.get_image_embeds(
                     pixel_values_videos,
                     grid_thw=grid_thw,
                     vision_buckets=self.vision_buckets,
                 )
             else:
-                video_embeds = self.visual(pixel_values_videos, grid_thw=flat_grid_thw)
+                video_embeds = self.visual(pixel_values_videos,
+                                           grid_thw=flat_grid_thw)
 
         # Split concatenated embeddings for each video item.
         merge_size = self.visual.spatial_merge_size

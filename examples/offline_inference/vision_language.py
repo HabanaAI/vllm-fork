@@ -314,6 +314,7 @@ def run_glm4_1v(questions: list[str], modality: str) -> ModelRequestData:
         prompts=prompts,
     )
 
+
 # GLM-4.5V
 def run_glm4_5v(questions: list[str], modality: str) -> ModelRequestData:
     model_name = "zai-org/GLM-4.5V"
