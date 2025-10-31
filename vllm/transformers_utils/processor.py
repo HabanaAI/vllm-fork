@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from transformers.processing_utils import ProcessorMixin
 from typing_extensions import TypeVar
 
+from vllm.transformers_utils.utils import convert_model_repo_to_path
+
 if TYPE_CHECKING:
     from vllm.config import ModelConfig
 
@@ -69,6 +71,7 @@ def get_processor(
                          isinstance(processor_cls, tuple) else processor_cls)
 
     try:
+        processor_name = convert_model_repo_to_path(processor_name)
         processor = processor_factory.from_pretrained(
             processor_name,
             *args,
@@ -130,6 +133,7 @@ def get_feature_extractor(
     from transformers import AutoFeatureExtractor
     from transformers.feature_extraction_utils import FeatureExtractionMixin
     try:
+        processor_name = convert_model_repo_to_path(processor_name)
         feature_extractor = AutoFeatureExtractor.from_pretrained(
             processor_name,
             *args,
@@ -182,6 +186,7 @@ def get_image_processor(
     from transformers.image_processing_utils import BaseImageProcessor
 
     try:
+        processor_name = convert_model_repo_to_path(processor_name)
         processor = AutoImageProcessor.from_pretrained(
             processor_name,
             *args,
