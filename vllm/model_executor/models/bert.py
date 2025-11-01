@@ -4,6 +4,7 @@
 from collections.abc import Iterable
 from typing import Optional
 
+import habana_frameworks.torch as htorch
 import torch
 from torch import nn
 from transformers import BertConfig
@@ -129,8 +130,10 @@ class BertEncoder(nn.Module):
         self,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
+        htorch.core.mark_step()
         for layer in self.layer:
             hidden_states = layer(hidden_states)
+            htorch.core.mark_step()
         return hidden_states
 
 
