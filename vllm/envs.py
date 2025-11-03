@@ -127,6 +127,7 @@ if TYPE_CHECKING:
     VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE: int = 163840
     VLLM_TOOL_PARSE_REGEX_TIMEOUT_SECONDS: int = 1
     VLLM_SLEEP_WHEN_IDLE: bool = False
+    VLLM_WORKERS_NUMA_TOPO: Optional[str] = None
 
 
 def get_default_cache_root():
@@ -872,6 +873,17 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # latency penalty when a request eventually comes.
     "VLLM_SLEEP_WHEN_IDLE":
     lambda: bool(int(os.getenv("VLLM_SLEEP_WHEN_IDLE", "0"))),
+
+    # If PP-group comms cannot use HCCL/NCCL/etc,
+    # set VLLM_PP_USE_CPU_COMS=1 to force PP comms over
+    # Gloo on CPU and avoid hangs (send/recv/broadcast).
+    "VLLM_PP_USE_CPU_COMS":
+    lambda: bool(int(os.getenv("VLLM_PP_USE_CPU_COMS", "0"))),
+
+    # Device NUMA topo, format: "module_id_start,module_id_stop:cpu_affinity:numa_affinity;
+    # module_id_start,module_id_stop:cpu_affinity:numa_affinity".
+    "VLLM_WORKERS_NUMA_TOPO":
+    lambda: os.getenv("VLLM_WORKERS_NUMA_TOPO", None),
 }
 
 # --8<-- [end:env-vars-definition]

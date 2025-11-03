@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
+import itertools
 import os
 import sys
 import threading
@@ -11,7 +12,7 @@ from multiprocessing import Queue
 from multiprocessing.connection import wait
 from multiprocessing.process import BaseProcess
 from typing import (Any, Callable, Dict, Generic, List, Optional, TextIO,
-                    TypeVar, Union)
+                    Tuple, TypeVar, Union)
 
 import torch
 
@@ -203,6 +204,48 @@ class ProcessWorkerWrapper:
         self._task_queue.close()
         self.process.kill()
 
+def _parse_affinity_string(affinity_str: str) -> Dict[Tuple[int, int], Tuple[itertools.chain, int]]:
+    """
+    Parse affinity string from environment variable into a dictionary.
+
+    Format: "0,3:56-111,168-223:1;4,7:0-55,112-167:0"
+    Returns: {(0,3): (chain(...), 1), (4,7): (chain(...), 0)}
+    """
+    result = {}
+
+    # Split by semicolon to get each group
+    groups = affinity_str.strip().split(';')
+
+    for group in groups:
+        # Split by colon: modID_range:cpu_affinity:numa_affinity
+        parts = group.split(':')
+        mod_range = parts[0]
+        cpu_affinity = parts[1]
+        numa_affinity = int(parts[2])
+
+        # Parse modID range
+        mod_ids = mod_range.split(',')
+        mod_start = int(mod_ids[0])
+        mod_end = int(mod_ids[1])
+
+        # Parse CPU affinity ranges
+        cpu_ranges = cpu_affinity.split(',')
+        range_objects = []
+
+        for cpu_range in cpu_ranges:
+            range_parts = cpu_range.split('-')
+            start = int(range_parts[0])
+            end = int(range_parts[1])
+            # range() is end-exclusive, so we add 1 to include the end value
+            range_objects.append(range(start, end + 1))
+
+        # Create chain of ranges
+        cpu_chain = itertools.chain(*range_objects)
+
+        # Add to result dictionary with tuple key
+        result[(mod_start, mod_end)] = (cpu_chain, numa_affinity)
+
+    return result
 
 def _run_worker_process(
     worker_factory: Callable[[VllmConfig, int], Any],
@@ -212,6 +255,25 @@ def _run_worker_process(
     rank: int,
 ) -> None:
     """Worker process event loop"""
+
+    # set CPU and NUMA affinity if specified
+    if envs.VLLM_WORKERS_NUMA_TOPO:
+        _topo = _parse_affinity_string(envs.VLLM_WORKERS_NUMA_TOPO)
+        for (key, (cpu_chain, numa_affinity)) in _topo.items():
+            if rank >= key[0] and rank <= key[1]:
+                try:
+                    os.sched_setaffinity(0, cpu_chain)
+                except AttributeError:
+                    logger.warning("Cannot set CPU affinity on this OS.")
+                try:
+                    import psutil
+                    p = psutil.Process()
+                    p.numa_affinity([numa_affinity])
+                except ImportError:
+                    logger.warning("psutil not installed, cannot set NUMA affinity.")
+                except AttributeError:
+                    logger.warning("Cannot set NUMA affinity on this OS.")
+                break
 
     # Add process-specific prefix to stdout and stderr
     process_name = get_mp_context().current_process().name
