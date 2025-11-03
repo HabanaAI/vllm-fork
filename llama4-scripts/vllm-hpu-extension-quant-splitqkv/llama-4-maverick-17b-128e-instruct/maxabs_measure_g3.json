@@ -1,0 +1,1 @@
+{"method": "HOOKS","mode": "MEASURE","observer": "maxabs","allowlist": {"types": [], "names":  []},"blocklist": {"types": [], "names":  []},"quantize_weight": false,"dump_stats_path": "/software/stanley/benchmark-config/vllm-fork-llama4/llama4-scripts/vllm-hpu-extension/calibration/inc/llama-4-maverick-17b-128e-instruct/g3/inc_output"}
