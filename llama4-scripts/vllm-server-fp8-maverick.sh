@@ -32,7 +32,7 @@ model_name="Maverick"
 mkdir -p benchmark_logs
 #export VLLM_SKIP_WARMUP=True
 
-RECIPE_FLAG="visionbf16_kvfp8" # Currently best functional with perf
+RECIPE_FLAG="visionbf16_kvfp8_splitqkv" # Currently best functional with perf
 
 if [[ "$RECIPE_FLAG" == "meta" ]]; then
   echo "INFO: Flag is 'meta'. Using meta recipe without FP8 KV cache. Meta's recipe (Vision and text is working but no fp8 kv cache)"
@@ -48,6 +48,7 @@ elif [[ "$RECIPE_FLAG" == "visionbf16_kvfp8" ]]; then
   KV_CACHE_ARGS="--kv-cache-dtype fp8_inc"
 elif [[ "$RECIPE_FLAG" == "visionbf16_kvfp8_splitqkv" ]]; then
   echo "INFO: Flag is 'visionbf16_kvfp8_splitqkv'. Using default recipe with FP8 KV cache with vision BF16 with splitqkv."
+  export QUANT_CONFIG="./vllm-hpu-extension-quant-splitqkv/llama-4-maverick-17b-128e-instruct/maxabs_quant_g3.json"
   KV_CACHE_ARGS="--kv-cache-dtype fp8_inc --split_qkv"
 fi
 
