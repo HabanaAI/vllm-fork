@@ -1205,8 +1205,109 @@ class MRotaryEmbedding(RotaryEmbedding):
         self.mrope_interleaved = mrope_interleaved
         if self.mrope_section:
             assert sum(self.mrope_section) == rotary_dim // 2
+        if self.mrope_interleaved:
+            # Use matrix add instead of slice assignment.
+            # Prepare the zero matrix in advance, keeping only the
+            # values at the positions that need to be assigned.
+            assert self.mrope_section
+            sin_start_idx = rotary_dim // 2
+            self.cos_sin_cache_mrope1 = torch.zeros_like(self.cos_sin_cache)
+            self.cos_sin_cache_mrope2 = torch.zeros_like(self.cos_sin_cache)
+            mrope1_slice = (list(range(1, mrope_section[1] * 3, 3)) + list(
+                range(sin_start_idx + 1, sin_start_idx + mrope_section[1] * 3,
+                      3)))
+            mrope2_slice = (list(range(2, mrope_section[2] * 3, 3)) + list(
+                range(sin_start_idx + 2, sin_start_idx + mrope_section[2] * 3,
+                      3)))
+            self.cos_sin_cache_mrope1[..., mrope1_slice] = \
+                self.cos_sin_cache[..., mrope1_slice]
+            self.cos_sin_cache_mrope2[..., mrope2_slice] = \
+                self.cos_sin_cache[..., mrope2_slice]
+            self.cos_sin_cache_mrope0 = self.cos_sin_cache.clone()
+            self.cos_sin_cache_mrope0[..., mrope1_slice] = 0
+            self.cos_sin_cache_mrope0[..., mrope2_slice] = 0
 
-    def forward(
+    def forward_hpu(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: Optional[torch.Tensor] = None,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """PyTorch-native implementation equivalent to forward().
+
+        Args:
+            positions:
+                [num_tokens,] (text only) or
+                [3, num_tokens] (T/H/W positions with multimodal inputs)
+            query: [num_tokens, num_heads * head_size]
+            key: [num_tokens, num_kv_heads * head_size]
+        """
+        from habana_frameworks.torch.hpex.kernels import (
+            RotaryPosEmbeddingMode, apply_rotary_pos_emb)
+        rope_mode: RotaryPosEmbeddingMode
+        if self.is_neox_style:
+            rope_mode = RotaryPosEmbeddingMode.BLOCKWISE
+        else:
+            rope_mode = RotaryPosEmbeddingMode.PAIRWISE
+        assert positions.ndim == 1 or positions.ndim == 2
+        assert key is not None
+
+        num_tokens = positions.shape[-1]
+        if positions.ndim == 2:
+            assert self.mrope_section
+            if self.mrope_interleaved:
+                cos_sin = (self.cos_sin_cache_mrope0[positions[0]] +
+                           self.cos_sin_cache_mrope1[positions[1]] +
+                           self.cos_sin_cache_mrope2[positions[2]])
+                cos, sin = cos_sin.chunk(2, dim=-1)
+            else:
+                cos_sin = self.cos_sin_cache[positions]
+                cos, sin = cos_sin.chunk(2, dim=-1)
+                cos = torch.cat([
+                    m[i] for i, m in enumerate(
+                        cos.split(self.mrope_section, dim=-1))
+                ],
+                                dim=-1)
+                sin = torch.cat([
+                    m[i] for i, m in enumerate(
+                        sin.split(self.mrope_section, dim=-1))
+                ],
+                                dim=-1)
+        else:
+            cos_sin = self.cos_sin_cache[positions]
+            cos, sin = cos_sin.chunk(2, dim=-1)
+
+        if self.is_neox_style:
+            cos = torch.cat((cos, cos), dim=-1)
+            sin = torch.cat((sin, sin), dim=-1)
+        cos = cos.unsqueeze(-2)
+        sin = sin.unsqueeze(-2)
+
+        query_shape = query.shape
+        query = query.view(num_tokens, -1, self.head_size)
+
+        if self.head_size == self.rotary_dim and key is not None:
+            key_shape = key.shape
+            key = key.view(num_tokens, -1, self.head_size)
+            query = apply_rotary_pos_emb(query, cos, sin, None, 0, rope_mode)
+            key = apply_rotary_pos_emb(key, cos, sin, None, 0, rope_mode)
+            return query.reshape(query_shape), key.reshape(key_shape)
+
+        query_rot = query[..., :self.rotary_dim]
+        query_pass = query[..., self.rotary_dim:]
+        query_rot = apply_rotary_pos_emb(query_rot, cos, sin,
+                                         self.is_neox_style)
+        query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
+
+        key_shape = key.shape
+        key = key.view(num_tokens, -1, self.head_size)
+        key_rot = key[..., :self.rotary_dim]
+        key_pass = key[..., self.rotary_dim:]
+        key_rot = apply_rotary_pos_emb(key_rot, cos, sin, self.is_neox_style)
+        key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
+        return query, key
+
+    def forward_native(
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
