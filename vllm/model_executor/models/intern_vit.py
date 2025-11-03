@@ -29,6 +29,13 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
+try:
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+    from vllm_hpu_extension.utils import ModuleFusedSDPA
+except ImportError:
+    print("Not using HPU fused scaled dot-product attention kernel.")
+    FusedSDPA = None
+
 NORM2FN = {
     'rms_norm': RMSNorm,
     'layer_norm': nn.LayerNorm,
@@ -271,8 +278,21 @@ class InternSdpaAttention(nn.Module):
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
+        if FusedSDPA is not None:
+            fsdpa_op = ModuleFusedSDPA(FusedSDPA)
+            x = fsdpa_op(q,
+                         k,
+                         v,
+                         None,
+                         dropout_p=0.0,
+                         is_causal=False,
+                         scale=self.scale,
+                         softmax_mode="fast",
+                         recompute_mode=True,
+                         valid_sequence_lengths=None)
+        else:
+            x = F.scaled_dot_product_attention(q, k, v, scale=self.scale)
 
-        x = F.scaled_dot_product_attention(q, k, v, scale=self.scale)
         x = x.transpose(1, 2).reshape(B, N, -1)
 
         x = self.proj(x)
