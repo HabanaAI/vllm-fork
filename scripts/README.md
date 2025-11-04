@@ -280,9 +280,10 @@ Copy the converted quantization files into the quantization folder:
 cp -r vllm-hpu-extension/calibration/quantization/* quantization/
 ```
 
-Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf.
-```bash
+Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf. An example of the quantization folder is below. 
+```shell
 ls vllm-fork/scripts/quantization/
+
 qwen3-235b-a22b-fp8  qwen2.5-72b-instruct
 ```
 
