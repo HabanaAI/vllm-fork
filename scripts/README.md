@@ -217,7 +217,7 @@ usage: calibrate_model.sh <options>
 > **For Mixture of Experts (MoE) models**: The `-u` must be passed to enable Expert Parallelism (EP) except for [Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct).
 
 ##### 1. Do the calibration for BF16 model
-For the models which only have BF16 precision, like Qwen2.5-72B-Insturct, it can be calibrated on 4 Gaudi cards with the command below. The measured data will be saved into the `quantization` folder. With this measured data, vLLM can run this model with FP8 precision with 2 or 4 Gaudi cards. 
+For the models which only have BF16 precision, like Qwen2.5-72B-Insturct, it can be calibrated on 4 Gaudi cards with the command below. The measured data will be saved into the `quantization` folder. With this measured data, vLLM can run this model with FP8 precision with 2 or 4 Gaudi cards.
 
 ```bash
 cd vllm-hpu-extension/calibration
@@ -230,7 +230,7 @@ cd vllm-hpu-extension/calibration
 ```
 
 ##### 2. Do the calibration for FP8 model
-For the new models which have the FP8 precision, like Qwen3-235B-A22B-FP8 or GLM-4.5-Air-FP8, the calibration is also required to optimize the performance. The calibration may directly be done on the FP8 model. The example below is to do the calibration on Qwen3-256B-A223-FP8 model with 8 cards. Then vLLM can run this model with FP8 precision with 4 or 8 Gaudi cards. 
+For the new models which have the FP8 precision, like Qwen3-235B-A22B-FP8 or GLM-4.5-Air-FP8, the calibration is also required to optimize the performance. The calibration may directly be done on the FP8 model. The example below is to do the calibration on Qwen3-256B-A223-FP8 model with 8 cards. Then vLLM can run this model with FP8 precision with 4 or 8 Gaudi cards.
 
 ``` bash
 bash calibrate_model.sh \
@@ -240,7 +240,7 @@ bash calibrate_model.sh \
      -t 8 -r 4 -u
 ```
 
-If only 4 Gaudi cards are available, the Qwen3-235B-A22B-FP8 calibration can also be done with 4 cards. Then vLLM can run this model with FP8 precision with only 4 Gaudi cards. 
+If only 4 Gaudi cards are available, the Qwen3-235B-A22B-FP8 calibration can also be done with 4 cards. Then vLLM can run this model with FP8 precision with only 4 Gaudi cards.
 
 ``` bash
 bash calibrate_model.sh \
@@ -280,7 +280,7 @@ Copy the converted quantization files into the quantization folder:
 cp -r vllm-hpu-extension/calibration/quantization/* quantization/
 ```
 
-Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf. An example of the quantization folder is below. 
+Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf. An example of the quantization folder is below.
 ```console
 root@server:/workspace$ ls vllm-fork/scripts/quantization/
 
