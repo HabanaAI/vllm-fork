@@ -636,7 +636,46 @@ bash start_gaudi_vllm_server.sh \
     -c /data/8B_warmup_cache
 ```
 
-#### 3.3.3 Qwen3-Coder-480B-A35B-Instruct-FP8 （8 卡部署）
+#### 3.3.3 Qwen3-235B-A22B-Instruct-2507-FP8 （4 卡部署）
+
+下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
+
+```bash
+pip install modelscope
+modelscope download --model Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 --local_dir /data/hf_models/Qwen3-235B-A22B-Instruct-2507-FP8
+```
+
+对于 Qwen3-235B-A22B-Instruct-2507-FP8，需要使用 calibrate_model.sh 脚本进行校准。
+
+```bash
+cd vllm-hpu-extension/calibration
+MODEL=/data/hf_models/Qwen3-235B-A22B-Instruct-2507-FP8
+HPU_SIZE=4
+./calibrate_model.sh \
+     -m $MODEL \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t $HPU_SIZE
+```
+
+Qwen3-235B-A22B-Instruct-2507-FP8 模型部署可使用如下命令启动：
+
+```bash
+#将校准后的量化文件复制到quantization文件夹中：
+cd vllm-fork/scripts
+mkdir quantization
+cp -r vllm-hpu-extension/calibration/quantization/* quantization/
+bash start_gaudi_vllm_server.sh \
+    -w "/data/hf_models/Qwen3-235B-A22B-Instruct-2507-FP8" \
+    -t 4 \
+    -a "127.0.0.1:30001" \
+    -d fp8 \
+    -b 128 \
+    -x 16384 \
+    -c /vllm_cache/Qwen3-235B-A22B-Instruct-2507-FP8
+```
+
+#### 3.3.4 Qwen3-Coder-480B-A35B-Instruct-FP8 （8 卡部署）
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
 
@@ -658,7 +697,7 @@ HPU_SIZE=8
      -t $HPU_SIZE
 ```
 
-Qwen3-Coder-480B-A35B-Instruct-FP8-G2 模型部署可使用如下命令启动：
+Qwen3-Coder-480B-A35B-Instruct-FP8 模型部署可使用如下命令启动：
 
 ```bash
 #将校准后的量化文件复制到quantization文件夹中：
