@@ -89,9 +89,8 @@ HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --si
 例如从 ModelScope 下载 Qwen2-72B 模型权重文件：
 
 ```bash
-sudo apt install git-lfs
-git-lfs install
-git clone https://www.modelscope.cn/Qwen/Qwen2-72B-Instruct /models/Qwen2-72B-Instruct
+pip install modelscope
+modelscope download --model Qwen/Qwen2-72B-Instruct --local_dir /models/Qwen2-72B-Instruct
 ```
 
 ### 1.4 安装 vLLM
@@ -100,10 +99,15 @@ git clone https://www.modelscope.cn/Qwen/Qwen2-72B-Instruct /models/Qwen2-72B-In
 使用如下命令在镜像环境安装 vLLM v1.21.0：
 
 ```bash
+# install vllm
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
 pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install -r vllm-fork/requirements-hpu.txt
 VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# [optional] install vllm-hpu-extension to do calibration and run in fp8
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+pip install -e vllm-hpu-extension --no-build-isolation
 ```
 
 可选：如果需要使用像 Qwen-VL、GLM-4V 这样的多模态模型，请安装 Pillow-SIMD 来提升性能：
@@ -145,14 +149,12 @@ Options:
 -q  Path to the quantization config file, str, default=None
     default=./quantization/<model_name_lower>/maxabs_quant_g2.json for -d 'fp8'
     The environment variable 'QUANT_CONFIG' will override this option.
--i  Input range, str, format='input_min,input_max', default='4,1024'
+-x  max-model-len for vllm, int, default=16384
     Make sure the range cover all the possible lengths from the benchmark/client.
 -p  Max number of the prefill sequences, int, default=1
     Used to control the max batch size for prefill to balance the TTFT and throughput.
     The default value of 1 is used to optimize the TTFT.
     Set to '' to optimize the throughput for short prompts.
--o  Output range, str, format='output_min,output_max', default='4,2048'
-    Make sure the range cover all the possible lengths from the benchmark/client.
 -b  max-num-seqs for vLLM, int, default=128
     Used to control the max batch size for decoding phase.
     It is recommended to set this value according to the 'Maximum concurrency'
@@ -186,9 +188,8 @@ Options:
 - `-a` API 服务器 URL，格式为 'IP:PORT'，默认值=127.0.0.1:30001
 - `-d` 指定模型精度，['bfloat16'|'float16'|'fp8'|'awq'|'gptq']，默认值为'bfloat16'，如果提供了-q 或环境变量“QUANT_CONFIG”，则设置为“fp8”。
 - `-q` 量化配置文件路径，默认值：无，如果通过 -d 'fp8' 将模型精度设置为 fp8，则默认值：./quantization/<model_name_lower>/maxabs_quant_g2.json，环境变量“QUANT_CONFIG”将覆盖此选项。
-- `-i` 指定单个访问请求输入的长度范围，比如 `-i 4,16384` 表示输入长度在 4 个 token 到 16k 个 token。用户可根据实际业务部署需求更改上限值。
-- `-p` 预填充序列的最大数量，整数，默认值为 1，用于控制预填充的最大批次大小，以平衡 TTFT 和吞吐量。默认值 1 用于优化 TTFT。设置为 '' 可优化短提示的吞吐量。
-- `-o` 指定单个访问请求输出的长度范围，比如 `-o 4,2048` 表示输出长度在 4 个 token 到 2k 个 token。用户可根据实际业务部署需求更改上限值。
+- `-x` vllm 的最大模型长度，整数，默认值=16384，确保该范围涵盖基准测试/客户端所有可能的长度。
+- `-p` 预填充队列的个数，整数，默认值为 1，用于控制预填充的最大批次大小，以平衡 TTFT 和吞吐量。默认值 1 用于优化 TTFT。如果是短的输入，可以设置为 2048/input_min 来优化吞吐量。
 - `-b` 服务支持的最大并发，默认值：128，用于控制解码阶段的最大批次大小。建议根据“最大并发量”设置此值。
 - `-g` 默认值为 8192，用于控制 HPUgraph 中捕获的最大批量 token 数量。降低此值可以减少内存使用量，但不能小于 2048。
 - `-u` 浮点型，默认值：0.9，用于控制 GPU 内存利用率。如果发生 OOM，请降低此值。
@@ -197,11 +198,9 @@ Options:
 - `-c` 执行模型预热的缓存目录
 - `-s` 是否跳过模型预热，布尔值，默认值为 false，跳过预热以减少启动时间。仅适用于调试/开发环境。请勿用于生产环境。
 
-服务启动命令和参数配置可参考[第三章节](#30-大模型服务启动示例)。
-
 ### 2.2 模型预热
 
-以下启动命令表示启动 vLLM 服务在 Qwen2-72B-Instruct 模型上，使用 Gaudi 的 4 张卡，module ID 分别是 0、1、2、3，输入长度范围是 800 到 1024 token，输出范围是 400 到 512 token，推理精度是 BF16，vLLM 服务侦听在 30001 端口上。
+以下启动命令表示启动 vLLM 服务在 Qwen2-72B-Instruct 模型上，使用 Gaudi 的 4 张卡，module ID 分别是 0、1、2、3，最大模型长度为 16384，推理精度是 BF16，vLLM 服务侦听在 30001 端口上。
 
 ```bash
 bash start_gaudi_vllm_server.sh \
@@ -210,8 +209,7 @@ bash start_gaudi_vllm_server.sh \
     -m 0,1,2,3 \
     -a 127.0.0.1:30001 \
     -d bfloat16 \
-    -i 800,1024 \
-    -o 400,512 \
+    -x 16384 \
     -b 128 \
     -c /data/warmup_cache
 ```
@@ -233,13 +231,140 @@ INFO: Uvicorn running on http://127.0.0.1:30001 (Press CTRL+C to quit)
 
 若对服务启动时间有严格要求，可在第二次带上预热缓存目录的启动任务命令中加上 `-s` 选项来跳过预热阶段，该选项会用部分初始访问请求来做性能预热，可能会观测到轻微的性能损失，在一段预热时间后恢复到正常水平。
 
+### 2.3 使用 INC 运行 FP8 的 vLLM
+
+使用 Intel(R) Neural Compressor (INC) 可以实现以 FP8 精度运行 vLLM。要使用 INC 以 FP8 精度运行 vLLM，请传递参数 -d fp8 并使用 -w <模型路径> 指定 bfloat16 或 float16 模型的路径。模型将使用从 FP8 校准程序获得的校准数据量化为 FP8。
+
+#### 2.3.1 FP8 格式转换
+
+Gaudi2 支持 fp8_e4m3fnuz 而非 fp8_e4m3fn，因此目前 fp8_e4m3fn 权重会先加载到主机内存，然后转换为 fp8_e4m3fnuz 格式，最后才传输到 HPU。如果模型使用 INC 来实现 FP8 量化，这个转换过程会自动完成，但是对于一些模型，例如 Hunyuan-A13B-Instruct-FP8， 需要使用脚本 convert_weights_for_gaudi2.py 离线转换 fp8_e4m3fn 权重，并在 calibration 和启动 vllm 中设置环境变量 VLLM_HPU_CONVERT_TO_FP8UZ=false。
+
+使用原始 fp8_e4m3fn 权重时，不要设置 VLLM_HPU_CONVERT_TO_FP8UZ=false；使用转换后的 fp8_e4m3fnuz 权重时，不要忘记设置 VLLM_HPU_CONVERT_TO_FP8UZ=false。
+
+convert_weights_for_gaudi2.py
+
+比较重要的参数包括：
+
+- `-i` [必需] 指定原始模型权重的路径
+- `-o` [必需] 指定输出文件夹
+- `-t` 为输入和权重使用 per tensor 量化方法转换 FP8 模型。默认配置下，权重采用 per channel 量化方法。
+
+模型权重转换示例：
+
+```bash
+cd vllm-hpu-extension
+python scripts/convert_weights_for_gaudi2.py -i /data/hf_models/Hunyuan-A13B-Instruct-FP8 -o /data/hf_models/Hunyuan-A13B-Instruct-FP8-G2 -t
+```
+
+#### 2.3.2 准备数据集
+
+建议使用 NeelNanda/pile-10k 进行校准。我们可以将其下载到本地路径。
+
+```bash
+python3 -m pip install hf_transfer huggingface_hub hf_xet
+export HF_ENDPOINT="https://hf-mirror.com"
+huggingface-cli download NeelNanda/pile-10k --repo-type dataset
+```
+
+#### 2.3.3 使用 vllm-hpu-extension 进行校准
+
+校准步骤已集成到 calibrate_model.sh 中。
+
+```bash
+cd vllm-hpu-extension/calibration
+# to print the help info
+bash calibrate_model.sh -h
+```
+
+命令输出如下：
+
+```
+Calibrate given MODEL_PATH for FP8 inference
+
+usage: calibrate_model.sh <options>
+
+  -m    - [required] huggingface stub or local directory of the MODEL_PATH
+  -d    - [required] path to source dataset (details in README)
+  -o    - [required] path to output directory for fp8 measurements
+  -b    - batch size to run the measurements at (default: 32)
+  -l    - limit number of samples in calibration dataset
+  -t    - tensor parallel size to run at (default: 1); NOTE: if t > 8 then we need a multi-node setup
+  -r    - rank of unified measurements, it should be smaller than original rank number and should be a factor of the original rank number
+  -u    - use expert parallelism (default: False), expert parallelism unification rule is unique, card 1 expert measurement will be extended to card 0 if unified to x from 2x cards number
+  -x    - expand measurement files to specific world size (default: not set)
+  -e    - set this flag to enable enforce_eager execution
+```
+
+比较重要的参数包括：
+
+- `-m` [必需] 指定模型权重所在目录
+- `-d` [必需] 校准使用的数据集，推荐 NeelNanda/pile-10k
+- `-o` [必需] fp8 校准输出目录路径
+- `-b` 运行校准的批处理大小（默认值：32）
+- `-l` 校准数据集中的样本数量限制
+- `-t` 运行张量并行的大小（默认值：1）；注意：如果 t > 8，则需要多节点设置
+- `-u` 使用专家并行（默认值：False），除 Llama-4-Scout-17B-16E-Instruct 外，必须传递 -u 参数才能启用专家并行 (EP)。
+- `-x` 将校准文件扩展到指定的卡数，例如指定 -t 8 -x 4，则校准文件可以用来运行 8 卡和 4 卡
+- `-e` 设置此标志以启用 enforce_eager 执行
+
+以下示例用于校准 Qwen2.5-72B-Instruct 模型用于两张 Gaudi 卡。校准数据将保存到 quantization 文件夹中。
+
+```bash
+cd vllm-hpu-extension/calibration
+MODEL=/models/Qwen2.5-72B-Instruct
+HPU_SIZE=2
+./calibrate_model.sh \
+     -m $MODEL \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t $HPU_SIZE
+```
+
+要使用流水线并行 (PP) 运行模型，必须设置 -x <TP_SIZE_WITH_PP>，其中 TP_SIZE_WITH_PP 表示启用 PP 时的 TP 大小。以 GLM-4.5-FP8 为例，TP=4，PP=2：
+
+```bash
+bash calibrate_model.sh \
+     -m /models/GLM-4.5-FP8 \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t 8 -x 4 -u
+```
+
+#### 2.3.4 创建 quantization 目录
+
+在 start_gaudi_vllm_server.sh 的同级目录下面创建 quantization 目录。
+
+```bash
+mkdir quantization
+#将校准后的量化文件复制到quantization文件夹中：
+cp -r vllm-hpu-extension/calibration/quantization/* quantization/
+```
+
+#### 2.3.5 以 FP8 精度启动 vLLM 服务
+
+使用 FP8 精度启动 vllm 需要更多时间来进行预热。建议创建预热缓存文件，以便下次加快预热速度。
+
+下面是使用 FP8 精度来运行 Qwen2.5-72B-Instruct 的示例。
+
+```bash
+bash start_gaudi_vllm_server.sh \
+    -w "/models/Qwen2.5-72B-Instruct" \
+    -t 2 \
+    -m 0,1 \
+    -a "127.0.0.1:30001" \
+    -d fp8 \
+    -b 128 \
+    -x 16384 \
+    -c /vllm_cache/Qwen2.5-32B-Instruct
+```
+
 ## 3.0 大模型服务启动示例
 
 ### 3.1 DeepSeek-R1 FP8（8 卡部署）
 
 #### 3.1.1 下载和转换模型权重
 
-对于大于 300B 的 FP8 模型，需要使用 8 卡部署推理服务，请确保 Gaudi2 服务器的高速互联网卡已连接至交换机（参考 1.2.1 章节）。
+对于大于 300B 的 FP8 模型，需要使用 8 卡部署推理服务，请确保 Gaudi2 服务器的高速互联网卡已连接至交换机。
 
 由于 Gaudi2 采用 torch.float8_e4m3fnuz 格式，DeepSeek-R1 FP8 的模型权重需要在 Gaudi2 服务器上做一次 FP8 格式转换。请确保有 1.5TB 以上的硬盘空间，用于保存下载的原生模型权重和转换以后的模型权重文件。现已支持 DeepSeek-R1 671B 和 DeepSeek-R1 0528，以下以 DeepSeek-R1 0528 为例说明启动步骤。DeepSeek-R1 671B 除了模型权重不同外，其他步骤、参数基本相同。
 
@@ -258,9 +383,8 @@ docker run -it --name deepseek_server --runtime=habana \
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
 
 ```bash
-sudo apt install git-lfs
-git-lfs install
-git clone https://www.modelscope.cn/deepseek-ai/DeepSeek-R1-0528.git /data/hf_models/DeepSeek-R1-0528
+pip install modelscope
+modelscope download --model deepseek-ai/DeepSeek-R1-0528 --local_dir /data/hf_models/DeepSeek-R1-0528
 ```
 
 模型权重转换：
@@ -362,20 +486,31 @@ docker run -it --name deepseek_r1_distill_server --runtime=habana \
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
 
 ```bash
-sudo apt install git-lfs
-git-lfs install
-git clone https://www.modelscope.cn/models/deepseek-ai/DeepSeek-R1-Distill-Llama-70B.git /data/hf_models/DeepSeek-R1-Distill-Llama-70B
-git clone https://www.modelscope.cn/models/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B.git /data/hf_models/DeepSeek-R1-Distill-Qwen-32B
-git clone https://www.modelscope.cn/models/deepseek-ai/DeepSeek-R1-Distill-Llama-8B.git /data/hf_models/DeepSeek-R1-Distill-Llama-8B
+pip install modelscope
+modelscope download --model deepseek-ai/DeepSeek-R1-Distill-Llama-70B --local_dir /data/hf_models/DeepSeek-R1-Distill-Llama-70B
+modelscope download --model deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --local_dir /data/hf_models/DeepSeek-R1-Distill-Qwen-32B
+modelscope download --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --local_dir /data/hf_models/DeepSeek-R1-Distill-Llama-8B
 ```
 
 #### 3.2.2 安装和启动 vLLM
 
-安装 vLLM  
-[参照 1.4 章节](#14-安装-vllm) 使用 vLLM aice/v1.22.0 版本安装到容器里。
+为容器设置正确的网络设置，确保容器可以正常访问 github。  
+使用如下命令在镜像环境安装 vLLM v1.21.0：
+
+```bash
+# install vllm
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install -r vllm-fork/requirements-hpu.txt
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# [optional] install vllm-hpu-extension to do calibration and run in fp8
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+pip install -e vllm-hpu-extension --no-build-isolation
+```
 
 启动 vLLM  
-进入启动脚本目录，启动 vLLM。如下命令表示在 module ID 0,1,2,3（`-t 4 -m 0,1,2,3`）上使用 4 卡跑 Deepseek-R1-Distill-Llama-70B 模型，最大支持并发 128（`-b 128`），支持输入 token 长度 800 到 4096（`-i 800,4096`），输出 token 长度范围 800 到 2048（`-o 800,2048`），精度 BF16（`-d bfloat16`），服务端口 30001（`-a 127.0.0.1:30001`），预热缓存目录 `/data/70B_warmup_cache`（`-c /data/70B_warmup_cache`）：
+进入启动脚本目录，启动 vLLM。如下命令表示在 module ID 0,1,2,3（`-t 4 -m 0,1,2,3`）上使用 4 卡跑 Deepseek-R1-Distill-Llama-70B 模型，最大支持并发 128（`-b 128`），精度 BF16（`-d bfloat16`），服务端口 30001（`-a 127.0.0.1:30001`），预热缓存目录 `/data/70B_warmup_cache`（`-c /data/70B_warmup_cache`）：
 
 ```bash
 cd vllm-fork/scripts
@@ -384,8 +519,7 @@ bash start_gaudi_vllm_server.sh \
     -t 4 \
     -m 0,1,2,3 \
     -b 128 \
-    -i 800,4096 \
-    -o 800,2048 \
+    -x 16384 \
     -d bfloat16 \
     -a 127.0.0.1:30001 \
     -c /data/70B_warmup_cache
@@ -399,8 +533,6 @@ bash start_gaudi_vllm_server.sh \
     -t 2 \
     -m 0,1 \
     -b 32 \
-    -i 800,4096 \
-    -o 800,2048 \
     -d bfloat16 \
     -a 127.0.0.1:30001 \
     -c /data/32B_warmup_cache
@@ -414,8 +546,6 @@ bash start_gaudi_vllm_server.sh \
     -t 1 \
     -m 0 \
     -b 32 \
-    -i 800,4096 \
-    -o 800,2048 \
     -d bfloat16 \
     -a 127.0.0.1:30001 \
     -c /data/8B_warmup_cache
@@ -439,21 +569,30 @@ docker run -it --name qwen_server --runtime=habana \
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
 
 ```bash
-sudo apt install git-lfs
-git-lfs install
-git clone https://www.modelscope.cn/Qwen/Qwen2.5-7B-Instruct.git /data/hf_models/Qwen2.5-7B-Instruct
-git clone https://www.modelscope.cn/Qwen/QwQ-32B.git /data/hf_models/QwQ-32B
-git clone https://www.modelscope.cn/Qwen/Qwen3-8B.git /data/hf_models/Qwen3-8B
-git clone https://www.modelscope.cn/Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8.git /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8
+pip install modelscope
+modelscope download --model Qwen/Qwen2.5-7B-Instruct --local_dir /data/hf_models/Qwen2.5-7B-Instruct
+modelscope download --model Qwen/QwQ-32B --local_dir /data/hf_models/QwQ-32B
+modelscope download --model Qwen/Qwen3-8B --local_dir /data/hf_models/Qwen3-8B
 ```
 
 #### 3.3.2 安装和启动 vLLM
 
-安装 vLLM  
-[参照 1.4 章节](#14-安装-vllm) 使用 vLLM aice/v1.22.0 版本安装到容器里。
+为容器设置正确的网络设置，确保容器可以正常访问 github。  
+使用如下命令在镜像环境安装 vLLM v1.21.0：
 
-启动 vLLM  
-进入启动脚本目录，启动 vLLM。
+```bash
+# install vllm
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install -r vllm-fork/requirements-hpu.txt
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# [optional] install vllm-hpu-extension to do calibration and run in fp8
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+pip install -e vllm-hpu-extension --no-build-isolation
+```
+
+启动 vLLM，进入启动脚本目录，启动 vLLM。
 
 Qwen2.5-7B-Instruct 模型单卡最大并发 32 部署可使用如下命令启动：
 
@@ -464,8 +603,6 @@ bash start_gaudi_vllm_server.sh \
     -t 1 \
     -m 0 \
     -b 32 \
-    -i 800,4096 \
-    -o 800,2048 \
     -d bfloat16 \
     -a 127.0.0.1:30001 \
     -c /data/7B_warmup_cache
@@ -480,8 +617,6 @@ bash start_gaudi_vllm_server.sh \
     -t 2 \
     -m 0,1 \
     -b 32 \
-    -i 800,4096 \
-    -o 800,2048 \
     -d bfloat16 \
     -a 127.0.0.1:30001 \
     -c /data/32B_warmup_cache
@@ -496,34 +631,48 @@ bash start_gaudi_vllm_server.sh \
     -t 2 \
     -m 0,1 \
     -b 32 \
-    -i 800,4096 \
-    -o 800,2048 \
     -d bfloat16 \
     -a 127.0.0.1:30001 \
     -c /data/8B_warmup_cache
 ```
 
-对于 Qwen3-Coder-480B-A35B-Instruct-FP8，需要使用脚本来对原始权重进行转换，可以从下面链接获得相关的脚本。
+#### 3.3.3 Qwen3-Coder-480B-A35B-Instruct-FP8 （8 卡部署）
 
-- https://github.com/HabanaAI/vllm-fork/blob/deepseek_r1/scripts/convert_for_g2.py
-- https://github.com/HabanaAI/vllm-fork/blob/deepseek_r1/scripts/run_inc_calib.sh
-- https://github.com/HabanaAI/vllm-fork/tree/deepseek_r1/scripts/quickstart
-
-获得相应的脚本之后，可以使用下面的命令来进行模型权重转换。
+下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
 
 ```bash
-#转换模型
-cd /root/vllm-fork
-export HF_ENDPOINT="https://hf-mirror.com"
-python scripts/convert_for_g2.py -i /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8 -o /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8-G2
-bash scripts/run_inc_calib.sh --model /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8-G2
+pip install modelscope
+modelscope download --model Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 --local_dir /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8
+```
+
+对于 Qwen3-Coder-480B-A35B-Instruct-FP8，需要使用 calibrate_model.sh 脚本进行校准。
+
+```bash
+cd vllm-hpu-extension/calibration
+MODEL=/data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8
+HPU_SIZE=8
+./calibrate_model.sh \
+     -m $MODEL \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t $HPU_SIZE
 ```
 
 Qwen3-Coder-480B-A35B-Instruct-FP8-G2 模型部署可使用如下命令启动：
 
 ```bash
-export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
-bash scripts/quickstart/start_vllm.sh -w /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8-G2 -q
+#将校准后的量化文件复制到quantization文件夹中：
+cd vllm-fork/scripts
+mkdir quantization
+cp -r vllm-hpu-extension/calibration/quantization/* quantization/
+bash start_gaudi_vllm_server.sh \
+    -w "/data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8" \
+    -t 8 \
+    -a "127.0.0.1:30001" \
+    -d fp8 \
+    -b 128 \
+    -x 16384 \
+    -c /vllm_cache/Qwen3-Coder-480B-A35B-Instruct-FP8
 ```
 
 ### 3.4 多模态模型
@@ -616,6 +765,7 @@ python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
 ```
 
 #### 3.4.3 FP8 dynamic quant
+
 **转换模型**\
 首先把模型下载到本地 \
 
