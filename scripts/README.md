@@ -281,12 +281,12 @@ cp -r vllm-hpu-extension/calibration/quantization/* quantization/
 ```
 
 Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf. An example of the quantization folder is below.
+
 ```console
 root@server:/workspace$ ls vllm-fork/scripts/quantization/
 
 qwen3-235b-a22b-fp8  qwen2.5-72b-instruct
 ```
-
 
 #### 4. Start vLLM service on Qwen2.5-72B-Instruct model with FP8 precision.
 It will take much more time to do warm-up with FP8 precision. Suggest creating the warm-up cache files to accelerate the warm-up for next time.
@@ -510,6 +510,3 @@ https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.22.0
   - Qwen2-VL-7B-Instruct
   - Qwen3-VL
   - InternVL3.5
-
-
-  
