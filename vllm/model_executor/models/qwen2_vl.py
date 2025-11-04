@@ -27,6 +27,7 @@
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
+import os
 from typing import Any, Callable, Literal, Optional, TypedDict, Union
 
 import torch
@@ -95,7 +96,7 @@ _MAX_FRAMES_PER_VIDEO = 16
 class AttentionLongSequence:
 
     @staticmethod
-    def forward(q, k, v, mask, q_block_size):
+    def forward(q, k, v, mask, q_block_size, softmax_mode):
         """
         Support long sequence at prompt phase
         """
@@ -112,7 +113,7 @@ class AttentionLongSequence:
             row_mask = mask[:, :, s:e, :]
             attn_output[:, :,
                         s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
-                                                  False, None)
+                                                  False, None, softmax_mode)
             # TODO: markstep after a couple of iterations
             # need to experiment the optimal number.
             if i % 75 == 0:
@@ -332,6 +333,10 @@ class Qwen2VisionAttention(nn.Module):
         }:
             raise RuntimeError(
                 f"Qwen2-VL does not support {self.attn_backend} backend now.")
+            
+        self.softmax_mode = 'fp32' if os.environ.get(
+            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
+                                                             ] else 'None'
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -408,10 +413,10 @@ class Qwen2VisionAttention(nn.Module):
 
             if q1.shape[2] <= 65536:  # need to investigate this crosspoint
                 fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0, False,
-                                            None)
+                                            None,self.softmax_mode)
             else:
                 fused_out = AttentionLongSequence.forward(
-                    q1, k1, v1, attn_mask, 64)
+                    q1, k1, v1, attn_mask, 64,self.softmax_mode)
             context_layer = rearrange(fused_out, "b h s d -> b s h d ")
         elif self.attn_backend == _Backend.TORCH_SDPA:
             # Execute attention entry by entry for speed & less VRAM.
