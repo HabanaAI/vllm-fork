@@ -282,7 +282,7 @@ cp -r vllm-hpu-extension/calibration/quantization/* quantization/
 
 Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf. An example of the quantization folder is below. 
 ```console
-ls vllm-fork/scripts/quantization/
+root@server:/workspace$ ls vllm-fork/scripts/quantization/
 
 qwen3-235b-a22b-fp8  qwen2.5-72b-instruct
 ```
@@ -510,4 +510,6 @@ https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.22.0
   - Qwen2-VL-7B-Instruct
   - Qwen3-VL
   - InternVL3.5
+
+
   
