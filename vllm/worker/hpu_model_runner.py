@@ -682,7 +682,7 @@ class HpuModelAdapter(torch.nn.Module):
                   if attn_bias is None:
                       attn_bias = single_attn_bias
                   else:
-                      attn_bias = torch.cat((single_attn_bias, attn_bias), dim=0)
+                      attn_bias = torch.cat((attn_bias, single_attn_bias), dim=0)
               attn_metadata = attn_metadata._replace(attn_bias=attn_bias)
             else:
               seq_lens_t = attn_metadata.seq_lens_tensor
