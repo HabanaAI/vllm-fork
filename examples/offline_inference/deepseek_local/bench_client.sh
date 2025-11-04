@@ -25,26 +25,3 @@ test_benchmark_serving_range() {
 # test_benchmark_serving_range 1024 1024 1 3 0
 # test_benchmark_serving_range 1024 1024 32 96 0
 test_benchmark_serving_range 1024 1024 128 256 0
-
-# 100%|███████████████████████████████████| 96/96 [01:24<00:00,  1.13it/s]
-# ============ Serving Benchmark Result ============
-# Successful requests:                     96        
-# Benchmark duration (s):                  84.78     
-# Total input tokens:                      98208     
-# Total generated tokens:                  98304     
-# Request throughput (req/s):              1.13      
-# Output token throughput (tok/s):         1159.47   
-# Total Token throughput (tok/s):          2317.81   
-# ---------------Time to First Token----------------
-# Mean TTFT (ms):                          12552.00  
-# Median TTFT (ms):                        14779.71  
-# P99 TTFT (ms):                           15260.55  
-# -----Time per Output Token (excl. 1st token)------
-# Mean TPOT (ms):                          13.07     
-# Median TPOT (ms):                        13.06     
-# P99 TPOT (ms):                           13.36     
-# ---------------Inter-token Latency----------------
-# Mean ITL (ms):                           13.07     
-# Median ITL (ms):                         13.00     
-# P99 ITL (ms):                            13.64     
-# ==================================================
