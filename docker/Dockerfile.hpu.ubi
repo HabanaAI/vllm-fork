@@ -15,26 +15,13 @@ RUN dnf -y update --best --allowerasing --skip-broken && dnf clean all
 
 WORKDIR /workspace
 
-## Python Installer #################################################################
-FROM habana-base as python-install
-
-ARG PYTHON_VERSION=3.11
-
-ENV VIRTUAL_ENV=/opt/vllm
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-RUN dnf install -y --setopt=install_weak_deps=0 --nodocs \
-    python${PYTHON_VERSION}-wheel && \
-    python${PYTHON_VERSION} -m venv $VIRTUAL_ENV --system-site-packages && pip install --no-cache -U pip wheel && dnf clean all
-
 ## Python Habana base #################################################################
-FROM python-install as python-habana-base
+FROM habana-base as python-habana-base
 
-ENV VIRTUAL_ENV=/opt/vllm
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # install Habana Software and common dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=bind,source=requirements-common.txt,target=requirements-common.txt \
+    --mount=type=bind,source=requirements,target=requirements \
     --mount=type=bind,source=requirements-hpu.txt,target=requirements-hpu.txt \
     pip install \
     -r requirements-hpu.txt
@@ -49,7 +36,7 @@ COPY csrc csrc
 COPY setup.py setup.py
 COPY cmake cmake
 COPY CMakeLists.txt CMakeLists.txt
-COPY requirements-common.txt requirements-common.txt
+COPY requirements requirements
 COPY requirements-hpu.txt requirements-hpu.txt
 COPY pyproject.toml pyproject.toml
 
@@ -73,12 +60,9 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     python3 setup.py bdist_wheel --dist-dir=dist
 
 ## Release #####################################################################
-FROM python-install AS vllm-openai
+FROM build AS vllm-openai
 
 WORKDIR /workspace
-
-ENV VIRTUAL_ENV=/opt/vllm
-ENV PATH=$VIRTUAL_ENV/bin/:$PATH
 
 # Triton needs a CC compiler
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs gcc \
@@ -99,7 +83,7 @@ ENV HF_HUB_OFFLINE=1 \
 # set up a non-root user here.
 RUN umask 002 \
     && useradd --uid 2000 --gid 0 vllm \
-    && chmod g+rwx $HOME /usr/src /workspace
+    && chmod g+rwx $HOME /usr/src /workspace && chmod -R g+rwx /var/log/habana_logs
 
 COPY LICENSE /licenses/vllm.md
 

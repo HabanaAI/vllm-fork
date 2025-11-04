@@ -12,7 +12,7 @@ ARG REPO_TYPE=habanalabs
 FROM ${DOCKER_URL}/${VERSION}/${BASE_NAME}/${REPO_TYPE}/pytorch-installer-${PT_VERSION}:${REVISION}
 
 # Parameterize commit/branch for vllm-fork checkout
-ARG VLLM_FORK_COMMIT=v0.7.2+Gaudi-1.21.0
+ARG VLLM_FORK_COMMIT=v0.9.0.1+Gaudi-1.22.0
 
 ARG BASE_NAME
 ENV BASE_NAME=${BASE_NAME}
@@ -26,6 +26,7 @@ RUN if echo "$BASE_NAME" | grep -qi "tencentos"; then \
   yum install -y gettext jq python3-pip git --allowerasing --exclude=openmpi --exclude=opensm-libs && \
   ln -sf /usr/bin/python3 /usr/bin/python ; \
 else \
+  yum remove -y pixman-devel || true && \
   yum update -y && \
   yum install -y gettext jq python3-pip git --allowerasing && \
   ln -sf /usr/bin/python3 /usr/bin/python ; \
