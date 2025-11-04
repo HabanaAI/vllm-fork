@@ -281,7 +281,7 @@ cp -r vllm-hpu-extension/calibration/quantization/* quantization/
 ```
 
 Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf. An example of the quantization folder is below. 
-```shell
+```console
 ls vllm-fork/scripts/quantization/
 
 qwen3-235b-a22b-fp8  qwen2.5-72b-instruct
