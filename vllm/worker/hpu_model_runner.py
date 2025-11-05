@@ -336,7 +336,8 @@ def get_target_layer_suffix_list(model_type) -> list[str]:
     }
 
     return [
-        decoder_layer_table.get(model_type, "DecoderLayer"), "EncoderLayer"
+        decoder_layer_table.get(model_type, "DecoderLayer"), "EncoderLayer",
+        "BertLayer"
     ]
 
 

@@ -120,19 +120,12 @@ class RobertaEmbedding(CustomOp):
                                     tokens, self.padding_idx)
                 offset += seq_len
         else:
-            for offset in range(position_ids.size()[0]):
-                pos_list.append(position_ids[offset])
-                token_list.append(input_ids[offset])
-
-            for index, (positions, tokens, seq_len) in enumerate(
-                    zip(pos_list, token_list, seq_lens)):
-                index_tensor = torch.tensor([index],
-                                            dtype=torch.long,
-                                            device=inputs_embeds.device)
-                pos = create_position_ids_from_input_ids_hpu(
-                    tokens, self.padding_idx, seq_len)
-                pos = pos.unsqueeze(0)
-                position_ids.index_copy_(0, index_tensor, pos)
+            position_ids = position_ids + self.padding_idx + 1
+            mask = position_ids.ne(self.padding_idx + 1).int()
+            mask_col = mask[:, 1].unsqueeze(-1)
+            mask.index_copy_(1, torch.tensor([0], device=mask.device),
+                             mask_col)  #in case the first token is not padding
+            position_ids = position_ids * mask
 
         # Position embeddings.
         position_embeddings = self.position_embeddings(position_ids)
