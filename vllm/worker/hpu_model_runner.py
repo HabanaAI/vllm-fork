@@ -1382,16 +1382,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
-                    if config.scale_format.lower(
-                    ) == 'const' and not disable_mark_scales_as_const:
-                        htcore.hpu_inference_initialize(self.model,
-                                                        mark_scales=True,
-                                                        mark_non_scales=True)
+                    # if config.scale_format.lower(
+                    # ) == 'const' and not disable_mark_scales_as_const:
+                    #     htcore.hpu_inference_initialize(self.model,
+                    #                                     mark_scales=True,
+                    #                                     mark_non_scales=True)
                     if torch.distributed.is_initialized():
                         torch.distributed.barrier()
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
+                logger.info(f"INC MODEL {self.model}")
 
             self._maybe_init_alibi_biases()
             hidden_layer_markstep_interval = int(

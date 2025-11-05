@@ -480,7 +480,8 @@ class MiniMaxM2Model(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
-
+from vllm.model_executor.model_loader.weight_utils import (
+    default_weight_loader, maybe_remap_kv_scale_name, with_thread_limits)
 class MiniMaxM2ForCausalLM(nn.Module, SupportsPP):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
@@ -527,6 +528,7 @@ class MiniMaxM2ForCausalLM(nn.Module, SupportsPP):
                                        sampling_metadata)
         return logits
 
+    @with_thread_limits()
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)
