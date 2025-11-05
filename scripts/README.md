@@ -250,6 +250,9 @@ bash calibrate_model.sh \
      -t 4 -u
 ```
 
+ [!TIP]
+> **To run fp8 inference with 4 HPUs using Qwen3-235B-A22B bfloat16 weights**: The weights have to be loaded to host memory first by adding `-e "--weights-load-device cpu"` to the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` or by setting `weights_load_device='cpu'` for the LLM engine.
+
 ##### 3. Do the calibration for pipeline parallelism mode
 The `-x <TP_SIZE_WITH_PP>` must set to run the model with pipeline parallelism (PP), with the `TP_SIZE_WITH_PP` means the TP size when PP is enabled. Take GLM-4.5-FP8 with TP=4 and PP=2 as an example:
 
