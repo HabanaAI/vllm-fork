@@ -7,6 +7,7 @@ set_bucketing(){
     input_max=${input_max:-1024}
     output_max=${output_max:-2048}
     block_size=${block_size:-128}
+    BUCKET_PADDING_RATIO=${BUCKET_PADDING_RATIO:-"0.1"}
 
     prompt_bs_step=1
     prompt_bs_min=1
@@ -14,10 +15,11 @@ set_bucketing(){
     # prompt_bs_max = min(prompt_bs_max, max_num_seqs)
     prompt_bs_max=$(( $prompt_bs_max > $max_num_seqs ? $max_num_seqs : $prompt_bs_max ))
     # prompt_bs_max = CEILING.MATH(prompt_bs_max, prompt_bs_step)
-    prompt_bs_max=$(( ($prompt_bs_max + $prompt_bs_step - 1) / $prompt_bs_step * $prompt_bs_step ))    
+    prompt_bs_max=$(( ($prompt_bs_max + $prompt_bs_step - 1) / $prompt_bs_step * $prompt_bs_step ))
     export VLLM_PROMPT_BS_BUCKET_MIN=${VLLM_PROMPT_BS_BUCKET_MIN:-$prompt_bs_min}
     export VLLM_PROMPT_BS_BUCKET_STEP=${VLLM_PROMPT_BS_BUCKET_STEP:-$prompt_bs_step}
     export VLLM_PROMPT_BS_BUCKET_MAX=${VLLM_PROMPT_BS_BUCKET_MAX:-$prompt_bs_max}
+    export VLLM_PROMPT_BS_BUCKET_LIMIT=${BUCKET_PADDING_RATIO}
 
     prompt_seq_step=128
     # prompt_seq_min = CEILING.MATH(input_min, prompt_seq_step)
@@ -27,6 +29,7 @@ set_bucketing(){
     export VLLM_PROMPT_SEQ_BUCKET_MIN=${VLLM_PROMPT_SEQ_BUCKET_MIN:-$prompt_seq_min}
     export VLLM_PROMPT_SEQ_BUCKET_STEP=${VLLM_PROMPT_SEQ_BUCKET_STEP:-$prompt_seq_step}
     export VLLM_PROMPT_SEQ_BUCKET_MAX=${VLLM_PROMPT_SEQ_BUCKET_MAX:-$prompt_seq_max}
+    export VLLM_PROMPT_SEQ_BUCKET_LIMIT=${BUCKET_PADDING_RATIO}
 
     # decode_bs_step = ROUNDUP(max_num_seqs / 16, 0)
     decode_bs_step=$(( ($max_num_seqs + 15) / 16 ))
@@ -36,6 +39,7 @@ set_bucketing(){
     export VLLM_DECODE_BS_BUCKET_MIN=${VLLM_DECODE_BS_BUCKET_MIN:-$decode_bs_min}
     export VLLM_DECODE_BS_BUCKET_STEP=${VLLM_DECODE_BS_BUCKET_STEP:-$decode_bs_step}
     export VLLM_DECODE_BS_BUCKET_MAX=${VLLM_DECODE_BS_BUCKET_MAX:-$decode_bs_max}
+    export VLLM_DECODE_BS_BUCKET_LIMIT=${BUCKET_PADDING_RATIO}
 
     decode_block_step=$decode_bs_max
     # decode_block_min = ROUNDUP(input_min / block_size, 0)
@@ -47,4 +51,5 @@ set_bucketing(){
     export VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN:-$decode_block_min}
     export VLLM_DECODE_BLOCK_BUCKET_STEP=${VLLM_DECODE_BLOCK_BUCKET_STEP:-$decode_block_step}
     export VLLM_DECODE_BLOCK_BUCKET_MAX=${VLLM_DECODE_BLOCK_BUCKET_MAX:-$decode_block_max}
+    export VLLM_DECODE_BLOCK_BUCKET_LIMIT=${BUCKET_PADDING_RATIO}
 }

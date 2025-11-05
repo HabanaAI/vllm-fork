@@ -26,7 +26,7 @@ bash setup_env.sh
 `local_hostname` is the local machine IP
 `metadata_server` is the remote machine IP where etcd is launched
 `protocal` is rdma or tcp
-`master_server_address` is the remote machine IP where mooncake master is launched. high speed network is preferred.
+`master_server_address` is the remote machine IP where mooncake master is launched.
 
 # note: rdma is limited to following device list, otherwise set to tcp
 

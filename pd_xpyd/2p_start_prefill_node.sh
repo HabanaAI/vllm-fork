@@ -1,4 +1,7 @@
 #set -x
+
+sleep 20
+
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
