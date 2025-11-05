@@ -827,7 +827,48 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
 ```
 
-#### 3.4.4 问题解答
+#### 3.4.4 FP8 static quant
+**下载 vllm-hpu-extension**
+
+```bash
+git clone https://github.com/HabanaAI/vllm-hpu-extension.git -b aice/v1.22.0
+cd vllm-hpu-extension/calibration
+pip install -r requirements.txt
+```
+
+**下载数据**
+
+下载数据集[NeelNanda/pile-10k](https://huggingface.co/datasets/NeelNanda/pile-10k)
+
+下载模型[Qwen3-VL-235B-A22B-Instruct-FP8](https://huggingface.co/Qwen/Qwen3-VL-235B-A22B-Instruct-FP8)
+
+**校准**
+
+```bash
+PT_HPU_LAZY_MODE=1 ./calibrate_model.sh \
+    -m /data/Qwen3-VL-235B-A22B-Instruct-FP8 \
+    -d /data/pile-10k \
+    -o /data/output \
+    -b 128 -t 8 -u -l 4096
+```
+
+校准结束后会在```/data/output/qwen3-vl-235b-a22b-instruct-fp8```文件夹获得```maxabs_quant_g2.json```文件
+
+**部署**
+
+```bash
+QUANT_CONFIG=/data/output/qwen3-vl-235b-a22b-instruct-fp8/maxabs_quant_g2.json \
+PT_HPU_LAZY_MODE=1 vllm serve \
+    /data/Qwen3-VL-30B-A3B-Instruct-FP8 \
+    --port 8000 \
+    --host 127.0.0.1 \
+    --limit-mm-per-prompt video=5,image=5 \
+    --mm_processor_kwargs max_pixels=1003520,min_pixels=3136 \
+    --tensor-parallel-size 8 \
+    --enable-expert-parallel
+```
+
+#### 3.4.5 问题解答
 
 - 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
 - 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。
