@@ -1209,7 +1209,7 @@ class MRotaryEmbedding(RotaryEmbedding):
             # Use matrix add instead of slice assignment.
             # Prepare the zero matrix in advance, keeping only the
             # values at the positions that need to be assigned.
-            assert self.mrope_section
+            assert mrope_section
             sin_start_idx = rotary_dim // 2
             self.cos_sin_cache_mrope1 = torch.zeros_like(self.cos_sin_cache)
             self.cos_sin_cache_mrope2 = torch.zeros_like(self.cos_sin_cache)
@@ -1232,6 +1232,7 @@ class MRotaryEmbedding(RotaryEmbedding):
         positions: torch.Tensor,
         query: torch.Tensor,
         key: Optional[torch.Tensor] = None,
+        offsets: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         """PyTorch-native implementation equivalent to forward().
 
@@ -1252,6 +1253,8 @@ class MRotaryEmbedding(RotaryEmbedding):
         assert positions.ndim == 1 or positions.ndim == 2
         assert key is not None
 
+        if offsets is not None:
+            offsets = offsets.view(positions.shape[0], -1)
         num_tokens = positions.shape[-1]
         if positions.ndim == 2:
             assert self.mrope_section
@@ -1312,6 +1315,7 @@ class MRotaryEmbedding(RotaryEmbedding):
         positions: torch.Tensor,
         query: torch.Tensor,
         key: Optional[torch.Tensor] = None,
+        offsets: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         """PyTorch-native implementation equivalent to forward().
 
@@ -1324,7 +1328,8 @@ class MRotaryEmbedding(RotaryEmbedding):
         """
         assert positions.ndim == 1 or positions.ndim == 2
         assert key is not None
-
+        if offsets is not None:
+            positions = positions + offsets
         num_tokens = positions.shape[-1]
         cos_sin = self.cos_sin_cache[positions]
         cos, sin = cos_sin.chunk(2, dim=-1)
