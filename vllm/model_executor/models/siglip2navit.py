@@ -7,12 +7,12 @@ from typing import Optional, Union
 
 import torch
 from einops import rearrange, repeat
+from habana_frameworks.torch.hpex.kernels import apply_rotary_pos_emb
 from torch import nn
 from torch.nn import functional as F
 from transformers.activations import ACT2FN
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_outputs import BaseModelOutputWithNoAttention
-from habana_frameworks.torch.hpex.kernels import apply_rotary_pos_emb
 
 from vllm.platforms import _Backend, current_platform
 
@@ -144,6 +144,7 @@ def rotate_half(x, interleaved=False):
                          "... d two -> ... (d two)",
                          two=2)
 
+
 def apply_rotary_pos_emb_hpu(
         q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor,
         sin: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -156,35 +157,15 @@ def apply_rotary_pos_emb_hpu(
     cos_full = cos.view(1, cos.shape[0], 1, cos.shape[1])
     sin_full = sin.view(1, sin.shape[0], 1, sin.shape[1])
     q_rot = apply_rotary_pos_emb(q_rot.float(), cos_full.float(),
-                                   sin_full.float()).type_as(q)
+                                 sin_full.float()).type_as(q)
     k_rot = apply_rotary_pos_emb(k_rot.float(), cos_full.float(),
-                                   sin_full.float()).type_as(k)
+                                 sin_full.float()).type_as(k)
 
     # Concatenate rotated and pass-through parts
     q_embed = torch.cat([q_rot, q_pass], dim=-1)
     k_embed = torch.cat([k_rot, k_pass], dim=-1)
     return q_embed, k_embed
 
-def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
-    """
-    x: (batch_size, seqlen, nheads, headdim)
-    cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
-    """
-    ro_dim = cos.shape[-1] * 2
-    assert ro_dim <= x.shape[-1]
-    cos = repeat(
-        cos,
-        "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
-    sin = repeat(
-        sin,
-        "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
-    return torch.cat(
-        [
-            x[..., :ro_dim] * cos +
-            rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]
-        ],
-        dim=-1,
-    )
 
 class Siglip2Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
