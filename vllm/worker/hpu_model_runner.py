@@ -470,13 +470,17 @@ class HpuModelAdapter(torch.nn.Module):
                                dtype):
         con_len = context_len.item()
         past_mask = torch.arange(0, con_len, dtype=torch.int32, device=device)
+        if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
+            attn_len = seq_len
+        else:
+            attn_len = seq_len - con_len
         past_mask = (past_mask.view(1, -1).expand(1, -1).ge(con_len).view(
             1, 1, -1).expand(1, seq_len, -1).view(1, 1, seq_len, -1))
         len_mask = (torch.arange(
-            0, seq_len - con_len, device=device,
-            dtype=torch.int32).view(1, seq_len - con_len).ge(
-                query_len.unsqueeze(-1)).view(1, 1, 1, seq_len - con_len))
-        causal_mask = torch.triu(torch.ones((1, 1, seq_len, seq_len - con_len),
+            0, attn_len, device=device,
+            dtype=torch.int32).view(1, attn_len).ge(
+                query_len.unsqueeze(-1)).view(1, 1, 1, attn_len))
+        causal_mask = torch.triu(torch.ones((1, 1, seq_len, attn_len),
                                             device=device,
                                             dtype=torch.bool),
                                  diagonal=1)
@@ -675,6 +679,8 @@ class HpuModelAdapter(torch.nn.Module):
               seq_len = (int)(attn_metadata.num_prefill_tokens /
                               attn_metadata.num_prefills)
               attn_bias = None
+              if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
+                  assert batch_size == 1, "Chunked prefill with dynamic block_list only supports batch_size=1"
               for i in range(batch_size):
                   single_attn_bias = self._set_attn_bias_chunked(
                       int(seq_len), context_lens_t[i], query_lens_t[i], device,
@@ -1886,10 +1892,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 prompt_tokens = prompt_tokens[context_len:]
                 prefix_block_tables.append(computed_block_nums)
             elif self.scheduler_config.chunked_prefill_enabled:
-                if seq_group_metadata.block_tables is not None:
+                if seq_group_metadata.block_tables is not None and (not envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT or context_len > 0):
                     # Prefill has chunked before.
                     block_table = seq_group_metadata.block_tables[seq_id]
-                    prefix_block_tables.append(block_table)
+                    if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
+                        assert context_len % self.block_size == 0, "context len must be multiple of block size in dynamic chunked prefill mode"
+                        prefix_blocks = context_len // self.block_size
+                        prefix_block_tables.append(block_table[:prefix_blocks])
+                    else:
+                        prefix_block_tables.append(block_table)
                 else:
                     # The first prefill.
                     prefix_block_tables.append([])
@@ -2019,12 +2030,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         for _ in range(batch_size_padding))
 
         real_num_seqs = len(query_lens)
-        bs = len(seq_group_metadata_list)
-        if bs > 1 and self.use_merged_prefill:
-            bs = 1
-        max_prompt_len = max(
-            self.bucketing_manager.find_prompt_bucket(bs, target_query_len,
-                                                      ctx)[1], self.block_size)
+        if self.scheduler_config.chunked_prefill_enabled and envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
+            assert target_query_len <= self.max_num_batched_tokens, f"{target_query_len=} exceeds {self.max_num_batched_tokens=} for chunked prefill"
+            max_prompt_len = self.max_num_batched_tokens
+        else:
+            bs = len(seq_group_metadata_list)
+            if bs > 1 and self.use_merged_prefill:
+                bs = 1
+            max_prompt_len = max(
+                self.bucketing_manager.find_prompt_bucket(bs, target_query_len,
+                                                          ctx)[1], self.block_size)
 
         if self.dp_awared_padding and\
             self.vllm_config.kv_transfer_config is None:
@@ -2064,7 +2079,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     ([_PAD_BLOCK_ID] * (max_num_block - len(bt)))
                     for bt in prefix_block_tables))
 
-            if self.scheduler_config.chunked_prefill_enabled:
+            if self.scheduler_config.chunked_prefill_enabled and not envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
                 if max_prompt_len < max_num_block * self.block_size:
                     max_prompt_len = max_num_block * self.block_size
             pad_len = len(prefix_block_list)

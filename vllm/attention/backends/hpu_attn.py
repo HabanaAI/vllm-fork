@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 import habana_frameworks.torch as htorch
 import torch
+import vllm.envs as envs
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.runtime import get_config
@@ -609,16 +610,25 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 attn_bias = attn_metadata.attn_bias
                 position_bias = None
 
+                if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
+                    assert prefill_batch_size == 1, "Only batch size 1 is supported for chunked prefill with dynamic block list."
+                    key_attn = attn_data.key.view(kv_shape)
+                    value_attn = attn_data.value.view(kv_shape)
+                    common_args['need_context'] = True
+                else:
+                    key_attn = self.k_cache.fetch_from_cache(
+                            attn_data.key_cache.unflatten(0, (-1, attn_metadata.block_size)),
+                            attn_metadata.block_list).view(kv_shape)
+                    value_attn = self.v_cache.fetch_from_cache(
+                            attn_data.value_cache.unflatten(0, (-1, attn_metadata.block_size)),
+                            attn_metadata.block_list).view(kv_shape)
+
                 out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=attn_data.query.view(query_shape),
 
-                key=self.k_cache.fetch_from_cache(
-                        attn_data.key_cache.unflatten(0, (-1, attn_metadata.block_size)),
-                        attn_metadata.block_list).view(kv_shape),
-                value=self.v_cache.fetch_from_cache(
-                        attn_data.value_cache.unflatten(0, (-1, attn_metadata.block_size)),
-                        attn_metadata.block_list).view(kv_shape),
+                key=key_attn,
+                value=value_attn,
                 is_causal=False,
                 attn_bias=attn_bias,
                 position_bias=position_bias,
