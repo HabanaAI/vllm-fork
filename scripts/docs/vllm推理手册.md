@@ -803,31 +803,9 @@ python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
     -c audio
 ```
 
-#### 3.4.3 FP8 dynamic quant
+#### 3.4.3 FP8 static quant
 
-**转换模型**\
-首先把模型下载到本地 \
-
-```bash
-git clone https://github.com/HabanaAI/vllm-hpu-extension.git -b aice/v1.22.0
-cd vllm-hpu-extension/scripts
-python dynamic_quant_multimodal_for_gaudi2.py \
-    -i /data/Qwen3-VL-30B-A3B-Instruct \
-    -o /data/Qwen3-VL-30B-A3B-Instruct-FP8-G2-Dynamic
-```
-
-**启动服务**\
-
-```bash
-PT_HPU_LAZY_MODE=1 vllm serve \
-    /data/Qwen3-VL-30B-A3B-Instruct-FP8-G2-Dynamic \
-    --port 8000 \
-    --host 127.0.0.1 \
-    --limit-mm-per-prompt video=5,image=5 \
-    --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
-```
-
-#### 3.4.4 FP8 static quant
+*static quant*有更低的精度损失和更好的性能。 **推荐使用**。
 
 **下载 vllm-hpu-extension**
 
@@ -855,7 +833,7 @@ PT_HPU_LAZY_MODE=1 ./calibrate_model.sh \
 
 校准结束后会在`/data/output/qwen3-vl-235b-a22b-instruct-fp8`文件夹获得`maxabs_quant_g2.json`文件
 
-**部署**
+**启动服务**
 
 ```bash
 QUANT_CONFIG=/data/output/qwen3-vl-235b-a22b-instruct-fp8/maxabs_quant_g2.json \
@@ -867,6 +845,32 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --mm_processor_kwargs max_pixels=1003520,min_pixels=3136 \
     --tensor-parallel-size 8 \
     --enable-expert-parallel
+```
+
+#### 3.4.4 FP8 dynamic quant
+
+*dynamic quant*不需要校准，流程更简单。
+
+**转换模型**\
+首先把模型下载到本地 \
+
+```bash
+git clone https://github.com/HabanaAI/vllm-hpu-extension.git -b aice/v1.22.0
+cd vllm-hpu-extension/scripts
+python dynamic_quant_multimodal_for_gaudi2.py \
+    -i /data/Qwen3-VL-30B-A3B-Instruct \
+    -o /data/Qwen3-VL-30B-A3B-Instruct-FP8-G2-Dynamic
+```
+
+**启动服务**\
+
+```bash
+PT_HPU_LAZY_MODE=1 vllm serve \
+    /data/Qwen3-VL-30B-A3B-Instruct-FP8-G2-Dynamic \
+    --port 8000 \
+    --host 127.0.0.1 \
+    --limit-mm-per-prompt video=5,image=5 \
+    --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
 ```
 
 #### 3.4.5 问题解答
