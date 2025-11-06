@@ -844,7 +844,7 @@ python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
 
 #### 3.4.3 FP8 static quant
 
-*static quant*有更低的精度损失和更好的性能。 **推荐使用**。
+*static quant*有更好的性能。 **推荐使用**。
 
 **下载 vllm-hpu-extension**
 
@@ -888,7 +888,7 @@ PT_HPU_LAZY_MODE=1 vllm serve \
 
 #### 3.4.4 FP8 dynamic quant
 
-*dynamic quant*不需要校准，流程更简单。
+*dynamic quant*流程更简单不需要校准，而且精度更高。
 
 **转换模型**\
 首先把模型下载到本地 \
