@@ -237,9 +237,9 @@ INFO: Uvicorn running on http://127.0.0.1:30001 (Press CTRL+C to quit)
 
 #### 2.3.1 FP8 格式转换
 
-Gaudi2 支持 fp8_e4m3fnuz 而非 fp8_e4m3fn，因此目前 fp8_e4m3fn 权重会先加载到主机内存，然后转换为 fp8_e4m3fnuz 格式，最后才传输到 HPU。如果模型使用 INC 来实现 FP8 量化，这个转换过程会自动完成，但是对于一些模型，例如 Hunyuan-A13B-Instruct-FP8， 需要使用脚本 convert_weights_for_gaudi2.py 离线转换 fp8_e4m3fn 权重，并在 calibration 和启动 vllm 中设置环境变量 VLLM_HPU_CONVERT_TO_FP8UZ=false。
+对于原生采用 fp8 权重的模型，例如：Qwen3-235B-A22B-FP8 和 GLM-4.5-Air-FP8，Gaudi2 支持 fp8_e4m3fnuz 而非 fp8_e4m3fn，因此目前 fp8_e4m3fn 权重会先加载到主机内存，然后转换为 fp8_e4m3fnuz 格式，最后才传输到 HPU。如果模型使用 INC 来实现 FP8 量化，这个转换过程会自动完成，但是对于一些模型，例如 Hunyuan-A13B-Instruct-FP8， 需要使用脚本 convert_weights_for_gaudi2.py 离线转换 fp8_e4m3fn 权重，并在 calibration 和启动 vllm 中设置环境变量 VLLM_HPU_CONVERT_TO_FP8UZ=false。
 
-使用原始 fp8_e4m3fn 权重时，不要设置 VLLM_HPU_CONVERT_TO_FP8UZ=false；使用转换后的 fp8_e4m3fnuz 权重时，不要忘记设置 VLLM_HPU_CONVERT_TO_FP8UZ=false。
+请注意：使用原始 fp8_e4m3fn 权重时，不要设置 VLLM_HPU_CONVERT_TO_FP8UZ=false；使用转换后的 fp8_e4m3fnuz 权重时，不要忘记设置 VLLM_HPU_CONVERT_TO_FP8UZ=false。
 
 convert_weights_for_gaudi2.py
 
@@ -307,18 +307,49 @@ usage: calibrate_model.sh <options>
 - `-x` 将校准文件扩展到指定的卡数，例如指定 -t 8 -x 4，则校准文件可以用来运行 8 卡和 4 卡
 - `-e` 设置此标志以启用 enforce_eager 执行
 
-以下示例用于校准 Qwen2.5-72B-Instruct 模型用于两张 Gaudi 卡。校准数据将保存到 quantization 文件夹中。
+##### 2.3.3.1 对原生 FP8 模型进行校准
+
+对于像 Qwen3-235B-A22B-FP8 或 GLM-4.5-Air-FP8 这样原生采用 FP8 精度的模型，也需要进行校准以优化性能。
+
+以下示例展示了如何使用 8 张卡对 Qwen3-256B-A223-FP8 模型进行校准。校准完成后，vLLM 可以使用 4 张或 8 张 Gaudi 卡以 FP8 精度运行此模型。
 
 ```bash
 cd vllm-hpu-extension/calibration
-MODEL=/models/Qwen2.5-72B-Instruct
-HPU_SIZE=2
-./calibrate_model.sh \
-     -m $MODEL \
+bash calibrate_model.sh \
+     -m /models/Qwen3-235B-A22B-FP8 \
      -d NeelNanda/pile-10k \
      -o quantization \
-     -t $HPU_SIZE
+     -t 8 -r 4 -u
 ```
+
+如果只有 4 张 Gaudi 卡可用，也可以使用这 4 张卡完成 Qwen3-235B-A22B-FP8 的校准。这样，vLLM 就可以仅使用这 4 张 Gaudi 卡以 FP8 精度运行此模型。
+
+```bash
+cd vllm-hpu-extension/calibration
+bash calibrate_model.sh \
+     -m /models/Qwen3-235B-A22B-FP8 \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t 4 -u
+```
+
+##### 2.3.3.2 对 BF16 模型进行校准
+
+对于仅支持 BF16 精度的模型，例如 Qwen2.5-72B-Insturct，可以使用以下命令在 4 张 Gaudi 卡上进行校准。
+
+测量数据将保存到 quantization 文件夹中。利用这些测量数据，vLLM 可以使用 2 张或 4 张 Gaudi 卡以 FP8 精度运行此模型。
+
+```bash
+cd vllm-hpu-extension/calibration
+./calibrate_model.sh \
+     -m /models/Qwen2.5-72B-Instruct \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t 4 \
+     -r 2
+```
+
+##### 2.3.3.3 对流水线并行模式进行校准
 
 要使用流水线并行 (PP) 运行模型，必须设置 -x <TP_SIZE_WITH_PP>，其中 TP_SIZE_WITH_PP 表示启用 PP 时的 TP 大小。以 GLM-4.5-FP8 为例，TP=4，PP=2：
 
@@ -338,6 +369,14 @@ bash calibrate_model.sh \
 mkdir quantization
 #将校准后的量化文件复制到quantization文件夹中：
 cp -r vllm-hpu-extension/calibration/quantization/* quantization/
+```
+
+注意：请确保 quantization 目录下的子目录名称与 models.conf 文件中 modelPath 的后缀匹配。以下是 quantization 文件夹的示例。
+
+```
+root@server:/workspace$ ls vllm-fork/scripts/quantization/
+
+qwen3-235b-a22b-fp8  qwen2.5-72b-instruct
 ```
 
 #### 2.3.5 以 FP8 精度启动 vLLM 服务
