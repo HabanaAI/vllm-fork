@@ -549,6 +549,8 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
                 return "<start_of_image>"
             if model_type == "kimi_vl":
                 return "<|media_start|>image<|media_content|><|media_pad|><|media_end|>" # noqa: E501
+            if model_type == "paddleocr_vl":
+                return None
 
             raise TypeError(f"Unknown {modality} model type: {model_type}")
         elif modality == "audio":
