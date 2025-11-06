@@ -96,7 +96,7 @@ modelscope download --model Qwen/Qwen2-72B-Instruct --local_dir /models/Qwen2-72
 ### 1.4 安装 vLLM
 
 为容器设置正确的网络设置，确保容器可以正常访问 github。  
-使用如下命令在镜像环境安装 vLLM v1.21.0：
+使用如下命令在镜像环境安装 vLLM v1.22.0：
 
 ```bash
 # install vllm
@@ -495,7 +495,7 @@ modelscope download --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --local_dir
 #### 3.2.2 安装和启动 vLLM
 
 为容器设置正确的网络设置，确保容器可以正常访问 github。  
-使用如下命令在镜像环境安装 vLLM v1.21.0：
+使用如下命令在镜像环境安装 vLLM v1.22.0：
 
 ```bash
 # install vllm
@@ -578,7 +578,7 @@ modelscope download --model Qwen/Qwen3-8B --local_dir /data/hf_models/Qwen3-8B
 #### 3.3.2 安装和启动 vLLM
 
 为容器设置正确的网络设置，确保容器可以正常访问 github。  
-使用如下命令在镜像环境安装 vLLM v1.21.0：
+使用如下命令在镜像环境安装 vLLM v1.22.0：
 
 ```bash
 # install vllm
@@ -828,6 +828,7 @@ PT_HPU_LAZY_MODE=1 vllm serve \
 ```
 
 #### 3.4.4 FP8 static quant
+
 **下载 vllm-hpu-extension**
 
 ```bash
@@ -852,7 +853,7 @@ PT_HPU_LAZY_MODE=1 ./calibrate_model.sh \
     -b 128 -t 8 -u -l 4096
 ```
 
-校准结束后会在```/data/output/qwen3-vl-235b-a22b-instruct-fp8```文件夹获得```maxabs_quant_g2.json```文件
+校准结束后会在`/data/output/qwen3-vl-235b-a22b-instruct-fp8`文件夹获得`maxabs_quant_g2.json`文件
 
 **部署**
 
