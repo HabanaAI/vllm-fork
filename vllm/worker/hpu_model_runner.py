@@ -118,7 +118,7 @@ class VisionBuckets:
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
                     multimodal_buckets = [
-                        1600, 3136, 4096, 6400, 7744, 9216, 12544
+                        1600, 3136, 4096, 6400
                     ]
             else:
                 multimodal_buckets = [int(i) for i in envvar.split(',')]
