@@ -767,7 +767,7 @@ pip install vllm[audio]
 **Qwen2-VL**: Support Image and Video inputs
 
 ```bash
-PT_HPU_LAZY_MODE=1 vllm serve \
+PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     Qwen/Qwen2-VL-7B-Instruct \
     --port 8000 \
     --host 127.0.0.1 \
@@ -779,7 +779,7 @@ PT_HPU_LAZY_MODE=1 vllm serve \
 **Qwen2-Audio**: Support Audio inputs
 
 ```bash
-PT_HPU_LAZY_MODE=1 vllm serve \
+PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     Qwen/Qwen2-Audio-7B-Instruct \
     --port 8000 \
     --host 127.0.0.1 \
@@ -791,7 +791,7 @@ PT_HPU_LAZY_MODE=1 vllm serve \
 **Qwen2.5-VL**: Support Image and Video inputs
 
 ```bash
-PT_HPU_LAZY_MODE=1 vllm serve \
+PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     Qwen/Qwen2.5-VL-7B-Instruct \
     --port 8000 \
     --host 127.0.0.1 \
@@ -803,7 +803,7 @@ PT_HPU_LAZY_MODE=1 vllm serve \
 **Qwen2.5-Omni**: Support Image, Video and Audio inputs
 
 ```bash
-PT_HPU_LAZY_MODE=1 vllm serve \
+PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     Qwen/Qwen2.5-Omni-7B \
     --port 8000 \
     --host 127.0.0.1 \
@@ -815,7 +815,7 @@ PT_HPU_LAZY_MODE=1 vllm serve \
 **Qwen3-VL**: Support Image and Video inputs
 
 ```bash
-PT_HPU_LAZY_MODE=1 vllm serve \
+PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     Qwen/Qwen3-VL-30B-A3B-Instruct \
     --port 8000 \
     --host 127.0.0.1 \
@@ -876,7 +876,7 @@ PT_HPU_LAZY_MODE=1 ./calibrate_model.sh \
 
 ```bash
 QUANT_CONFIG=/data/output/qwen3-vl-235b-a22b-instruct-fp8/maxabs_quant_g2.json \
-PT_HPU_LAZY_MODE=1 vllm serve \
+PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     /data/Qwen3-VL-30B-A3B-Instruct-FP8 \
     --port 8000 \
     --host 127.0.0.1 \
@@ -904,7 +904,7 @@ python dynamic_quant_multimodal_for_gaudi2.py \
 **启动服务**\
 
 ```bash
-PT_HPU_LAZY_MODE=1 vllm serve \
+PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     /data/Qwen3-VL-30B-A3B-Instruct-FP8-G2-Dynamic \
     --port 8000 \
     --host 127.0.0.1 \
