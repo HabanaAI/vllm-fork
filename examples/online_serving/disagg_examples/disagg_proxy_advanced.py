@@ -570,36 +570,47 @@ class Proxy:
             prefill_instance = None
             decode_instance = None
 
-            if len(self.prefill_instances) > 0:
-                kv_prepare_request = request.copy()
-                kv_prepare_request["max_tokens"] = 1
+            kv_prepare_request = request.copy()
+            kv_prepare_request["max_tokens"] = 1
 
-                start_time = time.time()
-                prompt = kv_prepare_request.get("prompt")
-                total_length = self.get_total_token_length(prompt)
-                end_time = time.time()
+            start_time = time.time()
+            prompt = kv_prepare_request.get("prompt")
+            total_length = self.get_total_token_length(prompt)
+            max_tokens = request.get("max_tokens", 0)
+            end_time = time.time()
 
-                log_info_green(
-                    f"create_completion -- prompt length: {total_length}, "
-                    f"tokenizer took "
-                    f"{(end_time - start_time) * 1000:.2f} ms")
-                prefill_instance = self.schedule(self.prefill_cycler,
+            log_info_green(
+                f"create_completion -- prompt length: {total_length}, "
+                f"max tokens: {max_tokens}, "
+                f"tokenizer took "
+                f"{(end_time - start_time) * 1000:.2f} ms")
+            prefill_instance = self.schedule(self.prefill_cycler,
                                                  is_prompt=True,
-                                                 request_len=total_length)
-                value = b''
-                try:
-                    async for chunk in self.forward_request(
-                            f"http://{prefill_instance}/v1/completions",
-                            kv_prepare_request):
-                        value += chunk
-                except HTTPException as http_exc:
-                    self.exception_handler(prefill_instance, decode_instance, total_length)
-                    raise http_exc
+                                                 request_len=total_length + 1)
 
-            # Perform kv recv and decoding stage
             decode_instance = self.schedule(self.decode_cycler,
                                             is_prompt=False,
-                                            request_len=total_length)
+                                            request_len=total_length + max_tokens)
+
+            if prefill_instance is None or decode_instance is None:
+                logger.error(
+                    f"No available instance can handle the request. "
+                    f"Prefill: {prefill_instance}, Decode: {decode_instance}, "
+                    f"request lengths -> prefill: {total_length + 1}, decode: {total_length + max_tokens}"
+                )
+                return None
+
+            value = b''
+            try:
+                async for chunk in self.forward_request(
+                        f"http://{prefill_instance}/v1/completions",
+                        kv_prepare_request):
+                    value += chunk
+            except HTTPException as http_exc:
+                self.exception_handler(prefill_instance, decode_instance, total_length)
+                raise http_exc
+
+            # Perform kv recv and decoding stage
             value = value.strip().decode("utf-8").removesuffix(
                 "data: [DONE]").encode("utf-8")
 
@@ -795,8 +806,21 @@ class LoadBalancedScheduler(SchedulingPolicy):
                  request_len: Optional[int] = None) -> str:
         with self.lock:
             if is_prompt:
-                min_value = min(self.prefill_utils_counter)
-                min_index = self.prefill_utils_counter.index(min_value)
+                candidates = [
+                    i for i, max_len in enumerate(self.prefill_model_len)
+                    if request_len <= max_len
+                ]
+                if not candidates:
+                    logger.warning("No prefill instance can handle request_len=%d", request_len)
+                    return None
+
+                min_value = min([self.prefill_utils_counter[i] for i in candidates])
+                min_indices = [
+                    i for i in candidates
+                    if self.prefill_utils_counter[i] == min_value
+                ]
+                min_index = min_indices[0]
+
                 self.prefill_bs_counter[min_index] += 1
                 self.prefill_utils_counter[min_index] += request_len
                 self.prefill_schedule_index += 1
@@ -805,18 +829,24 @@ class LoadBalancedScheduler(SchedulingPolicy):
                     f"instance = {min_index}, min_tokens = {min_value}")
                 return self.prefill_instances[min_index]
             else:
-                min_value = min(self.decode_bs_counter)
+                candidates = [
+                    i for i, max_len in enumerate(self.decode_model_len)
+                    if request_len <= max_len
+                ]
+                if not candidates:
+                    logger.warning("No decode instance can handle request_len=%d", request_len)
+                    return None
 
+                min_value = min([self.decode_bs_counter[i] for i in candidates])
+                min_indices = [i for i in candidates if self.decode_bs_counter[i] == min_value]
                 if min_value == 0:
-                    min_index = self.decode_bs_counter.index(min_value)
+                    min_index = next(i for i in candidates if self.decode_bs_counter[i] == 0)
                 else:
                     min_indices = [
-                        i for i, val in enumerate(self.decode_bs_counter)
-                        if val == min_value
+                        i for i in candidates
+                        if self.decode_bs_counter[i] == min_value
                     ]
-                    min_index = min(
-                        min_indices,
-                        key=lambda i: self.decode_kv_utils_counter[i])
+                    min_index = min(min_indices, key=lambda i: self.decode_kv_utils_counter[i])
 
                 self.decode_bs_counter[min_index] += 1
                 self.decode_kv_utils_counter[min_index] += request_len
