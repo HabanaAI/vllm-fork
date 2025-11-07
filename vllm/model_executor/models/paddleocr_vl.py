@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import math
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
 from typing import Optional, Union
@@ -65,6 +66,11 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         PromptUpdate)
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
 from vllm.sequence import IntermediateTensors
+
+is_hpu = current_platform.is_hpu()
+
+if is_hpu:
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 
 def smart_resize(
@@ -590,6 +596,10 @@ class SiglipAttention(nn.Module):
             raise RuntimeError(f"PaddleOCR-VL does not support \
                 {self.attn_backend} backend now.")
 
+        self.softmax_mode = 'fp32' if os.environ.get(
+            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
+                                                             ] else 'None'
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -627,10 +637,8 @@ class SiglipAttention(nn.Module):
             context_layer = rearrange(output,
                                       "(b s) ... -> b s ...",
                                       b=batch_size)
-        elif self.attn_backend == _Backend.TORCH_SDPA:
+        elif self.attn_backend == _Backend.TORCH_SDPA and is_hpu:
             # Execute attention entry by entry for speed & less VRAM.
-            import torch.nn.functional as F
-
             outputs = []
             for i in range(1, len(cu_seqlens)):
                 start_idx = cu_seqlens[i - 1]
@@ -640,10 +648,8 @@ class SiglipAttention(nn.Module):
                 v_i = v[:, start_idx:end_idx]
                 q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                  for x in [q_i, k_i, v_i])
-                output_i = F.scaled_dot_product_attention(q_i,
-                                                          k_i,
-                                                          v_i,
-                                                          dropout_p=0.0)
+                output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0, False,
+                                           None, self.softmax_mode)
                 output_i = rearrange(output_i, "b h s d -> b s h d ")
                 outputs.append(output_i)
             context_layer = torch.cat(outputs, dim=1)
