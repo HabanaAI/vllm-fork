@@ -487,11 +487,18 @@ class FusedMoE(torch.nn.Module):
                 from vllm.model_executor.layers.vllm_ext_patch import (
                     VllmMixtureOfExpertsOpFP8,
                 )
-                moe_n_slice = int(os.environ.get("VLLM_MOE_N_SLICE", 4))
-                assert moe_n_slice == 1, (
-                    f"moe_n_slice is {moe_n_slice}, expected 1 when using VLLM_REQUANT_FP8_INC"
-                )
-                num_expert_per_group = self.local_num_experts // moe_n_slice
+                
+                moe_n_slice = int(os.environ.get("VLLM_MOE_N_SLICE", 1))
+                if moe_n_slice != 1:
+                    logger.warning_once(
+                        f"Be careful that moe_n_slice is set to {moe_n_slice}, "
+                        f"Please confirm that the current process is not performing calibration."
+                        )
+                # assert moe_n_slice == 1, (
+                #     f"moe_n_slice is {moe_n_slice}, expected 1 when using VLLM_REQUANT_FP8_INC"
+                # )
+                # num_expert_per_group = self.local_num_experts // moe_n_slice
+                num_expert_per_group = self.local_num_experts
                 experts_min, experts_max = 0, self.local_num_experts
                 moe_op = VllmMixtureOfExpertsOpFP8(
                     num_expert_per_group,

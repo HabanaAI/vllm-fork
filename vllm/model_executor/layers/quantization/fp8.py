@@ -653,6 +653,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     moe_op.w2_list[index].set_weight_block_size(
                         layer.quant_config.weight_block_size
                     )
+                moe_op.enable_moe_chunk = self.enable_moe_chunk
+                moe_op.chunk_size_list = self.chunk_size_list
+                moe_op.token_boundary_list = self.token_boundary_list
+                moe_op.moe_slice_length = self.moe_slice_length
                 import habana_frameworks.torch as htorch
                 htorch.core.mark_step()
 
