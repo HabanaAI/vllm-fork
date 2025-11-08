@@ -599,7 +599,7 @@ class Proxy:
                                             max_tokens = max_tokens)
 
             if prefill_instance is None or decode_instance is None:
-                logger.error(
+                log_info_red(
                     "No available instance can handle the request. "
                     "Prefill: %s, Decode: %s, "
                     "request lengths -> prefill: %d, decode: %d",
@@ -712,7 +712,7 @@ class Proxy:
                                             max_tokens = max_tokens)
 
             if prefill_instance is None or decode_instance is None:
-                logger.error(
+                log_info_red(
                     "No available instance can handle the request. "
                     "Prefill: %s, Decode: %s, "
                     "request lengths -> prefill: %d, decode: %d",
@@ -856,7 +856,7 @@ class LoadBalancedScheduler(SchedulingPolicy):
                     if request_len + max_tokens <= max_len
                 ]
                 if not candidates:
-                    logger.warning(
+                    log_info_red(
                        "No prefill instance can handle request_len=%d, "
                        "max_tokens=%d",
                         request_len,
@@ -884,7 +884,7 @@ class LoadBalancedScheduler(SchedulingPolicy):
                     if request_len + max_tokens <= max_len
                 ]
                 if not candidates:
-                    logger.warning(
+                    log_info_red(
                         "No decode instance can handle request_len=%d, "
                         "max_tokens=%d",
                         request_len,
