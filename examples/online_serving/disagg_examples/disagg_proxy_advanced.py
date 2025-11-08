@@ -688,6 +688,7 @@ class Proxy:
             total_length = sum(
                 self.get_total_token_length(msg['content'])
                 for msg in kv_prepare_request['messages'])
+            max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
             log_info_green(
                 f"create_chat_completion -- prompt length: {total_length}, "
@@ -696,7 +697,30 @@ class Proxy:
 
             prefill_instance = self.schedule(self.prefill_cycler,
                                              is_prompt=True,
-                                             request_len=total_length)
+                                             request_len=total_length,
+                                             max_tokens = 1)
+
+            decode_instance = self.schedule(self.decode_cycler,
+                                            is_prompt=False,
+                                            request_len=total_length,
+                                            max_tokens = max_tokens)
+
+            if prefill_instance is None or decode_instance is None:
+                logger.error(
+                    "No available instance can handle the request. "
+                    "Prefill: %s, Decode: %s, "
+                    "request lengths -> prefill: %d, decode: %d",
+                    prefill_instance,
+                    decode_instance,
+                    total_length + 1,
+                    total_length + max_tokens,
+                )
+                self.on_done(
+                    prefill_instance=prefill_instance,
+                    decode_instance=decode_instance,
+                    req_len=total_length
+                )
+                return None
 
             value = b''
             try:
@@ -707,10 +731,8 @@ class Proxy:
             except HTTPException as http_exc:
                 self.exception_handler(prefill_instance, decode_instance, total_length)
                 raise http_exc
+
             # Perform kv recv and decoding stage
-            decode_instance = self.schedule(self.decode_cycler,
-                                            is_prompt=False,
-                                            request_len=total_length)
             value = value.strip().decode("utf-8").removesuffix(
                 "data: [DONE]").encode("utf-8")
 
