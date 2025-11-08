@@ -508,8 +508,9 @@ class Proxy:
     def schedule(self,
                  cycler: itertools.cycle,
                  is_prompt: int = None,
-                 request_len: Optional[int] = None) -> str:
-        return self.scheduling_policy.schedule(cycler, is_prompt, request_len)
+                 request_len: Optional[int] = None,
+                 max_tokens: Optional[int] = None) -> str:
+        return self.scheduling_policy.schedule(cycler, is_prompt, request_len, max_tokens)
 
     def schedule_completion(self,
                             prefill_instance: str = None,
@@ -586,17 +587,28 @@ class Proxy:
                 f"{(end_time - start_time) * 1000:.2f} ms")
             prefill_instance = self.schedule(self.prefill_cycler,
                                                  is_prompt=True,
-                                                 request_len=total_length + 1)
+                                                 request_len=total_length,
+                                                 max_tokens = 1)
 
             decode_instance = self.schedule(self.decode_cycler,
                                             is_prompt=False,
-                                            request_len=total_length + max_tokens)
+                                            request_len=total_length,
+                                            max_tokens = max_tokens)
 
             if prefill_instance is None or decode_instance is None:
                 logger.error(
-                    f"No available instance can handle the request. "
-                    f"Prefill: {prefill_instance}, Decode: {decode_instance}, "
-                    f"request lengths -> prefill: {total_length + 1}, decode: {total_length + max_tokens}"
+                    "No available instance can handle the request. "
+                    "Prefill: %s, Decode: %s, "
+                    "request lengths -> prefill: %d, decode: %d",
+                    prefill_instance,
+                    decode_instance,
+                    total_length + 1,
+                    total_length + max_tokens,
+                )
+                self.on_done(
+                    prefill_instance=prefill_instance,
+                    decode_instance=decode_instance,
+                    req_len=total_length
                 )
                 return None
 
@@ -766,7 +778,8 @@ class RoundRobinSchedulingPolicy(SchedulingPolicy):
 
     def schedule(self,
                  cycler: itertools.cycle,
-                 request: Optional[dict[str, any]] = None) -> str:
+                 request: Optional[dict[str, any]] = None,
+                 max_tokens:Optional[int] = None) -> str:
         return self.safe_next(cycler)
 
 
@@ -803,15 +816,20 @@ class LoadBalancedScheduler(SchedulingPolicy):
     def schedule(self,
                  cycler: itertools.cycle,
                  is_prompt: int = None,
-                 request_len: Optional[int] = None) -> str:
+                 request_len: int = None,
+                 max_tokens: int = None) -> str:
         with self.lock:
             if is_prompt:
                 candidates = [
                     i for i, max_len in enumerate(self.prefill_model_len)
-                    if request_len <= max_len
+                    if request_len + max_tokens <= max_len
                 ]
                 if not candidates:
-                    logger.warning("No prefill instance can handle request_len=%d", request_len)
+                    logger.warning(
+                       "No prefill instance can handle request_len=%d, max_tokens=%d",
+                        request_len,
+                        max_tokens,
+                    )
                     return None
 
                 min_value = min([self.prefill_utils_counter[i] for i in candidates])
@@ -831,10 +849,14 @@ class LoadBalancedScheduler(SchedulingPolicy):
             else:
                 candidates = [
                     i for i, max_len in enumerate(self.decode_model_len)
-                    if request_len <= max_len
+                    if request_len + max_tokens <= max_len
                 ]
                 if not candidates:
-                    logger.warning("No decode instance can handle request_len=%d", request_len)
+                    logger.warning(
+                        "No decode instance can handle request_len=%d, max_tokens=%d",
+                        request_len,
+                        max_tokens,
+                    )
                     return None
 
                 min_value = min([self.decode_bs_counter[i] for i in candidates])
