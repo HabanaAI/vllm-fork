@@ -211,29 +211,49 @@ class Proxy:
         self.router.options("/invocations")(lambda: None)
 
         self.router.get("/status",
-                        response_class=JSONResponse)(self.get_status)
+                response_class=JSONResponse)(self.get_status)
         self.router.post("/instances/add",
-                         dependencies=[Depends(self.api_key_authenticate)
+                dependencies=[Depends(self.api_key_authenticate)
                                        ])(self.add_instance_endpoint)
-        self.router.get("/health", response_class=PlainTextResponse)(self.get_health)
-        self.router.get("/ping", response_class=PlainTextResponse)(self.get_ping)
-        self.router.post("/ping", response_class=PlainTextResponse)(self.get_ping)
-        self.router.post("/tokenize", response_class=JSONResponse)(self.post_tokenize)
-        self.router.post("/detokenize", response_class=JSONResponse)(self.post_detokenize)
-        self.router.get("/v1/models", response_class=JSONResponse)(self.get_models)
-        self.router.get("/version", response_class=JSONResponse)(self.get_version)
-        self.router.post("/v1/embeddings", response_class=JSONResponse)(self.post_embeddings)
-        self.router.post("/pooling", response_class=JSONResponse)(self.post_pooling)
-        self.router.post("/score", response_class=JSONResponse)(self.post_score)
-        self.router.post("/v1/score", response_class=JSONResponse)(self.post_scorev1)
-        self.router.post("/rerank", response_class=JSONResponse)(self.post_rerank)
-        self.router.post("/v1/rerank", response_class=JSONResponse)(self.post_rerankv1)
-        self.router.post("/v2/rerank", response_class=JSONResponse)(self.post_rerankv2)
-        self.router.post("/invocations", response_class=JSONResponse)(self.post_invocations)
+        self.router.get("/health",
+                response_class=PlainTextResponse)(self.get_health)
+        self.router.get("/ping",
+                response_class=PlainTextResponse)(self.get_ping)
+        self.router.post("/ping",
+                response_class=PlainTextResponse)(self.get_ping)
+        self.router.post("/tokenize",
+                response_class=JSONResponse)(self.post_tokenize)
+        self.router.post("/detokenize",
+                response_class=JSONResponse)(self.post_detokenize)
+        self.router.get("/v1/models",
+                response_class=JSONResponse)(self.get_models)
+        self.router.get("/version",
+                response_class=JSONResponse)(self.get_version)
+        self.router.post("/v1/embeddings",
+                response_class=JSONResponse)(self.post_embeddings)
+        self.router.post("/pooling",
+                response_class=JSONResponse)(self.post_pooling)
+        self.router.post("/score",
+                response_class=JSONResponse)(self.post_score)
+        self.router.post("/v1/score",
+                response_class=JSONResponse)(self.post_scorev1)
+        self.router.post("/rerank",
+                response_class=JSONResponse)(self.post_rerank)
+        self.router.post("/v1/rerank",
+                response_class=JSONResponse)(self.post_rerankv1)
+        self.router.post("/v2/rerank",
+                response_class=JSONResponse)(self.post_rerankv2)
+        self.router.post("/invocations",
+                response_class=JSONResponse)(self.post_invocations)
 
-    async def get_from_instance(self, path: str, is_full_instancelist: int = 0):
+    async def get_from_instance(
+            self,
+            path: str,
+            is_full_instancelist: int = 0,
+    ):
         if not self.prefill_instances:
-            return JSONResponse(content={"error": "No instances available"}, status_code=500)
+            return JSONResponse(
+                content={"error": "No instances available"}, status_code=500)
 
         if is_full_instancelist == 0:
             instances = [self.prefill_instances[0]]
