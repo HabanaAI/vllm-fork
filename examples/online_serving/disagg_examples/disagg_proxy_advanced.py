@@ -20,6 +20,7 @@ from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
 from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 from transformers import AutoTokenizer
 from asyncio import CancelledError
+from fastapi.middleware.cors import CORSMiddleware
 
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s",
                               "%Y-%m-%d %H:%M:%S")
@@ -31,23 +32,22 @@ logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 logger.propagate = False
 
-from fastapi.middleware.cors import CORSMiddleware
+def log_info_color(color, msg, *args):
+    """Generic colored log with parameterized message."""
+    msg_colored = f"{escape_codes[color]}{msg}{escape_codes['reset']}"
+    logger.info(msg_colored, *args)
 
-def log_info_blue(msg):
-    logger.info("%s%s%s", escape_codes['cyan'], msg, escape_codes['reset'])
+def log_info_blue(msg, *args):
+    log_info_color('cyan', msg, *args)
 
+def log_info_green(msg, *args):
+    log_info_color('green', msg, *args)
 
-def log_info_green(msg):
-    logger.info("%s%s%s", escape_codes['green'], msg, escape_codes['reset'])
+def log_info_yellow(msg, *args):
+    log_info_color('yellow', msg, *args)
 
-
-def log_info_yellow(msg):
-    logger.info("%s%s%s", escape_codes['yellow'], msg, escape_codes['reset'])
-
-
-def log_info_red(msg):
-    logger.info("%s%s%s", escape_codes['red'], msg, escape_codes['reset'])
-
+def log_info_red(msg, *args):
+    log_info_color('red', msg, *args)
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=None,
                                         connect=None,
@@ -298,13 +298,13 @@ class Proxy:
 
         url = f"http://{self.prefill_instances[0]}{path}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as resp:
-                    try:
-                        content = await resp.json()
-                    except aiohttp.ContentTypeError:
-                        content = {"raw": await resp.text()}
-                    return JSONResponse(content, status_code=resp.status)
+            async with aiohttp.ClientSession() as session, \
+                    session.post(url, json=payload) as resp:
+                try:
+                    content = await resp.json()
+                except aiohttp.ContentTypeError:
+                    content = {"raw": await resp.text()}
+                return JSONResponse(content, status_code=resp.status)
         except Exception as e:
             return JSONResponse(
                 {"error": f"Failed to fetch {url}, reason: {str(e)}"},
@@ -581,10 +581,13 @@ class Proxy:
             end_time = time.time()
 
             log_info_green(
-                f"create_completion -- prompt length: {total_length}, "
-                f"max tokens: {max_tokens}, "
-                f"tokenizer took "
-                f"{(end_time - start_time) * 1000:.2f} ms")
+                "create_completion -- prompt length: %d, max tokens: %d, "
+                "tokenizer took %.2f ms",
+                total_length,
+                max_tokens,
+                (end_time - start_time) * 1000
+            )
+
             prefill_instance = self.schedule(self.prefill_cycler,
                                                  is_prompt=True,
                                                  request_len=total_length,
@@ -661,7 +664,10 @@ class Proxy:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                    logger.warning(
+                        "[0]Client disconnected during create_completion "
+                        "(CancelledError)"
+                    )
                 except Exception as e:
                     logger.error("[1] Exception in wrapped_generator: %s", str(e))
                     raise
@@ -772,7 +778,10 @@ class Proxy:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                    logger.warning(
+                        "[0]Client disconnected during create_chat_completion "
+                        "(CancelledError)"
+                    )
                 except Exception as e:
                     logger.error("[1] Exception in wrapped_generator: %s", str(e))
                     raise
@@ -848,7 +857,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 ]
                 if not candidates:
                     logger.warning(
-                       "No prefill instance can handle request_len=%d, max_tokens=%d",
+                       "No prefill instance can handle request_len=%d, "
+                       "max_tokens=%d",
                         request_len,
                         max_tokens,
                     )
@@ -875,7 +885,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 ]
                 if not candidates:
                     logger.warning(
-                        "No decode instance can handle request_len=%d, max_tokens=%d",
+                        "No decode instance can handle request_len=%d, "
+                        "max_tokens=%d",
                         request_len,
                         max_tokens,
                     )
