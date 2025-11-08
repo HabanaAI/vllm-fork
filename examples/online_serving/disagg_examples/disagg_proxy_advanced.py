@@ -605,10 +605,9 @@ class Proxy:
             max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
             log_info_green(
-                "<completion> - prompt len:%d, max tokens:%d, took %.2f ms",
-                total_length,
-                max_tokens,
-                ((end_time - start_time) * 1000)
+                f"<create completion> - prompt len:{total_length}, "
+                f"max tokens:{max_tokens}, "
+                f"took {(end_time - start_time) * 1000:.2f} ms"
             )
 
             prefill_instance = self.schedule(self.prefill_cycler,
@@ -623,13 +622,10 @@ class Proxy:
 
             if prefill_instance is None or decode_instance is None:
                 log_info_red(
-                    "No available instance can handle the request. "
-                    "Prefill: %s, Decode: %s, "
-                    "request lengths -> prefill: %d, decode: %d",
-                    prefill_instance,
-                    decode_instance,
-                    total_length + 1,
-                    total_length + max_tokens,
+                    f"No available instance can handle the request. "
+                    f"Prefill: {prefill_instance}, Decode: {decode_instance}, "
+                    f"request lengths -> prefill: {total_length + 1}, "
+                    f"decode: {total_length + max_tokens}"
                 )
                 self.exception_handler(
                     prefill_instance=prefill_instance,
@@ -721,10 +717,9 @@ class Proxy:
             max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
             log_info_green(
-                "<chat completion>Prompt len:%d, max tokens:%d, took %.2f ms",
-                total_length,
-                max_tokens,
-                (end_time - start_time) * 1000
+                f"<create chat completion> Prompt len:{total_length}, "
+                f"max tokens:{max_tokens}, "
+                f"took {(end_time - start_time) * 1000:.2f} ms"
             )
 
             prefill_instance = self.schedule(self.prefill_cycler,
@@ -739,13 +734,10 @@ class Proxy:
 
             if prefill_instance is None or decode_instance is None:
                 log_info_red(
-                    "No available instance can handle the request. "
-                    "Prefill: %s, Decode: %s, "
-                    "request lengths -> prefill: %d, decode: %d",
-                    prefill_instance,
-                    decode_instance,
-                    total_length + 1,
-                    total_length + max_tokens,
+                    f"No available instance can handle the request. "
+                    f"Prefill: {prefill_instance}, Decode: {decode_instance}, "
+                    f"request lengths -> prefill: {total_length + 1}, "
+                    f"decode: {total_length + max_tokens}"
                 )
                 self.exception_handler(
                     prefill_instance=prefill_instance,
@@ -883,10 +875,9 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 ]
                 if not candidates:
                     log_info_red(
-                       "No prefill instance can handle request_len=%d, "
-                       "max_tokens=%d",
-                        request_len,
-                        max_tokens,
+                        f"No prefill instance can handle "
+                        f"request_len={request_len}, "
+                        f"max_tokens={max_tokens}"
                     )
                     return None
 
@@ -911,10 +902,9 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 ]
                 if not candidates:
                     log_info_red(
-                        "No decode instance can handle request_len=%d, "
-                        "max_tokens=%d",
-                        request_len,
-                        max_tokens,
+                        f"No decode instance can handle "
+                        f"request_len={request_len}, "
+                        f"max_tokens={max_tokens}"
                     )
                     return None
 
