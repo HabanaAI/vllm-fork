@@ -571,7 +571,12 @@ class Proxy:
             logger.error("Unsupported prompt type: %s", type(prompt))
             return fake_len
 
-    def exception_handler(self, prefill_instance=None, decode_instance=None, req_len=None):
+    def exception_handler(
+            self,
+            prefill_instance=None,
+            decode_instance=None,
+            req_len=None,
+    ):
         if prefill_instance or decode_instance:
             try:
                 self.on_done(
@@ -600,10 +605,10 @@ class Proxy:
             max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
             log_info_green(
-                "<completion> - prompt len: %d, max tokens: %d, took %.2f ms"
+                "<completion> - prompt len:%d, max tokens:%d, took %.2f ms",
                 total_length,
                 max_tokens,
-                (end_time - start_time) * 1000
+                ((end_time - start_time) * 1000)
             )
 
             prefill_instance = self.schedule(self.prefill_cycler,
@@ -626,7 +631,7 @@ class Proxy:
                     total_length + 1,
                     total_length + max_tokens,
                 )
-                self.on_done(
+                self.exception_handler(
                     prefill_instance=prefill_instance,
                     decode_instance=decode_instance,
                     req_len=total_length
@@ -640,7 +645,8 @@ class Proxy:
                         kv_prepare_request):
                     value += chunk
             except HTTPException as http_exc:
-                self.exception_handler(prefill_instance, decode_instance, total_length)
+                self.exception_handler(
+                        prefill_instance, decode_instance, total_length)
                 raise http_exc
 
             # Perform kv recv and decoding stage
@@ -715,7 +721,7 @@ class Proxy:
             max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
             log_info_green(
-                "<chat completion>Prompt len: %d, max tokens: %d, took %.2f ms"
+                "<chat completion>Prompt len:%d, max tokens:%d, took %.2f ms",
                 total_length,
                 max_tokens,
                 (end_time - start_time) * 1000
@@ -741,7 +747,7 @@ class Proxy:
                     total_length + 1,
                     total_length + max_tokens,
                 )
-                self.on_done(
+                self.exception_handler(
                     prefill_instance=prefill_instance,
                     decode_instance=decode_instance,
                     req_len=total_length
