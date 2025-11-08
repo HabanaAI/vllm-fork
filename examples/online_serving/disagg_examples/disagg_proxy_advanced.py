@@ -579,10 +579,8 @@ class Proxy:
             total_length = self.get_total_token_length(prompt)
             max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
-
             log_info_green(
-                "create_completion -- prompt length: %d, max tokens: %d, "
-                "tokenizer took %.2f ms",
+                "<completion> - prompt len: %d, max tokens: %d, took %.2f ms"
                 total_length,
                 max_tokens,
                 (end_time - start_time) * 1000
@@ -697,9 +695,11 @@ class Proxy:
             max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
             log_info_green(
-                f"create_chat_completion -- prompt length: {total_length}, "
-                f"tokenizer took "
-                f"{(end_time - start_time) * 1000:.2f} ms")
+                "<chat completion>Prompt len: %d, max tokens: %d, took %.2f ms"
+                total_length,
+                max_tokens,
+                (end_time - start_time) * 1000
+            )
 
             prefill_instance = self.schedule(self.prefill_cycler,
                                              is_prompt=True,
