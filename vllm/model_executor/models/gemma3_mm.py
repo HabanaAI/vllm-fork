@@ -577,8 +577,12 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
             for i in batch_breakdown:
                 end_idx = start_idx + i
+<<<<<<< HEAD
                 indices = torch.arange(start_idx,
                                        end_idx).to(pixel_values.device)
+=======
+                indices = torch.arange(start_idx, end_idx)
+>>>>>>> chris/ovis_2_5
                 batch_sliced_pixel_values = torch.index_select(pixel_values,
                                                                dim=0,
                                                                index=indices)
