@@ -7,6 +7,8 @@ from typing import Optional, Union
 
 import torch
 from einops import rearrange, repeat
+from habana_frameworks.torch.hpex.kernels import apply_rotary_pos_emb \
+    as hpu_rotary
 from torch import nn
 from torch.nn import functional as F
 from transformers.activations import ACT2FN
@@ -187,6 +189,28 @@ def apply_rotary_pos_emb(
     return q_embed, k_embed
 
 
+def apply_rotary_pos_emb_hpu(
+        q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor,
+        sin: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    ro_dim = cos.shape[-1]
+    # Determine rotary dimension from cos/sin shape
+    q_rot, q_pass = q[..., :ro_dim], q[..., ro_dim:]
+    k_rot, k_pass = k[..., :ro_dim], k[..., ro_dim:]
+
+    # Prepare cos/sin (remove the chunking)
+    cos_full = cos.view(1, cos.shape[0], 1, cos.shape[1])
+    sin_full = sin.view(1, sin.shape[0], 1, sin.shape[1])
+    q_rot = hpu_rotary(q_rot.float(), cos_full.float(),
+                                 sin_full.float()).type_as(q)
+    k_rot = hpu_rotary(k_rot.float(), cos_full.float(),
+                                 sin_full.float()).type_as(k)
+
+    # Concatenate rotated and pass-through parts
+    q_embed = torch.cat([q_rot, q_pass], dim=-1)
+    k_embed = torch.cat([k_rot, k_pass], dim=-1)
+    return q_embed, k_embed
+
+
 class Siglip2Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -244,9 +268,14 @@ class Siglip2Attention(nn.Module):
 
         if self.use_rope:
             cos, sin = position_embeddings
-            queries, keys = apply_rotary_pos_emb(queries.unsqueeze(0),
-                                                 keys.unsqueeze(0), cos, sin,
-                                                 self.is_flash_attn_backend)
+            if is_hpu:
+                queries, keys = apply_rotary_pos_emb_hpu(queries.unsqueeze(0),
+                                                        keys.unsqueeze(0), cos,
+                                                        sin)
+            else:
+                queries, keys = apply_rotary_pos_emb(queries.unsqueeze(0),
+                                                    keys.unsqueeze(0), cos,
+                                                    sin)
             queries = queries.squeeze(0)
             keys = keys.squeeze(0)
 
