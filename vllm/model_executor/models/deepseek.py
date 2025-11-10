@@ -36,7 +36,7 @@ from vllm.distributed import (get_pp_group, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               tensor_model_parallel_all_reduce)
 from vllm.model_executor.layers.activation import SiluAndMul
-from vllm.model_executor.layers.fused_moe import fused_moe
+from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear,
@@ -110,15 +110,14 @@ class DeepseekMoE(nn.Module):
                 f"Tensor parallel size {self.tp_size} is greater than "
                 f"the number of experts {self.n_routed_experts}.")
 
-        self.experts = nn.ModuleList([
-            DeepseekMLP(hidden_size=config.hidden_size,
-                        intermediate_size=config.moe_intermediate_size,
-                        hidden_act=config.hidden_act,
-                        quant_config=quant_config,
-                        reduce_results=False)
-            for idx in range(self.n_routed_experts)
-        ])
-        self.pack_params()
+        self.experts = FusedMoE(num_experts=self.n_routed_experts,
+                                top_k=self.top_k,
+                                hidden_size=config.hidden_size,
+                                intermediate_size=config.moe_intermediate_size,
+                                reduce_results=False,
+                                renormalize=config.norm_topk_prob,
+                                quant_config=quant_config,
+                                prefix=f"{prefix}.experts")
 
         self.gate = ReplicatedLinear(config.hidden_size,
                                      self.n_routed_experts,
@@ -156,26 +155,21 @@ class DeepseekMoE(nn.Module):
         self.w2 = self.w2.view(len(w2), *w2s[0].shape)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        num_tokens, hidden_dim = hidden_states.shape
+        batch_size, num_tokens, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         if self.config.n_shared_experts is not None:
             shared_output = self.shared_experts(hidden_states)
         # router_logits: (num_tokens, n_experts)
         router_logits, _ = self.gate(hidden_states)
-        final_hidden_states = fused_moe(hidden_states,
-                                        self.w1,
-                                        self.w2,
-                                        router_logits,
-                                        self.top_k,
-                                        renormalize=self.config.norm_topk_prob,
-                                        inplace=True)
+        final_hidden_states = self.experts(hidden_states=hidden_states,
+                                           router_logits=router_logits)
 
         if self.config.n_shared_experts is not None:
             final_hidden_states = final_hidden_states + shared_output
         final_hidden_states = tensor_model_parallel_all_reduce(
             final_hidden_states)
 
-        return final_hidden_states.view(num_tokens, hidden_dim)
+        return final_hidden_states.view(batch_size, num_tokens, hidden_dim)
 
 
 class DeepseekAttention(nn.Module):
@@ -340,6 +334,7 @@ class DeepseekModel(nn.Module):
         config = vllm_config.model_config.hf_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
+        self.config = config
 
         self.vocab_size = config.vocab_size
 
@@ -398,9 +393,16 @@ class DeepseekModel(nn.Module):
             ("gate_up_proj", "up_proj", 1),
         ]
 
+        expert_params_mapping = FusedMoE.make_expert_params_mapping(
+            ckpt_gate_proj_name="gate_proj",
+            ckpt_down_proj_name="down_proj",
+            ckpt_up_proj_name="up_proj",
+            num_experts=self.config.n_routed_experts)
+
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
         for name, loaded_weight in weights:
+            orig_name = name
             if "rotary_emb.inv_freq" in name:
                 continue
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
@@ -421,19 +423,37 @@ class DeepseekModel(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                # Skip loading extra bias for GPTQ models.
-                if name.endswith(".bias") and name not in params_dict:
-                    continue
-                # Skip experts that are not assigned to this worker.
-                if (("mlp.experts." in name or "mlp.shared_experts." in name)
-                        and name not in params_dict):
-                    continue
-                if is_pp_missing_parameter(name, self):
-                    continue
-                param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(param, loaded_weight)
+                for mapping in expert_params_mapping:
+                    param_name, weight_name, expert_id, shard_id = mapping
+                    if weight_name not in orig_name:
+                        continue
+
+                    name = orig_name.replace(weight_name, param_name)
+
+                    param = params_dict[name]
+                    weight_loader = param.weight_loader
+                    weight_loader(param,
+                                  loaded_weight,
+                                  name,
+                                  shard_id=shard_id,
+                                  expert_id=expert_id)
+                    break
+                else:
+                    # Skip loading extra bias for GPTQ models.
+                    if name.endswith(".bias") and name not in params_dict:
+                        continue
+                    # Skip experts that are not assigned to this worker.
+                    if (("mlp.experts." in name
+                         or "mlp.shared_experts." in name)
+                            and name not in params_dict):
+                        continue
+                    if is_pp_missing_parameter(name, self):
+                        continue
+                    param = params_dict[name]
+                    weight_loader = getattr(param, "weight_loader",
+                                            default_weight_loader)
+                    weight_loader(param, loaded_weight)
+
             loaded_params.add(name)
         return loaded_params
 

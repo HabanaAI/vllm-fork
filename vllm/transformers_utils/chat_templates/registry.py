@@ -25,6 +25,7 @@ _MODEL_TYPE_TO_CHAT_TEMPLATE_FALLBACK: dict[str, ChatTemplatePath] = {
     "blip-2": CHAT_TEMPLATES_DIR / "template_blip2.jinja",
     "chameleon": CHAT_TEMPLATES_DIR / "template_basic.jinja",
     "deepseek_vl_v2": CHAT_TEMPLATES_DIR / "template_deepseek_vl2.jinja",
+    "deepseek_ocr": CHAT_TEMPLATES_DIR / "template_deepseek_ocr.jinja",
     "florence2": CHAT_TEMPLATES_DIR / "template_basic.jinja",
     "fuyu": CHAT_TEMPLATES_DIR / "template_fuyu.jinja",
     "paligemma": CHAT_TEMPLATES_DIR / "template_basic.jinja",
