@@ -1274,6 +1274,42 @@ def run_qwen3_vl_moe(questions: list[str], modality: str) -> ModelRequestData:
     )
 
 
+def run_qwen3_omni_moe(questions: list[str], modality: str) -> ModelRequestData:
+    model_name = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
+        mm_processor_kwargs={
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+            "fps": 1,
+        },
+        limit_mm_per_prompt={modality: 1},
+    )
+
+    if modality == "image":
+        placeholder = "<|image_pad|>"
+    elif modality == "video":
+        placeholder = "<|video_pad|>"
+
+    prompts = [
+        (
+            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            f"<|im_start|>user\n<|vision_start|>{placeholder}<|vision_end|>"
+            f"{question}<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+        for question in questions
+    ]
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
+
+
 # SkyworkR1V
 def run_skyworkr1v(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
@@ -1350,6 +1386,7 @@ model_example_map = {
     "qwen2_5_omni": run_qwen2_5_omni,
     "qwen3_vl": run_qwen3_vl,
     "qwen3_vl_moe": run_qwen3_vl_moe,
+    "qwen3_omni_moe": run_qwen3_omni_moe,
     "skywork_chat": run_skyworkr1v,
     "smolvlm": run_smolvlm,
     "tarsier": run_tarsier,
