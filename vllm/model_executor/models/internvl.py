@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import typing
 # adapted from https://huggingface.co/OpenGVLab/InternVL2-4B/blob/main/modeling_internvl_chat.py
 # --------------------------------------------------------
 # InternVL
@@ -9,7 +10,8 @@
 # --------------------------------------------------------
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Literal, Optional, TypedDict, TypeVar, Union
+from functools import partial
+from typing import Any, Callable, Literal, Optional, TypedDict, TypeVar, Union
 
 import numpy.typing as npt
 import torch
@@ -19,8 +21,12 @@ from PIL import Image
 from transformers import BatchEncoding, PretrainedConfig, TensorType
 
 from vllm.config import VllmConfig
+from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.quantization.awq import AWQConfig
+from vllm.model_executor.layers.quantization.fp8 import Fp8Config
+from vllm.model_executor.model_loader.weight_utils import (
+    default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.models.intern_vit import (InternVisionModel,
                                                    InternVisionPatchModel)
 from vllm.model_executor.models.module_mapping import MultiModelKeys
@@ -37,11 +43,15 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.tokenizer import AnyTokenizer
+from vllm.worker.hpu_model_runner import FusedMoE
 
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
 from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
-                    maybe_prefix, merge_multimodal_embeddings)
+                    is_pp_missing_parameter, maybe_prefix,
+                    merge_multimodal_embeddings)
+
+logger = init_logger(__name__)
 
 IMG_START = '<img>'
 IMG_END = '</img>'
@@ -1017,6 +1027,172 @@ class InternVLMultiModalProcessor(
         return prompt_repl
 
 
+def _patch_load_weights(
+        self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+    stacked_params_mapping = [
+        # (param_name, shard_name, shard_id)
+        ("qkv_proj", "q_proj", "q"),
+        ("qkv_proj", "k_proj", "k"),
+        ("qkv_proj", "v_proj", "v"),
+        ("gate_up_proj", "gate_proj", 0),
+        ("gate_up_proj", "up_proj", 1),
+    ]
+
+    base_expert_params_mapping = FusedMoE.make_expert_params_mapping(
+        ckpt_gate_proj_name="gate_proj",
+        ckpt_down_proj_name="down_proj",
+        ckpt_up_proj_name="up_proj",
+        num_experts=self.config.num_experts,
+    )
+
+    fused_expert_params_mapping = [
+        ("experts.w13_weight", "experts.gate_up_proj", 0, "w1"),
+        ("experts.w2_weight", "experts.down_proj", 0, "w2"),
+    ]
+
+    params_dict = dict(self.named_parameters())
+    loaded_params: set[str] = set()
+
+    is_fused_expert = False
+    for name, loaded_weight in weights:
+        expert_params_mapping = base_expert_params_mapping
+
+        for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            if ("experts.gate_up_proj" in name) or ("experts.down_proj"
+                                                    in name):
+                is_fused_expert = True
+                expert_params_mapping = fused_expert_params_mapping
+
+            if weight_name not in name:
+                continue
+
+            if "mlp.experts" in name:
+                continue
+
+            name_mapped = name.replace(weight_name, param_name)
+            if name_mapped.endswith("kv_scale"):
+                name_mapped = maybe_remap_kv_scale_name(
+                    name_mapped, params_dict)
+                if name_mapped is None:
+                    continue
+
+            if ((name_mapped.endswith(".bias")
+                 or name_mapped.endswith("_bias"))
+                    and name_mapped not in params_dict):
+                continue
+
+            if is_pp_missing_parameter(name_mapped, self):
+                continue
+
+            if name_mapped not in params_dict:
+                continue
+
+            param = params_dict[name_mapped]
+            weight_loader = getattr(param, "weight_loader",
+                                    default_weight_loader)
+
+            if weight_loader == default_weight_loader:
+                weight_loader(param, loaded_weight)
+            else:
+                weight_loader(param, loaded_weight, shard_id)
+            name = name_mapped
+            break
+
+        else:
+            # ia expert weight
+            for mapping in expert_params_mapping:
+                param_name, weight_name, expert_id, shard_id = mapping
+                if weight_name not in name:
+                    continue
+
+                orig_name = name
+                name_mapped = orig_name.replace(weight_name, param_name)
+
+                if is_fused_expert:
+                    quant_config = self.vllm_config.quant_config
+                    is_dynamic_channel = (isinstance(quant_config, Fp8Config)
+                                          and quant_config.quant_scheme
+                                          == "channel")
+
+                    if (not is_dynamic_channel) or ('scale' not in orig_name):
+                        loaded_w = loaded_weight.transpose(-1, -2)
+                    else:
+                        loaded_w = loaded_weight
+
+                    if is_dynamic_channel and ('gate_up_proj_scale'
+                                               in orig_name):
+                        loaded_w = loaded_w.unsqueeze(-1)
+
+                    if "experts.gate_up_proj" in orig_name:
+                        # gate_up -> (w1, w3)
+                        parts = loaded_w.chunk(2, dim=-2)
+                        self.load_fused_expert_weights(name_mapped,
+                                                       params_dict,
+                                                       parts[0].squeeze(-1),
+                                                       "w1",
+                                                       self.config.num_experts)
+                        self.load_fused_expert_weights(name_mapped,
+                                                       params_dict,
+                                                       parts[1].squeeze(-1),
+                                                       "w3",
+                                                       self.config.num_experts)
+                    else:
+                        # down_proj -> w2
+                        self.load_fused_expert_weights(name_mapped,
+                                                       params_dict, loaded_w,
+                                                       "w2",
+                                                       self.config.num_experts)
+
+                else:
+                    if is_pp_missing_parameter(name_mapped, self):
+                        continue
+                    if ((name.endswith(".bias") or name.endswith("_bias"))
+                            and name not in params_dict):
+                        continue
+
+                    param = params_dict[name_mapped]
+                    weight_loader = typing.cast(Callable[..., bool],
+                                                param.weight_loader)
+                    weight_loader(
+                        param,
+                        loaded_weight,
+                        name_mapped,
+                        shard_id=shard_id,
+                        expert_id=expert_id,
+                    )
+
+                name = name_mapped
+                break
+
+            else:
+                # Skip loading extra bias for GPTQ models.
+                if ((name.endswith(".bias") or name.endswith("_bias"))
+                        and name not in params_dict):
+                    continue
+                # Skip layers on other devices.
+                if is_pp_missing_parameter(name, self):
+                    continue
+                # Remapping the name of FP8 kv-scale.
+                if name.endswith("kv_scale"):
+                    remapped_kv_scale_name = name.replace(
+                        ".kv_scale", ".attn.kv_scale")
+                    if remapped_kv_scale_name not in params_dict:
+                        logger.warning_once(
+                            "Found kv scale in the checkpoint (e.g. %s), but not found the expected name in the model (e.g. %s). kv-scale is not loaded.",  # noqa: E501
+                            name,
+                            remapped_kv_scale_name,
+                        )
+                        continue
+                    else:
+                        name = remapped_kv_scale_name
+                param = params_dict[name]
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                weight_loader(param, loaded_weight)
+        loaded_params.add(name)
+    return loaded_params
+
+
 @MULTIMODAL_REGISTRY.register_processor(
     InternVLMultiModalProcessor,
     info=InternVLProcessingInfo,
@@ -1061,6 +1237,12 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             hf_config=config.text_config,
             prefix=maybe_prefix(prefix, "language_model"),
         )
+        is_dynamic_channel = \
+                          (isinstance(quant_config, Fp8Config) and
+                            quant_config.quant_scheme == "channel")
+        if is_dynamic_channel:
+            type(self.language_model).load_weights = partial(
+                _patch_load_weights, self.language_model)
 
         self.mlp1 = self._init_mlp1(config)
 
@@ -1101,7 +1283,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
             return InternVisionModel(
                 config.vision_config,
-                quant_config=quant_config,
+                quant_config=None,
                 num_hidden_layers_override=num_hidden_layers,
                 prefix=prefix,
             )
