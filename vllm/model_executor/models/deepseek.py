@@ -36,7 +36,6 @@ from vllm.distributed import (get_pp_group, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               tensor_model_parallel_all_reduce)
 from vllm.model_executor.layers.activation import SiluAndMul
-from vllm.model_executor.layers.fused_moe import fused_moe
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
@@ -112,13 +111,13 @@ class DeepseekMoE(nn.Module):
                 f"the number of experts {self.n_routed_experts}.")
 
         self.experts = FusedMoE(num_experts=self.n_routed_experts,
-                        top_k=self.top_k,
-                        hidden_size=config.hidden_size,
-                        intermediate_size=config.moe_intermediate_size,
-                        reduce_results=False,
-                        renormalize=config.norm_topk_prob,
-                        quant_config=quant_config,
-                        prefix=f"{prefix}.experts")
+                                top_k=self.top_k,
+                                hidden_size=config.hidden_size,
+                                intermediate_size=config.moe_intermediate_size,
+                                reduce_results=False,
+                                renormalize=config.norm_topk_prob,
+                                quant_config=quant_config,
+                                prefix=f"{prefix}.experts")
 
         self.gate = ReplicatedLinear(config.hidden_size,
                                      self.n_routed_experts,
@@ -163,7 +162,7 @@ class DeepseekMoE(nn.Module):
         # router_logits: (num_tokens, n_experts)
         router_logits, _ = self.gate(hidden_states)
         final_hidden_states = self.experts(hidden_states=hidden_states,
-            router_logits=router_logits)
+                                           router_logits=router_logits)
 
         if self.config.n_shared_experts is not None:
             final_hidden_states = final_hidden_states + shared_output
@@ -444,7 +443,8 @@ class DeepseekModel(nn.Module):
                     if name.endswith(".bias") and name not in params_dict:
                         continue
                     # Skip experts that are not assigned to this worker.
-                    if (("mlp.experts." in name or "mlp.shared_experts." in name)
+                    if (("mlp.experts." in name
+                         or "mlp.shared_experts." in name)
                             and name not in params_dict):
                         continue
                     if is_pp_missing_parameter(name, self):
@@ -496,7 +496,8 @@ class DeepseekForCausalLM(nn.Module, SupportsPP):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[torch.Tensor]:
-        logits = self.logits_processor(self.lm_head, hidden_states, sampling_metadata)
+        logits = self.logits_processor(self.lm_head, hidden_states,
+                                       sampling_metadata)
         return logits
 
     def load_weights(self, weights: Iterable[tuple[str,

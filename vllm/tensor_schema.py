@@ -11,6 +11,7 @@ logger = init_logger(__name__)
 
 
 class TensorShape:
+
     def __init__(
         self,
         *dims: int | str,
@@ -36,7 +37,8 @@ class TensorShape:
         for dim in self.dims:
             if isinstance(dim, str):
                 if dim in self.dynamic_dims:
-                    dim_strs.append(f"{dim}*")  # Mark dynamic dimensions with *
+                    dim_strs.append(
+                        f"{dim}*")  # Mark dynamic dimensions with *
                 else:
                     dim_strs.append(dim)
             else:
@@ -45,6 +47,7 @@ class TensorShape:
 
 
 class TensorSchema:
+
     def __init__(
         self,
         *,
@@ -98,12 +101,12 @@ class TensorSchema:
         return str(list(idxs))
 
     def _validate_field(
-        self,
-        value: object,
-        field_name: str,
-        expected_shape: tuple[int | str, ...],
-        dynamic_dims: set[str],
-        leading_idxs: tuple[int, ...] = (),
+            self,
+            value: object,
+            field_name: str,
+            expected_shape: tuple[int | str, ...],
+            dynamic_dims: set[str],
+            leading_idxs: tuple[int, ...] = (),
     ) -> tuple[int, ...]:
         """Validate a field and return the actual shape."""
         if isinstance(value, (int, float)):
@@ -115,13 +118,12 @@ class TensorSchema:
             raise TypeError(
                 f"{field_name}{self._fmt_indexer(leading_idxs)} is not "
                 f"one of the expected types: int, float, Tensor, list, tuple. "
-                f"Got: {type(value)}"
-            )
+                f"Got: {type(value)}")
 
         if len(value) == 0:
             raise ValueError(
-                f"{field_name}{self._fmt_indexer(leading_idxs)} is an empty sequence"
-            )
+                f"{field_name}{self._fmt_indexer(leading_idxs)} is an "
+                f"empty sequence")
 
         # Ensure all tensors in the list have the same
         # shape, besides dynamic dimensions
@@ -131,26 +133,25 @@ class TensorSchema:
                 field_name,
                 expected_shape[1:],
                 dynamic_dims,
-                leading_idxs=leading_idxs + (i,),
+                leading_idxs=leading_idxs + (i, ),
             )
 
             if i == 0:
                 first_shape = shape
             elif not self._match_shape_with_dynamic(
-                shape,
-                first_shape,
-                expected_shape,
-                dynamic_dims,
+                    shape,
+                    first_shape,
+                    expected_shape,
+                    dynamic_dims,
             ):
                 raise ValueError(
                     f"{field_name}{self._fmt_indexer(leading_idxs)} "
                     f"contains inconsistent shapes: {first_shape} "
-                    f"(index 0) vs {shape} (index {i})"
-                )
+                    f"(index 0) vs {shape} (index {i})")
 
         # Treat the list as a stacked tensor:
         # shape = (len(list), *tensor.shape)
-        return (len(value),) + first_shape
+        return (len(value), ) + first_shape
 
     def _validate_tensor_shape_expected(
         self,
@@ -163,38 +164,31 @@ class TensorSchema:
         """Validate that the actual tensor shape matches the expected shape."""
 
         if len(actual_shape) != len(expected_shape):
-            raise ValueError(
-                f"{field_name} has rank {len(actual_shape)} "
-                f"but expected {len(expected_shape)}. "
-                f"Expected shape: {expected_shape}, "
-                f"but got {actual_shape}"
-            )
+            raise ValueError(f"{field_name} has rank {len(actual_shape)} "
+                             f"but expected {len(expected_shape)}. "
+                             f"Expected shape: {expected_shape}, "
+                             f"but got {actual_shape}")
 
         for i, dim in enumerate(expected_shape):
             if dim in dynamic_dims:
                 continue
             elif isinstance(dim, int):
                 if actual_shape[i] != dim:
-                    raise ValueError(
-                        f"{field_name} dim[{i}] expected "
-                        f"{dim}, got {actual_shape[i]}. "
-                        f"Expected shape: {expected_shape}, "
-                        f"but got {actual_shape}"
-                    )
+                    raise ValueError(f"{field_name} dim[{i}] expected "
+                                     f"{dim}, got {actual_shape[i]}. "
+                                     f"Expected shape: {expected_shape}, "
+                                     f"but got {actual_shape}")
             elif isinstance(dim, str):
                 if dim in shape_env:
                     if actual_shape[i] != shape_env[dim]:
-                        raise ValueError(
-                            f"{field_name} dim[{i}] expected "
-                            f"'{dim}'={shape_env[dim]}, got "
-                            f"{actual_shape[i]}"
-                        )
+                        raise ValueError(f"{field_name} dim[{i}] expected "
+                                         f"'{dim}'={shape_env[dim]}, got "
+                                         f"{actual_shape[i]}")
                 else:
                     shape_env[dim] = actual_shape[i]
             else:
                 raise TypeError(
-                    f"{field_name} dim[{i}] has unsupported type: {type(dim)}"
-                )
+                    f"{field_name} dim[{i}] has unsupported type: {type(dim)}")
 
     def validate(self) -> None:
         type_hints = get_type_hints(self.__class__, include_extras=True)
@@ -202,7 +196,8 @@ class TensorSchema:
 
         for field_name, field_type in type_hints.items():
             # Check if field is missing
-            if not hasattr(self, field_name) or getattr(self, field_name) is None:
+            if not hasattr(self, field_name) or getattr(self,
+                                                        field_name) is None:
                 # Check if field is marked as optional
                 actual_type = field_type
                 if get_origin(field_type) is Annotated:
