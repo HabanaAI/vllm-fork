@@ -33,7 +33,6 @@ from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
     cutlass_fp8_supported, maybe_create_device_identity,
     normalize_e4m3fn_to_e4m3fnuz, per_tensor_dequantize,
     requantize_with_max_scale)
-from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
 from vllm.model_executor.parameter import (BlockQuantScaleParameter,
                                            ChannelQuantScaleParameter,
                                            ModelWeightParameter,
@@ -232,8 +231,6 @@ class Fp8LinearMethod(LinearMethodBase):
         layer.output_size_per_partition = output_size_per_partition
         layer.orig_dtype = params_dtype
         layer.weight_block_size = None
-        if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-            weight_loader = gaudi_weight_wrapper(weight_loader)
 
         if self.block_quant:
             tp_size = get_tensor_model_parallel_world_size()
@@ -554,9 +551,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         layer.orig_dtype = params_dtype
         layer.weight_block_size = None
         layer.weight_block_size = None
-        if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-            extra_weight_attrs["weight_loader"] = gaudi_weight_wrapper(
-                extra_weight_attrs.get("weight_loader"))
         layer.quant_config = self.quant_config
         if self.quant_config.is_checkpoint_fp8_serialized:
             params_dtype = torch.float8_e4m3fn

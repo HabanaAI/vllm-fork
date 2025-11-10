@@ -332,6 +332,42 @@ def run_glm4_1v(questions: list[str], modality: str) -> ModelRequestData:
     )
 
 
+# GLM-4.5V
+def run_glm4_5v(questions: list[str], modality: str) -> ModelRequestData:
+    model_name = "zai-org/GLM-4.5V"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=2,
+        mm_processor_kwargs={
+            "size": {"shortest_edge": 12544, "longest_edge": 47040000},
+            "fps": 1,
+        },
+        limit_mm_per_prompt={modality: 1},
+        tensor_parallel_size=4,
+    )
+
+    if modality == "image":
+        placeholder = "<|begin_of_image|><|image|><|end_of_image|>"
+    elif modality == "video":
+        placeholder = "<|begin_of_video|><|video|><|end_of_video|>"
+
+    prompts = [
+        (
+            "[gMASK]<sop><|system|>\nYou are a helpful assistant.<|user|>\n"
+            f"{placeholder}"
+            f"{question}<|assistant|>assistant\n"
+        )
+        for question in questions
+    ]
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
+
+
 # H2OVL-Mississippi
 def run_h2ovl(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
@@ -1291,6 +1327,42 @@ def run_qwen3_vl_moe(questions: list[str], modality: str) -> ModelRequestData:
     )
 
 
+def run_qwen3_omni_moe(questions: list[str], modality: str) -> ModelRequestData:
+    model_name = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
+        mm_processor_kwargs={
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+            "fps": 1,
+        },
+        limit_mm_per_prompt={modality: 1},
+    )
+
+    if modality == "image":
+        placeholder = "<|image_pad|>"
+    elif modality == "video":
+        placeholder = "<|video_pad|>"
+
+    prompts = [
+        (
+            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+            f"<|im_start|>user\n<|vision_start|>{placeholder}<|vision_end|>"
+            f"{question}<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+        for question in questions
+    ]
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
+
+
 # SkyworkR1V
 def run_skyworkr1v(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
@@ -1337,6 +1409,7 @@ model_example_map = {
     "gemma3": run_gemma3,
     "glm4v": run_glm4v,
     "glm4_1v": run_glm4_1v,
+    "glm4_5v": run_glm4_5v,
     "h2ovl_chat": run_h2ovl,
     "idefics3": run_idefics3,
     "internvl_chat": run_internvl,
@@ -1368,6 +1441,7 @@ model_example_map = {
     "qwen2_5_omni": run_qwen2_5_omni,
     "qwen3_vl": run_qwen3_vl,
     "qwen3_vl_moe": run_qwen3_vl_moe,
+    "qwen3_omni_moe": run_qwen3_omni_moe,
     "skywork_chat": run_skyworkr1v,
     "smolvlm": run_smolvlm,
     "tarsier": run_tarsier,
@@ -1375,6 +1449,7 @@ model_example_map = {
 
 MODELS_NEED_VIDEO_METADATA = [
     "glm4_1v",
+    "glm4_5v",
     "qwen3_vl",
     "qwen3_vl_moe",
 ]

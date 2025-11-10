@@ -17,6 +17,7 @@ import time
 from array import array
 from contextlib import suppress
 from enum import Enum, IntEnum
+from functools import wraps
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -116,9 +117,7 @@ class VisionBuckets:
                 if is_batch_based:
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
-                    multimodal_buckets = [
-                        1600, 3136, 4096, 6400, 7744, 9216, 12544
-                    ]
+                    multimodal_buckets = [1600, 3136, 4096, 6400]
             else:
                 multimodal_buckets = [int(i) for i in envvar.split(',')]
             self.multimodal_buckets = self._process_buckets(multimodal_buckets)
@@ -336,7 +335,8 @@ def get_target_layer_suffix_list(model_type) -> list[str]:
     }
 
     return [
-        decoder_layer_table.get(model_type, "DecoderLayer"), "EncoderLayer"
+        decoder_layer_table.get(model_type, "DecoderLayer"), "EncoderLayer",
+        "BertLayer"
     ]
 
 
@@ -407,10 +407,13 @@ class HpuModelAdapter(torch.nn.Module):
         # This is to ensure that we keeps
         # the static and dynamic parts distinct.
         if htorch.utils.internal.is_lazy():
-            if self.model_is_mrope and hasattr(self.model, 'visual'):
+            if self.model_is_mrope and hasattr(self.model, 'visual') and \
+               model_config is not None and \
+               model_config.model_type != "glm4v_moe":
                 logger.info("[Multimodal] Wrapping Visual Model")
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
+
             if self.model_is_mrope and hasattr(self.model, 'audio_tower'):
                 logger.info("[Multimodal] Wrapping Audio Model")
                 self.model.audio_tower = htorch.hpu.wrap_in_hpu_graph(
@@ -718,7 +721,9 @@ class HpuModelAdapter(torch.nn.Module):
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
             if self.model_is_mrope:
-                if self.model.config.model_type == 'qwen2_5_omni_thinker':
+                if self.model.config.model_type in [
+                        'qwen2_5_omni_thinker', 'qwen3_omni_moe_thinker'
+                ]:
                     multimodal_embeddings = \
                       self.model.get_multimodal_embeddings_v0(**kwargs)
                     inputs_embeds = self.model.get_input_embeddings_v0(
@@ -1032,6 +1037,61 @@ class CachedStepOutput:
         self.is_prompt = is_prompt
 
 
+def with_thread_limits():
+    """
+    Decorator to temporarily set OMP_NUM_THREADS and PyTorch threads,
+    and restore them after the function call.
+    
+    Args:
+        div_omp: divide CPU cores by this for OMP_NUM_THREADS
+        div_torch: divide CPU cores by this for torch.set_num_threads
+    """
+
+    def decorator(func):
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not envs.VLLM_HPU_CONVERT_TO_FP8UZ:
+                return func(*args, **kwargs)
+
+            world_size = 1
+            if torch.distributed.is_initialized():
+                world_size = torch.distributed.get_world_size()
+            world_size = min(world_size, 8)
+
+            div_omp = world_size
+            div_torch = world_size
+
+            # Save original settings
+            old_omp = os.environ.get("OMP_NUM_THREADS", None)
+            old_torch = torch.get_num_threads()
+            import psutil
+            num_cores = len(psutil.Process().cpu_affinity() or [0])
+
+            # Set new limits
+            os.environ["OMP_NUM_THREADS"] = str(max(1, num_cores // div_omp))
+            torch.set_num_threads(max(1, num_cores // div_torch))
+            logger.warning_once(
+                "Setting OMP_NUM_THREADS to %s and torch.set_num_threads to %s "
+                "for %s available CPU cores and world size %s",
+                os.environ["OMP_NUM_THREADS"], torch.get_num_threads(),
+                num_cores, world_size)
+            try:
+                # Call the actual function
+                return func(*args, **kwargs)
+            finally:
+                # Restore original settings
+                if old_omp is None:
+                    os.environ.pop("OMP_NUM_THREADS", None)
+                else:
+                    os.environ["OMP_NUM_THREADS"] = old_omp
+                torch.set_num_threads(old_torch)
+
+        return wrapper
+
+    return decorator
+
+
 class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     """
     Helper class for shared methods between GPU model runners.
@@ -1261,6 +1321,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             self.use_alibi = False
 
+    @with_thread_limits()
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
         if self.model_config.quantization == 'inc' or \
@@ -1357,10 +1418,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 torch.hpu.synchronize()
                 return model
 
-            with HabanaMemoryProfiler() as m_to_hpu:
-                self.model = move_model_to_hpu(self.model)
-            logger.info("Moving model to HPU took %s",
-                        m_to_hpu.get_summary_string())
+            # Move quantized model and tensors to HPU to avoid deduplicated
+            # copies of MoE weights in w13/w2 weights and w13/12 list.
+            # Skip for unquantized model as INC will handle it layer-by-layer.
+            if self.model_config.quantization is not None \
+                and self.model_config.quantization != 'inc':
+                with HabanaMemoryProfiler() as m_to_hpu:
+                    self.model = move_model_to_hpu(self.model)
+                logger.info("Moving model to HPU took %s",
+                            m_to_hpu.get_summary_string())
 
             if self._is_quant_with_inc():
                 logger.info("Preparing model with INC..")
@@ -2959,7 +3025,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             image_grid_thw = torch.tensor(
                 [[1, image_h, int(img_args / image_h)]])
             embed_dim = 1176
-            if 'qwen3_vl' in self.get_model().config.model_type:
+            if any([
+                    model_type in self.get_model().config.model_type
+                    for model_type in ['qwen3_vl', "qwen3_omni"]
+            ]):
                 embed_dim = 1536
             elif 'ernie4_5_moe_vl' in self.get_model().config.model_type:
                 # channels * patch_size * patch_size

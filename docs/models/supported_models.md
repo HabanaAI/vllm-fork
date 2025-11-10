@@ -537,7 +537,7 @@ Specified using `--task generate`.
 | `GLM4VForCausalLM`<sup>^</sup>               | GLM-4V                                                                   | T + I                                                                 | `zai-org/glm-4v-9b`, `zai-org/cogagent-9b-20241220` etc.                                                                                                    | ✅︎                     | ✅︎                          | ✅︎                    |
 | `Glm4vForConditionalGeneration`              | GLM-4.1V-Thinking                                                        | T + I<sup>E+</sup> + V<sup>E+</sup>                                   | `zai-org/GLM-4.1V-9B-Thinkg`,  etc.                                                                                                                       | ✅︎                     | ✅︎                          | ✅︎                    |
 | `Glm4MoeForCausalLM` | GLM-4.5 | T + I<sup>E+</sup> + V<sup>E+</sup> | `zai-org/GLM-4.5`, etc. | ✅︎ | ✅︎ | ✅︎ |
-| `Glm4v_moeForConditionalGeneration` | GLM-4.5V | T + I<sup>E+</sup> + V<sup>E+</sup> | `zai-org/GLM-4.5V`, etc. | ✅︎ | ✅︎ | ✅︎ |
+| `Glm4vMoeForConditionalGeneration` | GLM-4.5V | T + I<sup>E+</sup> + V<sup>E+</sup> | `zai-org/GLM-4.5V`, etc. | ✅︎ | ✅︎ | ✅︎ |
 | `GraniteSpeechForConditionalGeneration`      | Granite Speech                                                           | T + A                                                                 | `ibm-granite/granite-speech-3.3-8b`                                                                                                                     | ✅︎                     | ✅︎                          | ✅︎                    |
 | `H2OVLChatModel`                             | H2OVL                                                                    | T + I<sup>E+</sup>                                                    | `h2oai/h2ovl-mississippi-800m`, `h2oai/h2ovl-mississippi-2b`, etc.                                                                                      |                       | ✅︎                          | ✅︎\*                     |
 | `Idefics3ForConditionalGeneration`           | Idefics3                                                                 | T + I                                                                 | `HuggingFaceM4/Idefics3-8B-Llama3` etc.                                                                                                                 | ✅︎                     |                           |  ✅︎                     |
@@ -570,6 +570,7 @@ Specified using `--task generate`.
 | `Qwen2_5OmniThinkerForConditionalGeneration` | Qwen2.5-Omni                                                             | T + I<sup>E+</sup> + V<sup>E+</sup> + A<sup>+</sup>                   | `Qwen/Qwen2.5-Omni-7B`
 | `Qwen3VLForConditionalGeneration` | Qwen3-VL | T + I<sup>E+</sup> + V<sup>E+</sup> | `Qwen/Qwen3-VL-4B-Instruct`, etc. | ✅︎ | ✅︎ | ✅︎ |
 | `Qwen3VLMoeForConditionalGeneration` | Qwen3-VL-MOE | T + I<sup>E+</sup> + V<sup>E+</sup> | `Qwen/Qwen3-VL-30B-A3B-Instruct`, etc. | ✅︎ | ✅︎ | ✅︎ |                                                                                                                                 |                      | ✅︎                         | ✅︎\*                     |
+| `Qwen3OmniMoeThinkerForConditionalGeneration` | Qwen3-Omni | T + I<sup>E+</sup> + V<sup>E+</sup> + A<sup>+</sup> | `Qwen/Qwen3-Omni-30B-A3B-Instruct`, `Qwen/Qwen3-Omni-30B-A3B-Thinking` | ✅︎ | ✅︎ | ✅︎ |
 | `SkyworkR1VChatModel`                        | Skywork-R1V-38B                                                          | T + I                                                                 | `Skywork/Skywork-R1V-38B`                                                                                                                               |                       | ✅︎                          | ✅︎                      |
 | `SmolVLMForConditionalGeneration`            | SmolVLM2                                                                 | T + I                                                                 | `SmolVLM2-2.2B-Instruct`                                                                                                                                | ✅︎                     |                           | ✅︎                      |
 | `TarsierForConditionalGeneration`                | Tarsier                                                                  | T + I<sup>E+</sup>                                                                                                     | `omni-search/Tarsier-7b`,`omni-search/Tarsier-34b`                                                                                                           |                      | ✅︎                      | ✅︎                   |
@@ -643,11 +644,7 @@ Specified using `--task generate`.
     Our PaliGemma implementations have the same problem as Gemma 3 (see above) for both V0 and V1.
 
 !!! note
-    To use Qwen2.5-Omni, you have to install Hugging Face Transformers library from source via
-    `pip install git+https://github.com/huggingface/transformers.git`.
-
-    Read audio from video pre-processing is currently supported on V0 (but not V1), because overlapping modalities is not yet supported in V1.
-    `--mm-processor-kwargs '{"use_audio_in_video": true}'`.
+    For Qwen2.5-Omni and Qwen3-Omni, reading audio from video pre-processing (`--mm-processor-kwargs '{"use_audio_in_video": true}'`) is currently work in progress and not yet supported.
 
 ### Pooling Models
 
