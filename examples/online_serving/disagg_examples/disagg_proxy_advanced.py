@@ -20,6 +20,7 @@ from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
 from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 from transformers import AutoTokenizer
 from asyncio import CancelledError
+from fastapi.middleware.cors import CORSMiddleware
 
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s",
                               "%Y-%m-%d %H:%M:%S")
@@ -31,29 +32,46 @@ logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 logger.propagate = False
 
-from fastapi.middleware.cors import CORSMiddleware
+def log_info_color(color, msg, *args):
+    """Generic colored log with parameterized message."""
+    msg_colored = f"{escape_codes[color]}{msg}{escape_codes['reset']}"
+    logger.info(msg_colored, *args)
 
-def log_info_blue(msg):
-    logger.info("%s%s%s", escape_codes['cyan'], msg, escape_codes['reset'])
+def log_info_blue(msg, *args):
+    log_info_color('cyan', msg, *args)
 
+def log_info_green(msg, *args):
+    log_info_color('green', msg, *args)
 
-def log_info_green(msg):
-    logger.info("%s%s%s", escape_codes['green'], msg, escape_codes['reset'])
+def log_info_yellow(msg, *args):
+    log_info_color('yellow', msg, *args)
 
-
-def log_info_yellow(msg):
-    logger.info("%s%s%s", escape_codes['yellow'], msg, escape_codes['reset'])
-
-
-def log_info_red(msg):
-    logger.info("%s%s%s", escape_codes['red'], msg, escape_codes['reset'])
-
+def log_info_red(msg, *args):
+    log_info_color('red', msg, *args)
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=None,
                                         connect=None,
                                         sock_read=None,
                                         sock_connect=None)
 
+def query_instance_model_len(instances, timeout=5.0):
+    """
+    Query each instance for its max_model_len.
+    """
+    model_lens = []
+    for inst in instances:
+        try:
+            url = f"http://{inst}/v1/models"
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()["data"][0]
+            max_len = data.get("max_model_len", 0)
+            model_lens.append(max_len)
+            logger.info("Instance %s model_len: %d", inst, max_len)
+        except Exception as e:
+            logger.warning("Failed to get model_len from %s: %s", inst, e)
+            sys.exit(1)
+    return model_lens
 
 async def P_first_token_generator(generator_p,
                                   generator_d,
@@ -280,13 +298,13 @@ class Proxy:
 
         url = f"http://{self.prefill_instances[0]}{path}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as resp:
-                    try:
-                        content = await resp.json()
-                    except aiohttp.ContentTypeError:
-                        content = {"raw": await resp.text()}
-                    return JSONResponse(content, status_code=resp.status)
+            async with aiohttp.ClientSession() as session, \
+                    session.post(url, json=payload) as resp:
+                try:
+                    content = await resp.json()
+                except aiohttp.ContentTypeError:
+                    content = {"raw": await resp.text()}
+                return JSONResponse(content, status_code=resp.status)
         except Exception as e:
             return JSONResponse(
                 {"error": f"Failed to fetch {url}, reason: {str(e)}"},
@@ -490,8 +508,9 @@ class Proxy:
     def schedule(self,
                  cycler: itertools.cycle,
                  is_prompt: int = None,
-                 request_len: Optional[int] = None) -> str:
-        return self.scheduling_policy.schedule(cycler, is_prompt, request_len)
+                 request_len: Optional[int] = None,
+                 max_tokens: Optional[int] = None) -> str:
+        return self.scheduling_policy.schedule(cycler, is_prompt, request_len, max_tokens)
 
     def schedule_completion(self,
                             prefill_instance: str = None,
@@ -552,36 +571,50 @@ class Proxy:
             prefill_instance = None
             decode_instance = None
 
-            if len(self.prefill_instances) > 0:
-                kv_prepare_request = request.copy()
-                kv_prepare_request["max_tokens"] = 1
+            kv_prepare_request = request.copy()
+            kv_prepare_request["max_tokens"] = 1
 
-                start_time = time.time()
-                prompt = kv_prepare_request.get("prompt")
-                total_length = self.get_total_token_length(prompt)
-                end_time = time.time()
+            start_time = time.time()
+            prompt = kv_prepare_request.get("prompt")
+            total_length = self.get_total_token_length(prompt)
+            max_tokens = request.get("max_tokens", 0)
+            end_time = time.time()
+            log_info_green(
+                f"create_completion -- prompt length: {total_length}, "
+                f"max tokens: {max_tokens}, "
+                f"tokenizer took {(end_time - start_time) * 1000:.2f} ms"
+            )
 
-                log_info_green(
-                    f"create_completion -- prompt length: {total_length}, "
-                    f"tokenizer took "
-                    f"{(end_time - start_time) * 1000:.2f} ms")
-                prefill_instance = self.schedule(self.prefill_cycler,
+            prefill_instance = self.schedule(self.prefill_cycler,
                                                  is_prompt=True,
-                                                 request_len=total_length)
-                value = b''
-                try:
-                    async for chunk in self.forward_request(
-                            f"http://{prefill_instance}/v1/completions",
-                            kv_prepare_request):
-                        value += chunk
-                except HTTPException as http_exc:
-                    self.exception_handler(prefill_instance, decode_instance, total_length)
-                    raise http_exc
+                                                 request_len=total_length,
+                                                 max_tokens = 1)
 
-            # Perform kv recv and decoding stage
             decode_instance = self.schedule(self.decode_cycler,
                                             is_prompt=False,
-                                            request_len=total_length)
+                                            request_len=total_length,
+                                            max_tokens = max_tokens)
+
+            if prefill_instance is None or decode_instance is None:
+                log_info_red("No available instance can handle the request. ")
+                self.exception_handler(
+                    prefill_instance=prefill_instance,
+                    decode_instance=decode_instance,
+                    req_len=total_length
+                )
+                return None
+
+            value = b''
+            try:
+                async for chunk in self.forward_request(
+                        f"http://{prefill_instance}/v1/completions",
+                        kv_prepare_request):
+                    value += chunk
+            except HTTPException as http_exc:
+                self.exception_handler(prefill_instance, decode_instance, total_length)
+                raise http_exc
+
+            # Perform kv recv and decoding stage
             value = value.strip().decode("utf-8").removesuffix(
                 "data: [DONE]").encode("utf-8")
 
@@ -620,7 +653,10 @@ class Proxy:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                    logger.warning(
+                        "[0]Client disconnected during create_completion "
+                        "(CancelledError)"
+                    )
                 except Exception as e:
                     logger.error("[1] Exception in wrapped_generator: %s", str(e))
                     raise
@@ -647,6 +683,7 @@ class Proxy:
             total_length = sum(
                 self.get_total_token_length(msg['content'])
                 for msg in kv_prepare_request['messages'])
+            max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
             log_info_green(
                 f"create_chat_completion -- prompt length: {total_length}, "
@@ -655,7 +692,22 @@ class Proxy:
 
             prefill_instance = self.schedule(self.prefill_cycler,
                                              is_prompt=True,
-                                             request_len=total_length)
+                                             request_len=total_length,
+                                             max_tokens = 1)
+
+            decode_instance = self.schedule(self.decode_cycler,
+                                            is_prompt=False,
+                                            request_len=total_length,
+                                            max_tokens = max_tokens)
+
+            if prefill_instance is None or decode_instance is None:
+                log_info_red("No available instance can handle the request. ")
+                self.exception_handler(
+                    prefill_instance=prefill_instance,
+                    decode_instance=decode_instance,
+                    req_len=total_length
+                )
+                return None
 
             value = b''
             try:
@@ -666,10 +718,8 @@ class Proxy:
             except HTTPException as http_exc:
                 self.exception_handler(prefill_instance, decode_instance, total_length)
                 raise http_exc
+
             # Perform kv recv and decoding stage
-            decode_instance = self.schedule(self.decode_cycler,
-                                            is_prompt=False,
-                                            request_len=total_length)
             value = value.strip().decode("utf-8").removesuffix(
                 "data: [DONE]").encode("utf-8")
 
@@ -709,7 +759,10 @@ class Proxy:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                    logger.warning(
+                        "[0]Client disconnected during create_chat_completion "
+                        "(CancelledError)"
+                    )
                 except Exception as e:
                     logger.error("[1] Exception in wrapped_generator: %s", str(e))
                     raise
@@ -737,7 +790,8 @@ class RoundRobinSchedulingPolicy(SchedulingPolicy):
 
     def schedule(self,
                  cycler: itertools.cycle,
-                 request: Optional[dict[str, any]] = None) -> str:
+                 request: Optional[dict[str, any]] = None,
+                 max_tokens:Optional[int] = None) -> str:
         return self.safe_next(cycler)
 
 
@@ -764,16 +818,40 @@ class LoadBalancedScheduler(SchedulingPolicy):
         self.decode_schedule_index = 0
         self.decode_schedule_completion_index = 0
 
+        self.prefill_model_len = query_instance_model_len(prefill_instances)
+        self.decode_model_len = query_instance_model_len(decode_instances)
+
+        logger.info("Prefill instance model lens: %s", self.prefill_model_len)
+        logger.info("Decode instance model lens: %s", self.decode_model_len)
         super().__init__()
 
     def schedule(self,
                  cycler: itertools.cycle,
                  is_prompt: int = None,
-                 request_len: Optional[int] = None) -> str:
+                 request_len: int = None,
+                 max_tokens: int = None) -> str:
         with self.lock:
             if is_prompt:
-                min_value = min(self.prefill_utils_counter)
-                min_index = self.prefill_utils_counter.index(min_value)
+                candidates = [
+                    i for i, max_len in enumerate(self.prefill_model_len)
+                    if request_len + max_tokens <= max_len
+                ]
+                if not candidates:
+                    log_info_red(
+                       "No prefill instance can handle request_len=%d, "
+                       "max_tokens=%d",
+                        request_len,
+                        max_tokens,
+                    )
+                    return None
+
+                min_value = min([self.prefill_utils_counter[i] for i in candidates])
+                min_indices = [
+                    i for i in candidates
+                    if self.prefill_utils_counter[i] == min_value
+                ]
+                min_index = min_indices[0]
+
                 self.prefill_bs_counter[min_index] += 1
                 self.prefill_utils_counter[min_index] += request_len
                 self.prefill_schedule_index += 1
@@ -782,18 +860,29 @@ class LoadBalancedScheduler(SchedulingPolicy):
                     f"instance = {min_index}, min_tokens = {min_value}")
                 return self.prefill_instances[min_index]
             else:
-                min_value = min(self.decode_bs_counter)
+                candidates = [
+                    i for i, max_len in enumerate(self.decode_model_len)
+                    if request_len + max_tokens <= max_len
+                ]
+                if not candidates:
+                    log_info_red(
+                        "No decode instance can handle request_len=%d, "
+                        "max_tokens=%d",
+                        request_len,
+                        max_tokens,
+                    )
+                    return None
 
+                min_value = min([self.decode_bs_counter[i] for i in candidates])
+                min_indices = [i for i in candidates if self.decode_bs_counter[i] == min_value]
                 if min_value == 0:
-                    min_index = self.decode_bs_counter.index(min_value)
+                    min_index = next(i for i in candidates if self.decode_bs_counter[i] == 0)
                 else:
                     min_indices = [
-                        i for i, val in enumerate(self.decode_bs_counter)
-                        if val == min_value
+                        i for i in candidates
+                        if self.decode_bs_counter[i] == min_value
                     ]
-                    min_index = min(
-                        min_indices,
-                        key=lambda i: self.decode_kv_utils_counter[i])
+                    min_index = min(min_indices, key=lambda i: self.decode_kv_utils_counter[i])
 
                 self.decode_bs_counter[min_index] += 1
                 self.decode_kv_utils_counter[min_index] += request_len
