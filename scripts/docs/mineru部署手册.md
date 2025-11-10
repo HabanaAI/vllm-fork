@@ -7,10 +7,10 @@
 - 已安装 Intel Gaudi 软件栈
 - 支持 Gaudi 对应驱动版本的基础Docker镜像
 
-
 ## 使用MinerU v2.5.4
 
 ### 1. 启动docker
+
 ```
 docker run -it --name minerU-server --runtime=habana -e HABANA_VISIBLE_DEVICES=all \
            -e OMPI_MCA_btl_vader_single_copy_mechanism=none -v /mnt/disk1:/data  \
@@ -52,6 +52,7 @@ https://github.com/opendatalab/MinerU/blob/master/mineru.template.json
 ### 4. 使用MinerU vlm-vllm-engine backend
 
 #### 4.1 为vlm-vllm-engine backend安装vllm
+
 ```bash
 git clone https://github.com/HabanaAI/vllm-fork.git -b aice/v1.22.0
 pip install -e . -i https://mirrors.aliyun.com/pypi/simple
@@ -90,6 +91,7 @@ export VLLM_FP32_SOFTMAX=true
 - `VLLM_FP32_SOFTMAX` ： SDPA doftmax计算使用FP32精度
 
 #### 4.2.2 使用命令行方式运行Mineru
+
 ```bash
 mineru -p <input_path> -o <output_path>  -b vlm-vllm-engine 
 ```
@@ -97,23 +99,28 @@ mineru -p <input_path> -o <output_path>  -b vlm-vllm-engine
 #### 4.2.3 使用 http-client/server 方式运行Mineru
 
 ##### 启动 vllm server 和 api server
+
 ```bash
 # 在端口 30000 启动 VLLM 服务器
 mineru-vllm-server --host 0.0.0.0 --port 30000 --gpu-memory-utilization 0.7 2>&1 | tee -a server.log >/dev/null &
 ```
+
 ##### 使用 minerU CLI 处理文档
+
 ```bash
 export MINERU_VL_SERVER=http://0.0.0.0:30000
 mineru -p "input.pdf"  -o "output" -b vlm-http-client -u ${MINERU_VL_SERVER}
 ```
 
 ##### 使用 minerU API 处理文档
+
 ```bash
 # 声明mineru-vllm-server url 环境变量传递给api server使用
 export MINERU_VL_SERVER=http://0.0.0.0:30000
 # 在端口 8007 启动 MinerU API 服务器
 mineru-api --host 0.0.0.0 --port 8007 2>&1 | tee -a api.log >/dev/null &
 ```
+
 minerU API 参考
 
 ```bash
@@ -139,10 +146,10 @@ curl -vvv -X POST "http://0.0.0.0:8007/file_parse" \
   --output result.zip
 ```
 
-
 ### 5. 使用MinerU Pipeline backend
 
 #### 5.1 为Pipeline backend安装optimum-habana
+
 ```bash
 $ git clone https://github.com/huggingface/optimum-habana
 $ cd optimum-habana && git checkout 48a2dae1709b50630c6fc93fdf76c52fdfb82566
@@ -150,10 +157,12 @@ $ pip install -e . -i https://mirrors.aliyun.com/pypi/simple
 ```
 
 #### 5.2 为支持hpu修改已安装的doclayout_yolo和ultralytics代码
+
 ```bash
 vim /usr/local/lib/python3.10/dist-packages/doclayout_yolo/engine/predictor.py
 vim /usr/local/lib/python3.10/dist-packages/ultralytics/engine/predictor.py
 ```
+
 参照下面修改setup_model()函数中的device参数:
 
 ```bash
@@ -180,7 +189,9 @@ vim /usr/local/lib/python3.10/dist-packages/ultralytics/engine/predictor.py
 vim /usr/local/lib/python3.10/dist-packages/doclayout_yolo/nn/autobackend.py
 vim /usr/local/lib/python3.10/dist-packages/ultralytics/nn/autobackend.py
 ```
+
 参照如下修改warmup()，为其增加if self.device  == "hpu"分支:
+
 ```bash
     def warmup(self, imgsz=(1, 3, 640, 640)):
         """
@@ -202,6 +213,7 @@ vim /usr/local/lib/python3.10/dist-packages/ultralytics/nn/autobackend.py
 ```
 
 #### 5.3 使用命令行方式运行Mineru
+
 ```bash
 $ MINERU_DEVICE_MODE=hpu mineru -p ./test.pdf -o ./ -d hpu  -b pipeline -m ocr
 ```
