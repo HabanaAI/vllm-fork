@@ -7,7 +7,8 @@ from typing import Optional, Union
 
 import torch
 from einops import rearrange, repeat
-from habana_frameworks.torch.hpex.kernels import apply_rotary_pos_emb as hpu_rotary
+from habana_frameworks.torch.hpex.kernels import apply_rotary_pos_emb \
+    as hpu_rotary
 from torch import nn
 from torch.nn import functional as F
 from transformers.activations import ACT2FN
