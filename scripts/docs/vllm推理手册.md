@@ -543,7 +543,7 @@ h  Help info
 bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-0528-G2 -q -u 127.0.0.1 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
 
-首次预热启动时间约为一个小时。建议参考 2.2 节模型预热说明，设置 cache 目录存储 recipe 文件。当后续使用同样参数启动服务时，可用 skip_warmup 来跳过预热阶段节省启动时间。推理服务启动完毕后，您可以在镜像环境中发送如下命令，测试服务是否工作正常：
+在默认配置下，首次预热启动时间约为 15 分钟。建议参考 2.2 节模型预热说明，设置 cache 目录存储 recipe 文件。当后续使用同样参数启动服务时，可用 skip_warmup 来跳过预热阶段节省启动时间。推理服务启动完毕后，您可以在镜像环境中发送如下命令，测试服务是否工作正常：
 
 ```bash
 curl http://127.0.0.1:8688/v1/chat/completions \
@@ -739,7 +739,8 @@ HPU_SIZE=4
      -m $MODEL \
      -d NeelNanda/pile-10k \
      -o quantization \
-     -t $HPU_SIZE
+     -t $HPU_SIZE \
+     -u
 ```
 
 Qwen3-235B-A22B-Instruct-2507-FP8 模型部署可使用如下命令启动：
@@ -778,7 +779,8 @@ HPU_SIZE=8
      -m $MODEL \
      -d NeelNanda/pile-10k \
      -o quantization \
-     -t $HPU_SIZE
+     -t $HPU_SIZE \
+     -u
 ```
 
 Qwen3-Coder-480B-A35B-Instruct-FP8 模型部署可使用如下命令启动：
