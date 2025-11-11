@@ -1,6 +1,8 @@
 #!/bin/bash
 #set -x
 
+sleep 30
+
 # machine id, EP, TP, DP Index, DP Host IP
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
@@ -39,15 +41,51 @@ fi
 if [ "$INC_FP8" -eq 1 ]; then
   kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"
   echo "<decode>it's inc fp8 kv cache mode"
+  # INC FP8 settings
+  if [ "$EP_SIZE" -eq 32 ]; then
+    export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep32.json
+  else
+    export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json
+  fi
 else
   kv_cache_dtype_arg=""
   echo "<decode>it's bf16 kv cache mode"
+fi
+
+# Control whether to apply numactl bindings (1=enable, 0=disable)
+NUMACTL_ENABLED=${VLLM_USE_NUMACTL:-1}
+
+# Build CPU/NUMA bindings from hl-smi topology if available
+if command -v hl-smi >/dev/null 2>&1; then
+  # This sets CPU_BIND_<mod> and MEM_BIND_<mod> shell variables for each module id
+  eval "$(hl-smi topo -c -N | awk '
+    NR<=2 { next }                                  # skip headers
+    $1 ~ /^[0-9]+$/ {
+      mod=$1;
+      mem=$NF;                                      # last field is NUMA node
+      cpu="";
+      for (i=2; i<=NF-1; i++) {                    # CPU affinity spans fields 2..NF-1
+        part=$i;
+        sub(/,$/, "", part);                      # drop trailing comma per field
+        if (cpu=="") cpu=part; else cpu=cpu "," part;
+      }
+      gsub(/ /, "", cpu);                         # remove spaces
+      printf "CPU_BIND_%s=%s; MEM_BIND_%s=%s\n", mod, cpu, mod, mem;
+    }
+  ')"
 fi
 
 for ((i=0; i<$DP_RANK; i++))
 do
   RANK=$((DP_INDEX * DP_RANK + i))
   port=$((8200 + i))
+
+  # Derive Habana module id for this rank and bind to the corresponding NUMA/CPU
+  MOD_ID=$((RANK % 8))
+  CPU_BIND_VAR="CPU_BIND_${MOD_ID}"
+  MEM_BIND_VAR="MEM_BIND_${MOD_ID}"
+  CPU_BIND="${!CPU_BIND_VAR}"
+  MEM_BIND="${!MEM_BIND_VAR}"
 
   CMD=(
     python3 -m vllm.entrypoints.openai.api_server
@@ -81,25 +119,53 @@ do
 #    extra_env+=(VLLM_PROFILER_ENABLED=true)
 #  fi
 
+  if [ "$NUMACTL_ENABLED" -eq 1 ]; then
+    echo "CPU_BIND: $CPU_BIND"
+    echo "MEM_BIND: $MEM_BIND"
+    echo "HLS_MODULE_ID: $MOD_ID"
+    echo "DP_RANK: $RANK"
+  fi
+
   # Execute command
   if [ "$DP_RANK" -ne 1 ]; then
     if [ -n "$XPYD_LOG" ]; then
-      echo "env VLLM_DP_RANK=$RANK ${CMD[*]} (logging to $log_file)"
-      env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${extra_env[@]}" "${CMD[@]}" 2>&1 | tee "$log_file" &
+      if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
+        echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]} (logging to $log_file)" 2>&1 | tee -a "$log_file"
+        env HLS_MODULE_ID="$MOD_ID" VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" 2>&1 | tee -a "$log_file" &
+      else
+        echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK ${CMD[*]} (logging to $log_file)" 2>&1 | tee -a "$log_file"
+        env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" 2>&1 | tee -a "$log_file" &
+      fi
     else
       echo "env VLLM_DP_RANK=$RANK ${CMD[*]} (no logging)"
       env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${extra_env[@]}" "${CMD[@]}" &
+      if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
+        echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]} (no logging)"
+        env HLS_MODULE_ID="$MOD_ID" VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" &
+      else
+        echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK ${CMD[*]} (no logging)"
+        VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" &
+      fi
     fi
   else
     if [ -n "$XPYD_LOG" ]; then
-      echo "${CMD[*]} (logging to $log_file)"
-      "${CMD[@]}" 2>&1 | tee "$log_file" &
+      if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
+        echo "numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]}  (logging to $log_file)" 2>&1 | tee -a "$log_file"
+        env HLS_MODULE_ID="$MOD_ID" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" 2>&1 | tee -a "$log_file" &
+      else
+        echo "${CMD[*]} (logging to $log_file)" 2>&1 | tee -a "$log_file"
+        "${CMD[@]}" 2>&1 | tee -a "$log_file" &
+      fi
     else
-      echo "${CMD[*]} (no logging)"
-      "${CMD[@]}" &
+      if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
+        echo "numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]} (no logging)"
+        env HLS_MODULE_ID="$MOD_ID" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" &
+      else
+        echo "${CMD[*]} (no logging)"
+        "${CMD[@]}" &
+      fi
     fi
   fi
 done
 
 wait
-

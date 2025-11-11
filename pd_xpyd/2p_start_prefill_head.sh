@@ -6,6 +6,8 @@ if [ -z "$1" ] || [ "$1" == "g10" ]; then
     echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
 fi
 
+sleep 20
+
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g10}.json
 
