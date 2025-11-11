@@ -278,7 +278,7 @@ INFO: Uvicorn running on http://127.0.0.1:30001 (Press CTRL+C to quit)
 
 ### 2.3 使用 INC 运行 FP8 的 vLLM
 
-使用 Intel(R) Neural Compressor (INC) 可以实现以 FP8 精度运行 vLLM。要使用 INC 以 FP8 精度运行 vLLM，请传递参数 -d fp8 并使用 -w <模型路径> 指定 bfloat16 或 float16 模型的路径。模型将使用从 FP8 校准程序获得的校准数据量化为 FP8。
+使用 Intel(R) Neural Compressor (INC) 可以实现以 FP8 精度运行 vLLM。要使用 INC 以 FP8 精度运行 vLLM，请传递参数 -d fp8 并使用 -w <模型路径> 指定模型的路径。模型将使用从 FP8 校准程序获得的校准数据量化为 FP8。
 
 #### 2.3.1 FP8 格式转换
 
