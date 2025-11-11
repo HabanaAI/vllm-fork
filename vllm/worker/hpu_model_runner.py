@@ -202,7 +202,8 @@ class Singleton(type):
 def is_mm_optimized(model):
     return 'Gemma3ForConditionalGeneration' in str(type(model.model)) \
         if hasattr(model, 'model') else \
-        'Gemma3ForConditionalGeneration' in str(type(model))
+        'Gemma3ForConditionalGeneration' in str(type(model)) or \
+        'DeepseekOCRForCausalLM' in str(type(model))
 
 
 def pad_flat_tensor(tensor, desired_size):
@@ -3047,8 +3048,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             s = self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
-            num_image_tokens = self.model.model.config.mm_tokens_per_image \
-                    * img_args
+            mm_tokens_per_image = 1
+            if hasattr(self.model.model.config, "mm_tokens_per_image"):
+                mm_tokens_per_image = \
+                    self.model.model.config.mm_tokens_per_image
+
+            num_image_tokens = mm_tokens_per_image * img_args
             multi_modal_data = {
                 "pixel_values": pixel_values,
                 "num_crops": torch.zeros([img_args], dtype=torch.int32)
@@ -3056,6 +3061,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if 'ernie4_5_moe_vl' in self.get_model().config.model_type:
             image_token_id = self.get_model().config.im_patch_id
+        elif 'deepseek_vl_v2' in self.get_model().config.model_type:
+            image_token_id = self.get_model().image_token_id
         else:
             image_token_id = self.get_model().config.image_token_id
         prompt_token_ids_image = [image_token_id] * num_image_tokens
