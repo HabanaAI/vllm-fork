@@ -7,6 +7,8 @@ if [ "$2" == "master" ] || [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4"
     echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
 fi
 
+sleep 20
+
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g10}.json
 
 echo "Using Mooncake config: $MOONCAKE_CONFIG_PATH"
