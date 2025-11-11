@@ -27,6 +27,7 @@ import itertools
 import math
 from typing import Any, Optional, Union
 
+import numpy as np
 import torch
 from transformers import PretrainedConfig
 
@@ -1200,32 +1201,63 @@ class MRotaryEmbedding(RotaryEmbedding):
         self.cache_max_position_num = max_position_embeddings * 4
         super().__init__(head_size, rotary_dim, self.cache_max_position_num,
                          base, is_neox_style, dtype)
-
         self.mrope_section = mrope_section
         self.mrope_interleaved = mrope_interleaved
         if self.mrope_section:
             assert sum(self.mrope_section) == rotary_dim // 2
-        if self.mrope_interleaved:
-            # Use matrix add instead of slice assignment.
-            # Prepare the zero matrix in advance, keeping only the
-            # values at the positions that need to be assigned.
-            assert mrope_section
-            sin_start_idx = rotary_dim // 2
-            self.cos_sin_cache_mrope1 = torch.zeros_like(self.cos_sin_cache)
-            self.cos_sin_cache_mrope2 = torch.zeros_like(self.cos_sin_cache)
+
+        if current_platform.is_hpu():
+            self._prepare_cos_sin_cache_hpu(rotary_dim, mrope_section,
+                                            mrope_interleaved)
+
+    def _prepare_cos_sin_cache_hpu(self, rotary_dim, mrope_section,
+                                   mrope_interleaved):
+        # Use matrix add instead of slice assignment.
+        # Prepare the zero matrix in advance, keeping only the
+        # values at the positions that need to be assigned.
+        assert mrope_section
+        sin_start_idx = rotary_dim // 2
+        if mrope_interleaved:
             mrope1_slice = (list(range(1, mrope_section[1] * 3, 3)) + list(
                 range(sin_start_idx + 1, sin_start_idx + mrope_section[1] * 3,
                       3)))
             mrope2_slice = (list(range(2, mrope_section[2] * 3, 3)) + list(
                 range(sin_start_idx + 2, sin_start_idx + mrope_section[2] * 3,
                       3)))
-            self.cos_sin_cache_mrope1[..., mrope1_slice] = \
-                self.cos_sin_cache[..., mrope1_slice]
-            self.cos_sin_cache_mrope2[..., mrope2_slice] = \
-                self.cos_sin_cache[..., mrope2_slice]
-            self.cos_sin_cache_mrope0 = self.cos_sin_cache.clone()
-            self.cos_sin_cache_mrope0[..., mrope1_slice] = 0
-            self.cos_sin_cache_mrope0[..., mrope2_slice] = 0
+        else:
+            mrope_section_cumsum = np.cumsum(mrope_section)
+            mrope1_slice = (
+                list(range(mrope_section_cumsum[0], mrope_section_cumsum[1])) +
+                list(
+                    range(sin_start_idx + mrope_section_cumsum[0],
+                          sin_start_idx + mrope_section_cumsum[1])))
+            mrope2_slice = (
+                list(range(mrope_section_cumsum[1], mrope_section_cumsum[2])) +
+                list(
+                    range(sin_start_idx + mrope_section_cumsum[1],
+                          sin_start_idx + mrope_section_cumsum[2])))
+
+        self.cos_sin_cache_mrope1 = torch.zeros_like(self.cos_sin_cache)
+        self.cos_sin_cache_mrope2 = torch.zeros_like(self.cos_sin_cache)
+        self.cos_sin_cache_mrope1[..., mrope1_slice] = \
+            self.cos_sin_cache[..., mrope1_slice]
+        self.cos_sin_cache_mrope2[..., mrope2_slice] = \
+            self.cos_sin_cache[..., mrope2_slice]
+        self.cos_sin_cache_mrope0 = self.cos_sin_cache.clone()
+        self.cos_sin_cache_mrope0[..., mrope1_slice] = 0
+        self.cos_sin_cache_mrope0[..., mrope2_slice] = 0
+
+        def repeat_cache(cos_sin_cache):
+            if self.is_neox_style:
+                cos, sin = cos_sin_cache.chunk(2, dim=-1)
+                return torch.cat((cos, cos, sin, sin), dim=-1)
+            else:
+                return torch.repeat_interleave(cos_sin_cache, 2, dim=-1)
+
+        self.cos_sin_cache_mrope0 = repeat_cache(self.cos_sin_cache_mrope0)
+        self.cos_sin_cache_mrope1 = repeat_cache(self.cos_sin_cache_mrope1)
+        self.cos_sin_cache_mrope2 = repeat_cache(self.cos_sin_cache_mrope2)
+        self.cos_sin_cache = repeat_cache(self.cos_sin_cache)
 
     def forward_hpu(
         self,
@@ -1257,32 +1289,13 @@ class MRotaryEmbedding(RotaryEmbedding):
             offsets = offsets.view(positions.shape[0], -1)
         num_tokens = positions.shape[-1]
         if positions.ndim == 2:
-            assert self.mrope_section
-            if self.mrope_interleaved:
-                cos_sin = (self.cos_sin_cache_mrope0[positions[0]] +
-                           self.cos_sin_cache_mrope1[positions[1]] +
-                           self.cos_sin_cache_mrope2[positions[2]])
-                cos, sin = cos_sin.chunk(2, dim=-1)
-            else:
-                cos_sin = self.cos_sin_cache[positions]
-                cos, sin = cos_sin.chunk(2, dim=-1)
-                cos = torch.cat([
-                    m[i] for i, m in enumerate(
-                        cos.split(self.mrope_section, dim=-1))
-                ],
-                                dim=-1)
-                sin = torch.cat([
-                    m[i] for i, m in enumerate(
-                        sin.split(self.mrope_section, dim=-1))
-                ],
-                                dim=-1)
+            cos_sin = (self.cos_sin_cache_mrope0[positions[0]] +
+                       self.cos_sin_cache_mrope1[positions[1]] +
+                       self.cos_sin_cache_mrope2[positions[2]])
         else:
             cos_sin = self.cos_sin_cache[positions]
-            cos, sin = cos_sin.chunk(2, dim=-1)
 
-        if self.is_neox_style:
-            cos = torch.cat((cos, cos), dim=-1)
-            sin = torch.cat((sin, sin), dim=-1)
+        cos, sin = cos_sin.chunk(2, dim=-1)
         cos = cos.unsqueeze(-2)
         sin = sin.unsqueeze(-2)
 
