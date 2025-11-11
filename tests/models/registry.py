@@ -330,6 +330,8 @@ _MULTIMODAL_EXAMPLE_MODELS = {
                                                 transformers_version_reason="HF model is not compatible.",  # noqa: E501
                                                 hf_overrides={"architectures": ["DeepseekVLV2ForCausalLM"]}),  # noqa: E501
     "DeepseekOCRForCausalLM": _HfExamplesInfo("deepseek-ai/DeepSeek-OCR",), # noqa: E501
+    "DotsOCRForCausalLM": _HfExamplesInfo("rednote-hilab/dots.ocr",
+                                          trust_remote_code=True),
     "Ernie4_5_VLMoeForConditionalGeneration": _HfExamplesInfo("baidu/ERNIE-4.5-VL-28B-A3B-PT",  # noqa: E501
                                                               trust_remote_code=True),
     "FuyuForCausalLM": _HfExamplesInfo("adept/fuyu-8b"),
