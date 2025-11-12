@@ -25,9 +25,9 @@
 # limitations under the License.
 """Inference-only Qwen2-VL model compatible with HuggingFace weights."""
 import math
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
-import os
 from typing import Any, Callable, Literal, Optional, TypedDict, Union
 
 import torch
@@ -333,7 +333,7 @@ class Qwen2VisionAttention(nn.Module):
         }:
             raise RuntimeError(
                 f"Qwen2-VL does not support {self.attn_backend} backend now.")
-            
+
         self.softmax_mode = 'fp32' if os.environ.get(
             'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
                                                              ] else 'None'
@@ -413,10 +413,10 @@ class Qwen2VisionAttention(nn.Module):
 
             if q1.shape[2] <= 65536:  # need to investigate this crosspoint
                 fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0, False,
-                                            None,self.softmax_mode)
+                                            None, self.softmax_mode)
             else:
                 fused_out = AttentionLongSequence.forward(
-                    q1, k1, v1, attn_mask, 64,self.softmax_mode)
+                    q1, k1, v1, attn_mask, 64, self.softmax_mode)
             context_layer = rearrange(fused_out, "b h s d -> b s h d ")
         elif self.attn_backend == _Backend.TORCH_SDPA:
             # Execute attention entry by entry for speed & less VRAM.
@@ -657,6 +657,8 @@ class Qwen2VisionTransformer(nn.Module):
             prefix=f"{prefix}.merger",
         )
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
+        #compose small images SDPA into one bigger SDPA with mask
+        self.compose_seq_len = 1024
 
     @property
     def dtype(self) -> torch.dtype:
@@ -856,8 +858,6 @@ class Qwen2VisionTransformerStaticShape(Qwen2VisionTransformer):
         calc_img_size = 0
         calc_img_len_list = []
         calc_grid_thw_list = []
-        #compose small images SDPA into one bigger SDPA with mask
-        compose_seq_len = 1024
         # process each image one by one
         for img_idx in range(grid_thw.shape[0]):
             img_shape = grid_thw[img_idx, :].unsqueeze(0)
@@ -871,7 +871,8 @@ class Qwen2VisionTransformerStaticShape(Qwen2VisionTransformer):
             calc_img_size += curr_img_size
             calc_img_len_list.append(curr_img_size)
             calc_grid_thw_list.append(img_shape)
-            if calc_img_size + next_img_size < compose_seq_len:
+            if calc_img_size + next_img_size < self.compose_seq_len:
+                #compose small images SDPA into one bigger SDPA with mask
                 continue
             else:
                 curr_img_size = calc_img_size
