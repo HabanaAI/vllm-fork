@@ -1311,15 +1311,15 @@ class MRotaryEmbedding(RotaryEmbedding):
 
         query_rot = query[..., :self.rotary_dim]
         query_pass = query[..., self.rotary_dim:]
-        query_rot = apply_rotary_pos_emb(query_rot, cos, sin,
-                                         self.is_neox_style)
+        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0,
+                                         rope_mode)
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
 
         key_shape = key.shape
         key = key.view(num_tokens, -1, self.head_size)
         key_rot = key[..., :self.rotary_dim]
         key_pass = key[..., self.rotary_dim:]
-        key_rot = apply_rotary_pos_emb(key_rot, cos, sin, self.is_neox_style)
+        key_rot = apply_rotary_pos_emb(key_rot, cos, sin, None, 0, rope_mode)
         key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
         return query, key
 
