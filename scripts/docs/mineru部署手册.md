@@ -71,13 +71,14 @@ cp -r vllm/vllm/v1/sample/logits_processor vllm-fork/vllm/v1/sample/logits_proce
 export MAX_NUM_SEQS=16
 export PT_HPU_LAZY_MODE=1
 export VLLM_SKIP_WARMUP=True
-export VLLM_GRAPH_RESERVED_MEM=0.2
+export VLLM_GRAPH_RESERVED_MEM=0.5
 export VLLM_GRAPH_PROMPT_RATIO=0.4
 export VLLM_MULTIMODAL_BUCKETS="64,192,384,512,640,768,896,1024,1152,1280,1408,1536,1664,2496, 3136, 4096, 5504, 6272, 7104, 8192, 9216"
 export MINERU_MODEL_SOURCE=local
 export VLLM_CONFIGURE_LOGGING=0
 export VLLM_USE_V1=0
 export VLLM_FP32_SOFTMAX=true
+export VLLM_FP32_SOFTMAX_VISION=true
 ```
 
 **关键环境变量说明：**
@@ -88,7 +89,7 @@ export VLLM_FP32_SOFTMAX=true
 - `VLLM_GRAPH_PROMPT_RATIO=0.4`：为提示处理分配 40% 内存
 - `VLLM_MULTIMODAL_BUCKETS`：多模态处理的预定义存储桶大小
 - `VLLM_USE_V1`：不使用VLLM V1 engine 避免customer logits 调用出错
-- `VLLM_FP32_SOFTMAX` ： SDPA doftmax计算使用FP32精度
+- `VLLM_FP32_SOFTMAX`,`VLLM_FP32_SOFTMAX_VISION` ： SDPA softmax计算使用FP32精度
 
 #### 4.2.2 使用命令行方式运行Mineru
 
