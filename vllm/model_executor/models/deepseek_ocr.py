@@ -387,20 +387,21 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
         if images_spatial_crop is not None:
             assert batch_sz == images_spatial_crop.shape[0]
         if images_crop is not None:
-            assert batch_sz == images_crop.shape[0]
-            if images_crop.dtype != model_dtype:
-                images_crop = images_crop.to(model_dtype)
+            assert batch_sz == len(images_crop) \
+                if isinstance(images_crop, list) else \
+                    images_crop.shape
 
         ret_list = []
         have_image_data = False
         for i in range(batch_sz):
             base_size = self.vision_config.image_size
             if pixel_values[i] is not None:
+                images_crop_data = images_crop[i].to(model_dtype)
+
                 pixel_input = DeepseekOCRImagePixelInputs(
                     type="pixel_values",
                     data=pixel_values[i],
-                    images_crop=images_crop[i] if images_crop \
-                        is not None else None,
+                    images_crop=images_crop_data,
                     images_spatial_crop=images_spatial_crop[i] \
                         if images_spatial_crop is not None else None,
                     resolve_bindings={
