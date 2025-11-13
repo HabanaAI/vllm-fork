@@ -27,6 +27,7 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         BaseProcessingInfo, PromptReplacement,
                                         PromptUpdate)
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.tensor_schema import TensorSchema, TensorShape
 from vllm.transformers_utils.configs.deepseek_vl2 import DeepseekVLV2Config
@@ -36,6 +37,11 @@ from vllm.transformers_utils.tokenizer import cached_tokenizer_from_config
 
 from .deepencoder import DeepCLIPVisionTransformer, build_sam_vit_b
 from .deepseek_vl2 import MlpProjector
+
+is_hpu = current_platform.is_hpu()
+
+if is_hpu:
+    import habana_frameworks.torch.core as htcore
 
 # The image token id may be various
 _IMAGE_TOKEN = "<image>"
@@ -266,6 +272,25 @@ class DeepseekOCRMultiModalProcessor(
         ]
 
 
+class DeepseekOCRVisual(nn.Module):
+
+    def __init__(
+        self,
+        sam_model,
+        vision_model,
+    ):
+        super().__init__()
+        self.sam_model = sam_model
+        self.vision_model = vision_model
+
+    def forward(self, image_tensor: torch.Tensor) -> torch.Tensor:
+        htcore.mark_step()
+        features_1 = self.sam_model(image_tensor)
+        htcore.mark_step()
+        features_2 = self.vision_model(image_tensor, features_1)
+        return features_1, features_2
+
+
 @MULTIMODAL_REGISTRY.register_processor(
     DeepseekOCRMultiModalProcessor,
     info=DeepseekOCRProcessingInfo,
@@ -326,6 +351,8 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
             quant_config=quant_config,
             prefix=maybe_prefix(prefix, "vision_model"),
         )
+
+        self.visual = DeepseekOCRVisual(self.sam_model, self.vision_model)
 
         self.projector = MlpProjector(self.projector_config)
         self.tile_tag = config.tile_tag
@@ -420,8 +447,8 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
 
     def _encode_global_features(self,
                                 image_tensor: torch.Tensor) -> torch.Tensor:
-        global_features_1 = self.sam_model(image_tensor)
-        global_features_2 = self.vision_model(image_tensor, global_features_1)
+        global_features_1, global_features_2 = \
+            self.visual(image_tensor)
         features = torch.cat(
             (
                 global_features_2[:, 1:],
@@ -445,8 +472,7 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
         if torch.sum(patches).item() == 0:
             return None
 
-        local_features_1 = self.sam_model(patches)
-        local_features_2 = self.vision_model(patches, local_features_1)
+        local_features_1, local_features_2 = self.visual(patches)
         features = torch.cat(
             (
                 local_features_2[:, 1:],
