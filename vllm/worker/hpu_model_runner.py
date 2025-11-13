@@ -1929,9 +1929,43 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         bs = len(seq_group_metadata_list)
         if bs > 1 and self.use_merged_prefill:
             bs = 1
-        max_prompt_len = max(
-            self.bucketing_manager.find_prompt_bucket(bs, target_query_len,
-                                                      ctx)[1], self.block_size)
+
+        if any(context_lens):
+            assert not self.scheduler_config.chunked_prefill_enabled
+
+            max_num_block = max(len(bt) for bt in prefix_block_tables)
+            padded_num_block = self.bucketing_manager.find_prompt_bucket(
+                bs, target_query_len, max_num_block)[2]
+            ctx = padded_num_block
+
+            for i in range(len(seq_lens)):
+                seq_lens[i] += (len(prefix_block_tables[i]) -
+                                padded_num_block) * self.block_size
+            prefix_block_list = list(
+                itertools.chain.from_iterable(
+                    bt[:padded_num_block] if len(bt) >=
+                    padded_num_block else bt + ([_PAD_BLOCK_ID] *
+                                                (padded_num_block - len(bt)))
+                    for bt in prefix_block_tables))
+
+            pad_len = len(prefix_block_list)
+            prefix_block_list = pad_list(prefix_block_list, pad_len,
+                                         _PAD_BLOCK_ID)
+
+            prefix_block_list_tensor = torch.tensor(prefix_block_list,
+                                                    dtype=torch.long,
+                                                    device=self.device)
+        else:
+            ctx = 0
+            prefix_block_list_tensor = None
+
+        target_query_len = sum(query_lens) if self.use_merged_prefill else max(
+            query_lens)
+
+        _, pad_seq_len, pad_ctx = self.bucketing_manager.find_prompt_bucket(
+            bs, target_query_len, ctx)
+        assert pad_ctx == ctx and pad_seq_len >= target_query_len
+        max_prompt_len = max(pad_seq_len, self.block_size)
 
         if self.dp_awared_padding and\
             self.vllm_config.kv_transfer_config is None:
@@ -1956,29 +1990,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 [lora_id] *
                 (max_prompt_len if seq_group_metadata.sampling_params and
                  seq_group_metadata.sampling_params.prompt_logprobs else 1))
-
-        if any(context_lens):
-            assert not self.scheduler_config.chunked_prefill_enabled
-            # prefix caching
-
-            max_num_block = max(len(bt) for bt in prefix_block_tables)
-            max_num_block = self.bucketing_manager.find_prompt_bucket(
-                bs, target_query_len, max_num_block)[2]
-            prefix_block_list = list(
-                itertools.chain.from_iterable(
-                    bt if len(bt) == max_num_block else bt +
-                    ([_PAD_BLOCK_ID] * (max_num_block - len(bt)))
-                    for bt in prefix_block_tables))
-
-            pad_len = len(prefix_block_list)
-            prefix_block_list = pad_list(prefix_block_list, pad_len,
-                                         _PAD_BLOCK_ID)
-
-            prefix_block_list_tensor = torch.tensor(prefix_block_list,
-                                                    dtype=torch.long,
-                                                    device=self.device)
-        else:
-            prefix_block_list_tensor = None
 
         input_tokens_tensor = make_cpu_tensor(input_tokens,
                                               max_len=max_prompt_len,
