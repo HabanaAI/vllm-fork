@@ -46,6 +46,9 @@ def load_plugins_by_group(group: str) -> dict[str, Callable[[], Any]]:
 
     plugins = dict[str, Callable[[], Any]]()
     for plugin in discovered_plugins:
+        if plugin.name == "register_paddlex_genai_models":
+            logger.info("Skipping plugin %s", plugin.name)
+            continue
         if allowed_plugins is None or plugin.name in allowed_plugins:
             if allowed_plugins is not None:
                 log_level("Loading plugin %s", plugin.name)
