@@ -1962,8 +1962,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # prefix caching
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
-            max_num_block = self.bucketing_manager.find_prompt_bucket(
-                bs, target_query_len, max_num_block)[2]
             prefix_block_list = list(
                 itertools.chain.from_iterable(
                     bt if len(bt) == max_num_block else bt +
