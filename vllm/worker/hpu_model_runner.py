@@ -1905,10 +1905,24 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             sampling_params = SamplingParams(temperature=temperature)
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
+        context_len = 0
         if is_prompt:
             input_len = seq_len
             output_len = 0
             block_tables = None
+
+            if (self.scheduler_config.chunked_prefill_enabled
+                    and self.scheduler_config.prefill_chunk_size):
+                # if chunked prefill enabled prefill chunk size specified
+                # simplify the warmup by considering the chunk size
+                chunk_size = self.scheduler_config.prefill_chunk_size
+                if seq_len > chunk_size:
+                    chunks = seq_len // chunk_size
+                    chunk_remaining = seq_len % chunk_size
+                    if chunk_remaining == 0:
+                        chunks = chunks - 1
+                    context_len = chunks * chunk_size
+                    block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
         else:
             input_len = seq_len - 1
             output_len = 1
@@ -1917,6 +1931,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         output_token_ids = [1] * output_len
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
+        if is_prompt:
+            # set the _num_computed_tokens for the context len
+            seq_data.update_num_computed_tokens(context_len)
         seq_data.output_token_ids = output_token_ids
         return SequenceGroupMetadata(request_id=str(group_id),
                                      is_prompt=(output_len == 0),
