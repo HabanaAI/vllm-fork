@@ -15,6 +15,7 @@ from vllm.core.block.naive_block import (BlockPool, NaiveBlock,
                                          NaiveBlockAllocator)
 from vllm.core.evictor import EvictionPolicy, Evictor, make_evictor
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
 from vllm.sequence import Sequence
 
 PrefixHash = int
@@ -1075,8 +1076,21 @@ class ComputedBlocksTracker:
         # This is O(logN), where N is the number of blocks.
         num_cached_blocks = len(
             self._allocator.find_cached_blocks_prefix(block_hashes))
+        if current_platform.is_hpu(
+        ) and num_cached_blocks > 0 and seq.is_prefill():
+            from vllm_hpu_extension.bucketing.common import (
+                get_bucketing_manager)
+            hpu_bucketing_manager = get_bucketing_manager()
+            seq_len = seq.get_len() - num_cached_blocks * self._block_size
+            _, _, bkt_cached_blocks = hpu_bucketing_manager.find_prompt_bucket(
+                1, seq_len, num_cached_blocks, False)
+            logger.info("HPU bucketing adjusted cached blocks from %d to %d",
+                        num_cached_blocks, bkt_cached_blocks)
+            num_cached_blocks = bkt_cached_blocks
         num_cached_tokens = num_cached_blocks * self._block_size
         self._seq_id_to_num_tokens_computed[seq.seq_id] = num_cached_tokens
+        self._seq_id_to_blocks_hashes[
+            seq.seq_id] = block_hashes[:num_cached_blocks]
         return num_cached_tokens
 
     def remove_seq(self, seq_id: int) -> None:
