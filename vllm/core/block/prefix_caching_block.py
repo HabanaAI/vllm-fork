@@ -1084,8 +1084,8 @@ class ComputedBlocksTracker:
             seq_len = seq.get_len() - num_cached_blocks * self._block_size
             _, _, bkt_cached_blocks = hpu_bucketing_manager.find_prompt_bucket(
                 1, seq_len, num_cached_blocks, False)
-            logger.info("HPU bucketing adjusted cached blocks from %d to %d",
-                        num_cached_blocks, bkt_cached_blocks)
+            logger.debug("HPU bucketing adjusted cached blocks from %d to %d",
+                         num_cached_blocks, bkt_cached_blocks)
             num_cached_blocks = bkt_cached_blocks
         num_cached_tokens = num_cached_blocks * self._block_size
         self._seq_id_to_num_tokens_computed[seq.seq_id] = num_cached_tokens
