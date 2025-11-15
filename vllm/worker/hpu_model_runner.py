@@ -1959,6 +1959,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if any(context_lens):
             assert not self.scheduler_config.chunked_prefill_enabled
+            assert self.scheduler_config.max_num_prefill_seqs == 1
+            assert bs == 1, (
+                "Prefix caching with multiple sequences is not supported yet.")
             # prefix caching
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
