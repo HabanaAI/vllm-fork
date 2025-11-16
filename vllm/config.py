@@ -4586,6 +4586,14 @@ class VllmConfig:
                            "but the scheduler is configured to publish them."
                            "Modify KVEventsConfig.enable_kv_cache_events"
                            "to True to enable.")
+        if (current_platform.is_hpu()
+                and self.cache_config.enable_prefix_caching
+                and self.scheduler_config.max_num_prefill_seqs is not None
+                and self.scheduler_config.max_num_prefill_seqs > 1):
+            logger.warning(
+                "Prefix caching with bs > 1 is not supported on HPU."
+                " Setting max_num_prefill_seqs to 1.")
+            self.scheduler_config.max_num_prefill_seqs = 1
         current_platform.check_and_update_config(self)
 
         if not self.instance_id:
