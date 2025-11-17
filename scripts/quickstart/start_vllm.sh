@@ -126,12 +126,12 @@ block_size=128
 # DO NOT change ends...
 
 # memory footprint tuning params
-if (( max_model_len <= 16384 )); then
+if (( max_model_len <= 18432 )); then
 	export VLLM_GPU_MEMORY_UTILIZATION=0.85
 else
-	export VLLM_GPU_MEMORY_UTILIZATION=0.7
+	export VLLM_GPU_MEMORY_UTILIZATION=0.65
 fi
-export VLLM_GRAPH_RESERVED_MEM=0.2
+export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=0
 export VLLM_MLA_DISABLE_REQUANTIZATION=0
 export VLLM_DELAYED_SAMPLING="true"
