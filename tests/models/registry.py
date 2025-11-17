@@ -329,6 +329,9 @@ _MULTIMODAL_EXAMPLE_MODELS = {
                                                 max_transformers_version="4.48",  # noqa: E501
                                                 transformers_version_reason="HF model is not compatible.",  # noqa: E501
                                                 hf_overrides={"architectures": ["DeepseekVLV2ForCausalLM"]}),  # noqa: E501
+    "DeepseekOCRForCausalLM": _HfExamplesInfo("deepseek-ai/DeepSeek-OCR",), # noqa: E501
+    "DotsOCRForCausalLM": _HfExamplesInfo("rednote-hilab/dots.ocr",
+                                          trust_remote_code=True),
     "Ernie4_5_VLMoeForConditionalGeneration": _HfExamplesInfo("baidu/ERNIE-4.5-VL-28B-A3B-PT",  # noqa: E501
                                                               trust_remote_code=True),
     "FuyuForCausalLM": _HfExamplesInfo("adept/fuyu-8b"),
@@ -350,6 +353,10 @@ _MULTIMODAL_EXAMPLE_MODELS = {
                                          trust_remote_code=True),
     "Idefics3ForConditionalGeneration": _HfExamplesInfo("HuggingFaceM4/Idefics3-8B-Llama3",  # noqa: E501
                                                         {"tiny": "HuggingFaceTB/SmolVLM-256M-Instruct"}),  # noqa: E501
+    "KeyeForConditionalGeneration": _HfExamplesInfo("Kwai-Keye/Keye-VL-8B-Preview", # noqa: E501
+                                                    trust_remote_code=True),
+    "KeyeVL1_5ForConditionalGeneration": _HfExamplesInfo("Kwai-Keye/Keye-VL-1_5-8B", # noqa: E501
+                                                         trust_remote_code=True),
     "KimiVLForConditionalGeneration": _HfExamplesInfo("moonshotai/Kimi-VL-A3B-Instruct",  # noqa: E501
                                                       extras={"thinking": "moonshotai/Kimi-VL-A3B-Thinking"},  # noqa: E501
                                                       trust_remote_code=True,
@@ -414,6 +421,9 @@ _MULTIMODAL_EXAMPLE_MODELS = {
     "Qwen3VLMoeForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen3-VL-30B-A3B-Instruct", # noqa: E501
                                                         max_model_len=4096,
                                                         min_transformers_version="4.57"),
+    "Qwen3OmniMoeForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen3-Omni-30B-A3B-Instruct", # noqa: E501
+                                                            max_model_len=4096, # noqa: E501
+                                                            min_transformers_version="4.57"), # noqa: E501
     "SkyworkR1VChatModel": _HfExamplesInfo("Skywork/Skywork-R1V-38B"),
     "SmolVLMForConditionalGeneration": _HfExamplesInfo("HuggingFaceTB/SmolVLM2-2.2B-Instruct"),  # noqa: E501
     "UltravoxModel": _HfExamplesInfo("fixie-ai/ultravox-v0_5-llama-3_2-1b",  # noqa: E501

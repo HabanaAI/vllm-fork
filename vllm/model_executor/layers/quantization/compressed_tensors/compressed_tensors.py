@@ -13,7 +13,6 @@ from compressed_tensors.quantization import (QuantizationArgs,
                                              QuantizationType)
 from pydantic import BaseModel
 
-import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.linear import (LinearBase, LinearMethodBase,
@@ -33,7 +32,6 @@ from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
     find_matched_target, is_activation_quantization_format,
     should_ignore_layer)
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
-from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
 from vllm.platforms import current_platform
 
 if current_platform.is_hpu():
@@ -583,8 +581,6 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
         details
         """
         weight_loader = extra_weight_attrs.get("weight_loader")
-        if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-            weight_loader = gaudi_weight_wrapper(weight_loader)
         layer.scheme.create_weights(
             layer=layer,
             input_size=input_size,
