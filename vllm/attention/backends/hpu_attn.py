@@ -462,14 +462,15 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
                                          latent_vec_k.shape[-1])
         # get prefix cache
         if attn_metadata.block_list is not None:
-            # Cannot use fetch_from_cache for chunked prefill for
-            # avoiding contiguous_pa path. If the flag is correct for
-            # chunked prefill or prefix cache, we can use it
-            # past = self.latent_cache_k.fetch_from_cache(
-            #     k_cache, attn_metadata.block_list)
-            past = k_cache.index_select(0, attn_metadata.block_list)
-            if self.VLLM_USE_FP8_MATMUL:
+            # VLLM_CONTIGUOUS_PA should be disabled. fetch_from_cache for
+            # contiguous pa is not compatible with chunked prefill
+            if not self.VLLM_USE_FP8_MATMUL:
+                past = self.latent_cache_k.fetch_from_cache(
+                    k_cache, attn_metadata.block_list)
+            else:
                 # KV cache is fp8, so we need to convert to bfloat16
+                past = self.latent_cache_k_nodeq.fetch_from_cache(
+                    k_cache, attn_metadata.block_list)
                 past = self.latent_cache_k_nodeq.dequant_output(past)
             # past is in the shape of (num_blocks, block_size, head_size)
             # reshape to (batch_size, seq_len, head_size)
