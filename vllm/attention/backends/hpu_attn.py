@@ -39,10 +39,15 @@ def initialize_fp8_kv_cache(mod, load_device="hpu"):
             self.scale_input = torch.tensor(1.0,
                                             dtype=torch.bfloat16,
                                             device=load_device)
+            self.output_scale = 1.0
 
         def quant_input(self, x, input_scale=None):
             return torch.ops.hpu.cast_to_fp8_v2(x, input_scale, False, False,
                                                 torch.float8_e4m3fn)[0]
+
+        def dequant_output(self, output):
+            return torch.ops.hpu.cast_from_fp8(output, self.output_scale,
+                                               torch.bfloat16)
 
         def forward(self, input, *args, **kwargs):
             qinput = self.quant_input(input, input_scale=self.scale_input)
@@ -463,6 +468,9 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             # past = self.latent_cache_k.fetch_from_cache(
             #     k_cache, attn_metadata.block_list)
             past = k_cache.index_select(0, attn_metadata.block_list)
+            if self.VLLM_USE_FP8_MATMUL:
+                # KV cache is fp8, so we need to convert to bfloat16
+                past = self.latent_cache_k_nodeq.dequant_output(past)
             # past is in the shape of (num_blocks, block_size, head_size)
             # reshape to (batch_size, seq_len, head_size)
             past = past.reshape(batch_size, -1, past.shape[-1])
