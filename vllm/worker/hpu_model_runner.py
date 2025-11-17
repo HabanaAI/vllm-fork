@@ -107,14 +107,18 @@ class VisionBuckets:
     This class is used to bucket image tokens
     '''
 
-    def __init__(self, is_batch_based):
+    def __init__(self, is_batch_based, sub_image_list = None):
         self.is_batch_based = is_batch_based
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "").lower()
         if envvar == 'none':
             self.multimodal_buckets = None
         else:
             if envvar == "":
-                if is_batch_based:
+                if sub_image_list is not None:
+                    assert isinstance(sub_image_list, list), \
+                        "sub_image_list must be a list"
+                    multimodal_buckets = sub_image_list
+                elif is_batch_based:
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
                     multimodal_buckets = [1600, 3136, 4096, 6400]
@@ -204,6 +208,10 @@ def is_mm_optimized(model):
         if hasattr(model, 'model') else \
         'Gemma3ForConditionalGeneration' in str(type(model)) or \
         'DeepseekOCRForCausalLM' in str(type(model))
+
+def fixed_sub_image_list(model):
+    return [i for i in range(6+1) if i!=1] \
+        if 'DeepseekOCRForCausalLM' in str(type(model)) else None
 
 
 def pad_flat_tensor(tensor, desired_size):
@@ -411,6 +419,10 @@ class HpuModelAdapter(torch.nn.Module):
             if self.model_is_mrope and hasattr(self.model, 'visual') and \
                model_config is not None and \
                model_config.model_type != "glm4v_moe":
+                logger.info("[Multimodal] Wrapping Visual Model")
+                self.model.visual = htorch.hpu.wrap_in_hpu_graph(
+                    self.model.visual, disable_tensor_cache=True)
+            elif 'DeepseekOCRForCausalLM' in str(type(self.model)):
                 logger.info("[Multimodal] Wrapping Visual Model")
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
@@ -1717,8 +1729,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def add_vision_buckets_to_mrope_mm_optimized(self):
         model = self.get_model()
         self.is_mm_optimized = is_mm_optimized(model)
+        sub_image_list = fixed_sub_image_list(model)
         if self.model_is_mrope or self.is_mm_optimized:
-            model.vision_buckets = VisionBuckets(self.is_mm_optimized)
+            model.vision_buckets = \
+                VisionBuckets(self.is_mm_optimized, sub_image_list)
             model.vision_buckets.graphed_buckets = \
                 self.graphed_multimodal_buckets
             model.audio_buckets = AudioBuckets()
@@ -3007,6 +3021,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "pixel_values": pixel_values,
                 "image_grid_thw": image_grid_thw,
             }
+        elif 'DeepseekOCRForCausalLM' in str(type(self.get_model())):
+            pixel_values = torch.randn(1, 3, 1024, 1024)
+            images_crop = torch.randn(img_args, 3, 640, 640)
+            images_spatial_crop = torch.tensor([[1, img_args]])
+            multi_modal_data = {
+                "pixel_values": pixel_values,
+                "images_crop": images_crop,
+                "images_spatial_crop": images_spatial_crop,
+            }
+            num_image_tokens=1
         elif self.model_is_mrope:
             if not hasattr(self.get_model().config, "vision_config"):
                 raise ValueError("Expect mrope model to have vision_config")
@@ -3061,7 +3085,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if 'ernie4_5_moe_vl' in self.get_model().config.model_type:
             image_token_id = self.get_model().config.im_patch_id
-        elif 'deepseek_vl_v2' in self.get_model().config.model_type:
+        elif 'DeepseekOCRForCausalLM' in str(type(self.get_model())):
             image_token_id = self.get_model().image_token_id
         else:
             image_token_id = self.get_model().config.image_token_id
