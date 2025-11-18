@@ -1898,7 +1898,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         seq_len,
                                         is_prompt,
                                         lora_request=None,
-                                        temperature=0):
+                                        temperature=0,
+                                        is_profile_run=False):
         if self.is_pooler:
             sampling_params = None
         else:
@@ -1911,7 +1912,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             output_len = 0
             block_tables = None
 
-            if (self.scheduler_config.chunked_prefill_enabled
+            if (not is_profile_run
+                    and self.scheduler_config.chunked_prefill_enabled
                     and self.scheduler_config.prefill_chunk_size):
                 # if chunked prefill enabled prefill chunk size specified
                 # simplify the warmup by considering the chunk size
@@ -1931,7 +1933,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         output_token_ids = [1] * output_len
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
-        if is_prompt:
+        if is_prompt and context_len > 0:
             # set the _num_computed_tokens for the context len
             seq_data.update_num_computed_tokens(context_len)
         seq_data.output_token_ids = output_token_ids
@@ -2037,7 +2039,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
-                    temperature=temperature) for i in range(batch_size)
+                    temperature=temperature,
+                    is_profile_run=is_profile_run) for i in range(batch_size)
             ]
         else:
             # FIXME: seq_len is actually number of blocks
@@ -2050,7 +2053,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
-                    temperature=temperature) for i, b in enumerate(blocks)
+                    temperature=temperature,
+                    is_profile_run=is_profile_run) for i, b in enumerate(blocks)
             ]
         if not is_dummy_run:
             torch.hpu.synchronize()
