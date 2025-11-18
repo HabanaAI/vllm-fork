@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from contextlib import suppress
-from typing import Any, Literal, Optional, cast
+from typing import Any, Callable, Literal, Optional, cast
 
 import torch
 from compressed_tensors.config import (CompressionFormat,
@@ -561,7 +561,6 @@ class CompressedTensorsConfig(QuantizationConfig):
 
         return weight_quant.num_bits == input_quant.num_bits == 8
 
-
 class CompressedTensorsLinearMethod(LinearMethodBase):
 
     def __init__(self, quantization_config: CompressedTensorsConfig):
@@ -615,6 +614,19 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
         if scheme is None:
             raise ValueError("A scheme must be defined for each layer")
         return scheme.apply_weights(layer, x, bias=bias)
+
+    def dequant_fp8_weight(self, layer: torch.nn.Module) -> torch.Tensor:
+        if layer.scheme.strategy == QuantizationStrategy.CHANNEL.value:  # weights were quantized per-channel
+            dequant_weight = layer.weight.to(
+                layer.weight_scale.dtype) * layer.weight_scale.squeeze()
+            return dequant_weight.to(torch.bfloat16).t()
+        else:
+            raise NotImplementedError(
+                "Implemented per-channel dequantization only")
+
+    def get_dequant_weights_func(
+        self, ) -> Optional[Callable[[torch.nn.Module], torch.Tensor]]:
+        return self.dequant_fp8_weight
 
 
 class CompressedTensorsKVCacheMethod(BaseKVCacheMethod):
