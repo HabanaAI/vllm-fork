@@ -1898,17 +1898,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         seq_len,
                                         is_prompt,
                                         lora_request=None,
-                                        temperature=0):
+                                        temperature=0,
+                                        context_blocks=0):
         if self.is_pooler:
             sampling_params = None
         else:
             sampling_params = SamplingParams(temperature=temperature)
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
+        context_len = 0
         if is_prompt:
             input_len = seq_len
             output_len = 0
             block_tables = None
+            if context_blocks > 0:
+                context_len = context_blocks * self.block_size
+                block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
         else:
             input_len = seq_len - 1
             output_len = 1
@@ -1917,6 +1922,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         output_token_ids = [1] * output_len
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
+        if is_prompt and context_len > 0:
+            # set the _num_computed_tokens for the context len
+            seq_data.update_num_computed_tokens(context_len)
         seq_data.output_token_ids = output_token_ids
         return SequenceGroupMetadata(request_id=str(group_id),
                                      is_prompt=(output_len == 0),
@@ -1979,7 +1987,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         temperature=0,
                         num_iters=3,
                         align_worker=False,
-                        is_dummy_run=False) -> None:
+                        is_dummy_run=False,
+                        context_blocks=0) -> None:
         use_graphs = (is_dummy_run) or self._use_graphs(
             batch_size, seq_len, is_prompt, is_profile_run=is_profile_run)
         scenario_name = ("warmup_"
@@ -2020,7 +2029,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
-                    temperature=temperature) for i in range(batch_size)
+                    temperature=temperature,
+                    context_blocks=context_blocks) for i in range(batch_size)
             ]
         else:
             # FIXME: seq_len is actually number of blocks
@@ -2145,23 +2155,44 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             raise RuntimeError("LoRA is not enabled.")
         return self.lora_manager.list_adapters()
 
-    def log_warmup(self, phase, i, max_i, batch_size, seq_len):
+    def log_warmup(self, phase, i, max_i, batch_size, seq_len,
+                   context_blocks=0):
         free_mem = format_bytes(
             HabanaMemoryProfiler.current_free_device_memory())
         dim = "num_blocks"
+        context_blocks_info = ""
         if "Prompt" in phase:
             dim = "seq_len"
+            if context_blocks > 0:
+                context_blocks_info = f"num_blocks:{context_blocks} "
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
                f"{dim}:{seq_len} "
+               f"{context_blocks_info}"
                f"free_mem:{free_mem}")
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
         for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
-            self.log_warmup('Prompt' if is_prompt else 'Decode', i,
-                            len(buckets), batch_size, seq_len)
-            self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
+            if (is_prompt and self.scheduler_config.chunked_prefill_enabled
+                    and self.scheduler_config.prefill_chunk_size):
+                chunk_size = self.scheduler_config.prefill_chunk_size
+                max_chunks = self.max_model_len // chunk_size
+                if self.max_model_len % chunk_size > 0:
+                    max_chunks += 1
+                chunk_blocks = chunk_size // self.block_size
+                for chunk in range(max_chunks):
+                    context_blocks = chunk * chunk_blocks
+                    self.log_warmup('Prompt' if is_prompt else 'Decode', i,
+                                    len(buckets), batch_size, seq_len,
+                                    context_blocks)
+                    self.warmup_scenario(batch_size, seq_len, is_prompt,
+                                         kv_caches,
+                                         context_blocks=context_blocks)
+            else:
+                self.log_warmup('Prompt' if is_prompt else 'Decode', i,
+                                len(buckets), batch_size, seq_len)
+                self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
 
     def warmup_graphs(self,
                       strategy,
