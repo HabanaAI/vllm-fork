@@ -1913,6 +1913,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_tables = None
             if context_blocks > 0:
                 context_len = context_blocks * self.block_size
+                # input length and num blocks needs to consider the context
+                input_len = seq_len + context_len
+                num_blocks = math.ceil(input_len / self.block_size)
                 block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
         else:
             input_len = seq_len - 1
