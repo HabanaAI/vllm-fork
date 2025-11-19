@@ -70,7 +70,7 @@ set_common_env(){
     # pytorch bridge
     export PT_HPU_LAZY_MODE=${PT_HPU_LAZY_MODE:-"1"}   # change to '0' to use torch.compile
     if [ "$num_hpu" -gt 1 ]; then
-        export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
+        export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
     fi
 
     # performance tuning
@@ -262,7 +262,7 @@ set_dtype(){
 
 # set up linear bucketing based on max_model_len and max_num_batched_tokens
 set_bucketing(){
-    export VLLM_EXPONENTIAL_BUCKETING=false
+    export VLLM_EXPONENTIAL_BUCKETING=${VLLM_EXPONENTIAL_BUCKETING:-"false"}
 
     max_num_batched_tokens=${max_num_batched_tokens:-8192}
     max_num_seqs=${max_num_seqs:-128}
