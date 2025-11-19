@@ -264,10 +264,12 @@ class LLM:
                                    "false").lower() in ["true", "1"]
         if not enable_profile:
             return None
+        skip_first = int(os.getenv("VLLM_ENGINE_PROFILER_SKIP_STEPS", "0"))
         warmup = int(os.getenv("VLLM_ENGINE_PROFILER_WARMUP_STEPS", "0"))
         steps = int(os.getenv("VLLM_ENGINE_PROFILER_STEPS", "1"))
         repeat = int(os.getenv("VLLM_ENGINE_PROFILER_REPEAT", "1"))
-        schedule = torch.profiler.schedule(wait=0,
+        schedule = torch.profiler.schedule(skip_first=skip_first,
+                                           wait=0,
                                            warmup=warmup,
                                            active=steps,
                                            repeat=repeat)
