@@ -9,7 +9,7 @@ Help() {
     # Display Help
     echo "Start a vLLM server for a huggingface model on Gaudi."
     echo
-    echo "Usage: bash start_gaudi_vllm_server.sh <-w> [-t:r:m:a:d:q:x:p:b:g:k:u:e:l:c:sf] [-h]"
+    echo "Usage: bash start_gaudi_vllm_server.sh <-w> [-t:r:m:a:d:q:x:p:n:b:g:k:u:e:l:c:sf] [-h]"
     echo "Options:"
     echo "-w  Weights of the model, str, could be model id in huggingface or local path."
     echo "    DO NOT change the model name as some of the parameters depend on it."
@@ -30,6 +30,10 @@ Help() {
     echo "    Used to control the max batch size for prefill to balance the TTFT and throughput."
     echo "    The default value of 1 is used to optimize the TTFT."
     echo "    Set to '' to optimize the throughput for short prompts."
+    echo "-n  Max number of the mixed sequences, int, default=${PREFERED_PREFILL_BS}"
+    echo "    Used to control the max batch size for prefill+decode to balance the TTFT and throughput."
+    echo "    The default value of 1 is used to optimize the TTFT."
+    echo "    This must be between 'max_num_prefill_seqs' and 'max_num_seqs'."
     echo "-b  max-num-seqs for vLLM, int, default=${PREFERED_DECODING_BS}"
     echo "    Used to control the max batch size for decoding phase."
     echo "    It is recommended to set this value according to the 'Maximum concurrency'"
@@ -59,7 +63,7 @@ Help() {
 }
 
 # Get the options
-while getopts hw:t:r:m:a:d:q:x:p:b:g:k:u:e:l:c:sf flag; do
+while getopts hw:t:r:m:a:d:q:x:p:n:b:g:k:u:e:l:c:sf flag; do
     case $flag in
     h) # display Help
         Help
@@ -85,6 +89,8 @@ while getopts hw:t:r:m:a:d:q:x:p:b:g:k:u:e:l:c:sf flag; do
         max_model_len=$OPTARG ;;
     p) # max number of prefill sequences
         max_num_prefill_seqs=$OPTARG ;;
+    n) # max number of mixed sequences
+        max_num_mixed_seqs=$OPTARG ;;
     b) # batch size
         max_num_seqs=$OPTARG ;;
     g) # max-seq-len-to-capture
@@ -138,6 +144,7 @@ dtype=${dtype:-"bfloat16"}
 quant_config=${quant_config:-""}
 max_model_len=${max_model_len:-"16384"}
 max_num_prefill_seqs=${max_num_prefill_seqs-${PREFERED_PREFILL_BS}}
+max_num_mixed_seqs=${max_num_mixed_seqs-${PREFERED_PREFILL_BS}}
 max_num_seqs=${max_num_seqs:-$PREFERED_DECODING_BS}
 max_seq_len_to_capture=${max_seq_len_to_capture:-$PREFERED_SEQ_LEN_TO_CAPTURE}
 chunk_size=${chunk_size:-""}
@@ -166,11 +173,11 @@ if [[ "$chunk_size" != "" ]]; then
     echo "    chunked prefill enabled with max-num-batched-tokens: ${chunk_size}"
 fi
 
+case_name=serve_${model_name}_${dtype}_${DEVICE_NAME}_len${max_model_len}_bs${max_num_seqs}_ps${max_num_prefill_seqs}
 if [[ "$chunk_size" != "" ]]; then
-    case_name=serve_${model_name}_${dtype}_${DEVICE_NAME}_len${max_model_len}_chunk${chunk_size}_bs${max_num_seqs}_tp${num_tp_hpu}_pp${num_pp_hpu}_$(date +%F-%H-%M-%S)
-else
-    case_name=serve_${model_name}_${dtype}_${DEVICE_NAME}_len${max_model_len}_bs${max_num_seqs}_tp${num_tp_hpu}_pp${num_pp_hpu}_$(date +%F-%H-%M-%S)
+    case_name=${case_name}_ms${max_num_mixed_seqs}_chunk${chunk_size}
 fi
+case_name=${case_name}_tp${num_tp_hpu}_pp${num_pp_hpu}_$(date +%F-%H-%M-%S)
 log_file="${case_name}.log"
 
 set_config
@@ -191,6 +198,7 @@ python3 -m vllm.entrypoints.openai.api_server \
     --dtype "${DATA_TYPE}" \
     --max-num-seqs "${max_num_seqs}" \
     --max-num-prefill-seqs "${max_num_prefill_seqs}" \
+    --max-num-mixed-seqs "${max_num_mixed_seqs}" \
     --max-num-batched-tokens "${max_num_batched_tokens}" \
     --max-seq-len-to-capture "${max_seq_len_to_capture}" \
     --gpu-memory-utilization "${gpu_memory_utilization}" \

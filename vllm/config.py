@@ -2166,7 +2166,11 @@ class SchedulerConfig:
     max_num_prefill_seqs: Optional[int] = None
     """Maximum number of prefill sequences to be
     processed in a single iteration. Used only with padding-aware
-    scheduling."""
+    scheduling or chunked prefill."""
+
+    max_num_mixed_seqs: Optional[int] = None
+    """Maximum number of prefill+decode sequences to be
+    processed in a single iteration. Used only with chunked prefill."""
 
     use_padding_aware_scheduling: bool = False
     """If True, scheduler will consider padded
@@ -2312,9 +2316,11 @@ class SchedulerConfig:
                 f"({self.num_scheduler_steps}) must be greater than or "
                 "equal to 1.")
         if self.max_num_prefill_seqs is not None \
-            and not self.use_padding_aware_scheduling:
-            raise ValueError("max_num_prefill_seqs can be only "
-                             "used with padding-aware-scheduling. ")
+            and not self.use_padding_aware_scheduling \
+            and not self.chunked_prefill_enabled:
+            raise ValueError(
+                "max_num_prefill_seqs can be only "
+                "used with padding-aware-scheduling or chunked prefill. ")
         if self.use_padding_aware_scheduling and self.chunked_prefill_enabled:
             raise ValueError("Padding-aware scheduling currently "
                              "does not work with chunked prefill ")
@@ -4594,6 +4600,34 @@ class VllmConfig:
                 "Prefix caching with bs > 1 is not supported on HPU."
                 " Setting max_num_prefill_seqs to 1.")
             self.scheduler_config.max_num_prefill_seqs = 1
+        if (current_platform.is_hpu()
+                and not self.scheduler_config.chunked_prefill_enabled
+                and self.scheduler_config.max_num_mixed_seqs is not None):
+            logger.warning("Mixed prefill+decode batches is only "
+                           "supported with chunked prefill on HPU. "
+                           "Setting max_num_mixed_seqs to None.")
+            self.scheduler_config.max_num_mixed_seqs = None
+        if (current_platform.is_hpu()
+                and self.scheduler_config.max_num_prefill_seqs is not None
+                and self.scheduler_config.max_num_mixed_seqs is not None
+                and self.scheduler_config.max_num_prefill_seqs
+                > self.scheduler_config.max_num_mixed_seqs):
+            logger.warning(
+                "Mixed prefill+decode seqs limit is "
+                "less than prefill seqs limit. "
+                "Setting max_num_mixed_seqs to max_num_prefill_seqs.")
+            self.scheduler_config.max_num_mixed_seqs = \
+                self.scheduler_config.max_num_prefill_seqs
+        if (current_platform.is_hpu()
+                and self.scheduler_config.max_num_seqs is not None
+                and self.scheduler_config.max_num_mixed_seqs is not None
+                and self.scheduler_config.max_num_mixed_seqs
+                > self.scheduler_config.max_num_seqs):
+            logger.warning("Mixed prefill+decode seqs limit is "
+                           "more than max seqs limit. "
+                           "Setting max_num_mixed_seqs to max_num_seqs.")
+            self.scheduler_config.max_num_mixed_seqs = \
+                self.scheduler_config.max_num_seqs
         current_platform.check_and_update_config(self)
 
         if not self.instance_id:

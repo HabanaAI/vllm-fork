@@ -345,6 +345,7 @@ class EngineArgs:
         SchedulerConfig.long_prefill_token_threshold
     max_num_seqs: Optional[int] = SchedulerConfig.max_num_seqs
     max_num_prefill_seqs: Optional[int] = None
+    max_num_mixed_seqs: Optional[int] = None
     max_logprobs: int = ModelConfig.max_logprobs
     disable_log_stats: bool = False
     revision: Optional[str] = ModelConfig.revision
@@ -739,7 +740,15 @@ class EngineArgs:
             default=EngineArgs.max_num_prefill_seqs,
             help=('Maximum number of prefill sequences per '
                   'iteration. Can be used only with padding-aware '
-                  'scheduling. Must be <= max_num_seqs.'))
+                  'scheduling or chunked prefill. '
+                  'Must be <= max_num_seqs.'))
+        parser.add_argument(
+            '--max-num-mixed-seqs',
+            type=int,
+            default=EngineArgs.max_num_mixed_seqs,
+            help=('Maximum number of prefill+decode sequences per '
+                  'iteration. Can be used only with chunked prefill. '
+                  'Must be <= max_num_seqs and >= max_num_prefill_seqs.'))
         parser.add_argument('--disable-log-stats',
                             action='store_true',
                             help='Disable logging statistics.')
@@ -1212,6 +1221,7 @@ class EngineArgs:
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_num_seqs=self.max_num_seqs,
             max_num_prefill_seqs=self.max_num_prefill_seqs,
+            max_num_mixed_seqs=self.max_num_mixed_seqs,
             max_model_len=model_config.max_model_len,
             cuda_graph_sizes=self.cuda_graph_sizes,
             num_lookahead_slots=num_lookahead_slots,
