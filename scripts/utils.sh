@@ -78,6 +78,7 @@ set_common_env(){
     export VLLM_DELAYED_SAMPLING=${VLLM_DELAYED_SAMPLING:-"true"}
     export VLLM_ZERO_PADDING=${VLLM_ZERO_PADDING:-"true"}
     export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-"true"}
+    export VLLM_SERVER_DEV_MODE=${VLLM_SERVER_DEV_MODE:-"1"}
 
     # network
     default_host_ip=${host:-$(hostname -I | awk '{print $1}')}
