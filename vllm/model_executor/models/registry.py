@@ -219,6 +219,8 @@ _MULTIMODAL_MODELS = {
     "NVLM_D": ("nvlm_d", "NVLM_D_Model"),
     "Ovis": ("ovis", "Ovis"),
     "Ovis2_5": ("ovis2_5", "Ovis2_5"),
+    "PaddleOCRVLForConditionalGeneration": ("paddleocr_vl",
+                                            "PaddleOCRVLForConditionalGeneration"),
     "PaliGemmaForConditionalGeneration": ("paligemma", "PaliGemmaForConditionalGeneration"),  # noqa: E501
     "Phi3VForCausalLM": ("phi3v", "Phi3VForCausalLM"),
     "PixtralForConditionalGeneration": ("pixtral", "PixtralForConditionalGeneration"),  # noqa: E501
@@ -422,6 +424,8 @@ class _ModelRegistry:
             raise TypeError(msg)
 
         if model_arch in self.models:
+            if model_arch == "PaddleOCRVLForConditionalGeneration":
+                return
             logger.warning(
                 "Model architecture %s is already registered, and will be "
                 "overwritten by the new model class %s.", model_arch,

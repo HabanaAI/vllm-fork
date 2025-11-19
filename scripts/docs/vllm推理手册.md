@@ -39,7 +39,8 @@
     - [3.4.2 client 端请求格式样例](#342-client-端请求格式样例)
     - [3.4.3 FP8 static quant](#343-fp8-static-quant)
     - [3.4.4 FP8 dynamic quant](#344-fp8-dynamic-quant)
-    - [3.4.5 问题解答](#345-问题解答)
+    - [3.4.5 PaddleOCR-VL 模型](#345-paddleocr-vl-模型)
+    - [3.4.6 问题解答](#346-问题解答)
 
 ## 1.0 环境部署
 
@@ -959,7 +960,41 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
 ```
 
-#### 3.4.5 问题解答
+#### 3.4.5 PaddleOCR-VL 模型
+**启动服务**
+
+```bash
+PT_HPU_LAZY_MODE=1 vllm serve \
+    PaddlePaddle/PaddleOCR-VL \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --trust-remote-code \
+    --gpu-memory-utilization 0.5 \
+    --max-model-len 16384 \
+    --served-model-name 'PaddleOCR-VL-0.9B'
+```
+
+**client 端请求格式样例**\
+PaddleOCR-VL 模型的client端依赖于PaddleOCR pipeline, 先安装必要的paddle相关库:
+
+```bash
+pip install paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+pip install paddlex==3.3.4
+pip install "paddleocr[doc-parser]"
+```
+
+然后，使用PaddleOCR CLI 命令发送请求:
+
+```bash
+paddleocr doc_parser \
+    -i https://paddle-model-ecology.bj.bcebos.com/paddlex/imgs/demo_image/paddleocr_vl_demo.png \
+    --enable_mkldnn False \
+    --vl_rec_backend vllm-server \
+    --vl_rec_server_url http://127.0.0.1:8080/v1 \
+    --save_path ./output
+```
+
+#### 3.4.6 问题解答
 
 - 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
 - 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。

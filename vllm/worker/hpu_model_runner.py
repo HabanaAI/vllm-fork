@@ -410,7 +410,7 @@ class HpuModelAdapter(torch.nn.Module):
         if htorch.utils.internal.is_lazy():
             if self.model_is_mrope and hasattr(self.model, 'visual') and \
                model_config is not None and \
-               model_config.model_type != "glm4v_moe":
+               model_config.model_type not in ("glm4v_moe", "paddleocr_vl"):
                 logger.info("[Multimodal] Wrapping Visual Model")
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
@@ -728,6 +728,11 @@ class HpuModelAdapter(torch.nn.Module):
                     multimodal_embeddings = \
                       self.model.get_multimodal_embeddings_v0(**kwargs)
                     inputs_embeds = self.model.get_input_embeddings_v0(
+                        input_ids, multimodal_embeddings)
+                elif self.model.config.model_type == 'paddleocr_vl':
+                    multimodal_embeddings = \
+                      self.model.get_multimodal_embeddings(**kwargs)
+                    inputs_embeds = self.model.get_input_embeddings(
                         input_ids, multimodal_embeddings)
                 else:
                     image_input = self.model._parse_and_validate_image_input(
@@ -3091,6 +3096,66 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         )
         return seq_group
 
+    def create_dummy_paddleocr_multi_modal_seq_group_metadata(
+            self, group_id, num_patches, sampling_params, lora_request,
+            seq_len):
+        if not hasattr(self.get_model().config, "vision_config"):
+            raise ValueError("Expect paddleocr_vl model to have vision_config")
+
+        if num_patches == UNSET_IMG_ARGS:
+            # Using the largest bucket
+            num_patches = self.get_model(
+            ).vision_buckets.multimodal_buckets[-1]
+        model_config = self.get_model().config
+        vision_config = model_config.vision_config
+        compression_ratio = model_config.compression_ratio
+        num_channels = vision_config.num_channels
+        image_size = vision_config.image_size
+        patch_size = vision_config.patch_size
+
+        num_patches = (image_size // patch_size + 1)**2
+        if num_patches == UNSET_IMG_ARGS:
+            # Using the largest bucket
+            num_patches = self.get_model(
+            ).vision_buckets.multimodal_buckets[-1]
+
+        num_image_tokens = int(num_patches * (compression_ratio**2))
+
+        # for dummy input construction
+        image_token_id = 100295
+        prompt_token_ids = [image_token_id] * min(seq_len, num_image_tokens)
+        prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
+        placeholders_by_modality = {
+            'image':
+            [PlaceholderRange(offset=0, length=len(prompt_token_ids))]
+        }
+        seq_data = SequenceData(prompt_token_ids_array)
+
+        pixel_values = torch.randn(num_patches, num_channels, patch_size,
+                                   patch_size)
+        image_grid_thw = torch.tensor(
+            [[1, image_size // patch_size + 1, image_size // patch_size + 1]])
+
+        multi_modal_data = {
+            "pixel_values": pixel_values,
+            "image_grid_thw": image_grid_thw,
+            "image_num_patches": torch.Tensor([num_patches]),
+            "image_token_id": torch.tensor(image_token_id, dtype=torch.long),
+        }
+        multi_modal_data = MultiModalKwargs(multi_modal_data)
+
+        seq_group = SequenceGroupMetadata(
+            request_id=str(group_id),
+            is_prompt=True,
+            seq_data={group_id: seq_data},
+            sampling_params=sampling_params,
+            block_tables=None,
+            lora_request=lora_request[group_id] if lora_request else None,
+            multi_modal_data=multi_modal_data,
+            multi_modal_placeholders=placeholders_by_modality,
+        )
+        return seq_group
+
     def create_dummy_seq_group_metadata(self,
                                         group_id,
                                         seq_len,
@@ -3108,13 +3173,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         computed_block_nums = None
         if is_prompt:
             if self.is_mm_run() and img_args is not None:
-                return self.create_dummy_multi_modal_seq_group_metadata(
-                    group_id=group_id,
-                    img_args=img_args,
-                    sampling_params=sampling_params,
-                    lora_request=lora_request,
-                    seq_len=seq_len,
-                )
+                if self.get_model().config.model_type == "paddleocr_vl":
+                    return \
+                        self.create_dummy_paddleocr_multi_modal_seq_group_metadata(
+                        group_id=group_id,
+                        num_patches=img_args,
+                        sampling_params=sampling_params,
+                        lora_request=lora_request,
+                        seq_len=seq_len,
+                    )
+                else:
+                    return self.create_dummy_multi_modal_seq_group_metadata(
+                        group_id=group_id,
+                        img_args=img_args,
+                        sampling_params=sampling_params,
+                        lora_request=lora_request,
+                        seq_len=seq_len,
+                    )
             else:
                 input_len = seq_len
                 output_len = 0
