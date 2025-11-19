@@ -80,6 +80,7 @@ set_common_env(){
     export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-"true"}
     export VLLM_SERVER_DEV_MODE=${VLLM_SERVER_DEV_MODE:-"1"}
     export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=${PT_HPU_SDPA_QKV_SLICE_MODE_FWD:-"0"}
+    export VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-"1"}
 
     # network
     default_host_ip=${host:-$(hostname -I | awk '{print $1}')}
