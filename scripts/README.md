@@ -468,9 +468,9 @@ modID   CPU Affinity    NUMA Affinity
 The following 4 ENVs are used to control the device profiling:
 * `VLLM_ENGINE_PROFILER_ENABLED`, set to `true` to enable device profiler.
 * `VLLM_ENGINE_PROFILER_SKIP_STEPS`, number of steps to skip for profiling.
-* `VLLM_ENGINE_PROFILER_WARMUP_STEPS`, number of steps to ignore for each repeation.
-* `VLLM_ENGINE_PROFILER_STEPS`, number of steps to capture in each repeation.
-* `VLLM_ENGINE_PROFILER_REPEAT`, number of repeation for (warmup_steps + profile_steps).
+* `VLLM_ENGINE_PROFILER_WARMUP_STEPS`, number of steps to ignore for each repetition.
+* `VLLM_ENGINE_PROFILER_STEPS`, number of steps to capture in each repetition.
+* `VLLM_ENGINE_PROFILER_REPEAT`, number of repetition for (warmup_steps + profile_steps).
 
 > Please refer to [torch.profiler.schedule](https://pytorch.org/docs/stable/profiler.html#torch.profiler.schedule) for more details about the profiler schedule arguments.
 
