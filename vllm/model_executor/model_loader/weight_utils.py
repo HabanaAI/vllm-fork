@@ -477,8 +477,8 @@ def safetensors_weights_iterator(
                     if param.dtype == torch.float8_e4m3fn:
                         param = (param.float() * fp8_e4m3fnuz_max /
                                  fp8_e4m3fn_max).to(torch.float8_e4m3fnuz)
-                    elif param.dtype == torch.float32 and "scale" in name.split(
-                            ".")[-1]:
+                    elif param.dtype in [torch.float32, torch.bfloat16
+                                         ] and "scale" in name.split(".")[-1]:
                         param *= fp8_e4m3fn_max / fp8_e4m3fnuz_max
                 yield name, param
 
@@ -539,8 +539,8 @@ def fastsafetensors_weights_iterator(
                         if t.dtype == torch.float8_e4m3fn:
                             t = (t.float() * fp8_e4m3fnuz_max /
                                  fp8_e4m3fn_max).to(torch.float8_e4m3fnuz)
-                        elif t.dtype == torch.float32 and "scale" in k.split(
-                                ".")[-1]:
+                        elif t.dtype in [torch.float32, torch.bfloat16
+                                         ] and "scale" in k.split(".")[-1]:
                             t *= fp8_e4m3fn_max / fp8_e4m3fnuz_max
                     yield k, t
             finally:

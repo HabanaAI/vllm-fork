@@ -70,7 +70,7 @@ set_common_env(){
     # pytorch bridge
     export PT_HPU_LAZY_MODE=${PT_HPU_LAZY_MODE:-"1"}   # change to '0' to use torch.compile
     if [ "$num_hpu" -gt 1 ]; then
-        export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
+        export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
     fi
 
     # performance tuning
@@ -78,11 +78,23 @@ set_common_env(){
     export VLLM_DELAYED_SAMPLING=${VLLM_DELAYED_SAMPLING:-"true"}
     export VLLM_ZERO_PADDING=${VLLM_ZERO_PADDING:-"true"}
     export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-"true"}
+    export VLLM_SERVER_DEV_MODE=${VLLM_SERVER_DEV_MODE:-"1"}
+    export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=${PT_HPU_SDPA_QKV_SLICE_MODE_FWD:-"0"}
+    export VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-"1"}
 
     # network
     default_host_ip=${host:-$(hostname -I | awk '{print $1}')}
-    default_ifname=$( ip -br addr show to ${default_host_ip} | awk '{print $1}' )
     export VLLM_HOST_IP=${VLLM_HOST_IP:-"${default_host_ip}"}
+    
+    if [[ "${default_host_ip}" == "127.0.0.1" || -z "${default_host_ip}" ]]; then
+    default_host_ip=$( \
+        hostname -I | tr ' ' '\n' | grep -v '127.0.0.1' | head -n 1 \
+        || ip route get 1.1.1.1 2>/dev/null | awk 'NR==1{print $7}' \
+    )
+    fi
+    
+    [ -z "${default_host_ip}" ] && echo "ERROR: No non-loopback IPv4 address found. Please check network configuration." >&2
+    default_ifname=$( ip -br addr show to "${default_host_ip}" | awk '{print $1}' )
     export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-"${default_ifname}"}
     export HCCL_SOCKET_IFNAME=${HCCL_SOCKET_IFNAME:-"${default_ifname}"}
 }
@@ -250,7 +262,7 @@ set_dtype(){
 
 # set up linear bucketing based on max_model_len and max_num_batched_tokens
 set_bucketing(){
-    export VLLM_EXPONENTIAL_BUCKETING=false
+    export VLLM_EXPONENTIAL_BUCKETING=${VLLM_EXPONENTIAL_BUCKETING:-"false"}
 
     max_num_batched_tokens=${max_num_batched_tokens:-8192}
     max_num_seqs=${max_num_seqs:-128}

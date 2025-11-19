@@ -1963,6 +1963,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if any(context_lens):
             assert not self.scheduler_config.chunked_prefill_enabled
+            assert self.scheduler_config.max_num_prefill_seqs == 1
+            assert bs == 1, (
+                "Prefix caching with multiple sequences is not supported yet.")
             # prefix caching
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
@@ -2836,9 +2839,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         """
         with self.profiler.record_event('internal', 'prepare_input_tensors'):
             assert seq_group_metadata_list is not None
-            if self.profiler.enabled:
-                self.profiler_counter_helper.capture_seq_group_metadata_stats(
-                    seq_group_metadata_list=seq_group_metadata_list)
+            self.profiler_counter_helper.capture_seq_group_metadata_stats(
+                seq_group_metadata_list=seq_group_metadata_list)
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list, finished_requests_ids, align_worker)
             assert model_input.attn_metadata is not None
@@ -4055,7 +4057,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         warmup_mode=False,
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
-        ctx_blocks: int = 1,
+        ctx_blocks: int = 0,
         is_dummy_run: bool = False,
         is_pt_profiler_run: bool = False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
@@ -4144,6 +4146,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
+            elif attn_metadata.block_list is not None:
+                if not warmup_mode:
+                    ctx_blocks = attn_metadata.block_list.shape[-1]
 
             if self._is_fla_model():
                 use_graphs = not is_prompt
@@ -4289,8 +4294,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         attn_metadata,
                         kv_caches=kv_caches
                     )
+                real_seq_lens = model_input.seq_lens
+                real_seq_lens = real_seq_lens if real_seq_lens else \
+                    self.profiler_counter_helper.real_seq_lens
+                real_query_lens = model_input.query_lens
+                real_query_lens = real_query_lens if real_query_lens else \
+                    self.profiler_counter_helper.prompt_seq_lens
                 profiler_args = {
-                    'real_seq_len': model_input.seq_lens,
+                    'real_seq_lens': real_seq_lens,
+                    'real_query_lens': real_query_lens,
                     'real_batch_size': real_batch_size
                 }
 
