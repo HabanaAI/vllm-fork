@@ -1215,6 +1215,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.vllm_config.scheduler_config.num_scheduler_steps == 1
         self.cached_step_outputs: List[CachedStepOutput] = []
         self.is_pooler = False
+        self.is_score = False
         self.is_causal = is_causal
         # For delayed sampling
         self.cached_step_inputs: List[
@@ -1336,6 +1337,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                    f"took {m_getmodel.get_summary_string()}")
             logger.info(msg)
             self.is_pooler = hasattr(self.model, "_pooler")
+            self.is_score = (self.model_config.task == "score") 
             if self.lora_config:
                 assert hasattr(self.model, "embedding_modules"
                                ), "Model does not have embedding_modules"
@@ -1620,7 +1622,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _use_graphs(self, batch_size, seq_len):
         if self.enforce_eager:
             return False
-        return batch_size * seq_len <= self.max_seq_len_to_capture
+        if self.is_score :
+            flag = batch_size <= self.max_num_prefill_seqs
+            logger.debug("score model use graph config: %s was !!",
+                           (batch_size, self.max_num_prefill_seqs))
+        else :
+            flag = (batch_size * seq_len) <= self.max_seq_len_to_capture
+
+        return flag
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens

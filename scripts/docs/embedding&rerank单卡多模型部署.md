@@ -16,7 +16,19 @@ bge-reranker-large
 bge-reranker-v2-m3
 gte-reranker-modernbert-base
 
-## 快速开始
+## 目录
+
+1. [系统OS配置](#系统os配置)
+2. [环境变量说明](#环境变量说明)
+3. [服务启动](#服务启动)
+4. [客户端配置](#客户端配置)
+5. [调优参数](#调优参数)
+6. [单模型部署](#单模型部署)
+
+
+### 多模型部署
+
+适应于多卡多模型部署场景
 
 ```bash
 # 基本使用（默认max-model-len=512）
@@ -31,17 +43,10 @@ python launch_multi_models.py --models model1 model2 --max-model-len 8192
 python launch_multi_models.py --models model1 model2 --env-preset performance
 ```
 
-## 目录
-
-1. [系统OS配置](#系统os配置)
-2. [服务启动](#服务启动)
-3. [客户端配置](#客户端配置)
-4. [调优参数](#调优参数)
-
 ## 系统OS配置
 
 ### 硬件要求
-- **CPU**: 3 vCPU
+- **CPU**: 4 vCPU
 - **HPU**: 1卡
 
 ### CPU 调优配置
@@ -213,7 +218,7 @@ VLLM_CONTIGUOUS_PA=false VLLM_SKIP_WARMUP=true python3 -m \
 可以根据模型大小再作调整。
 - 2个模型：35% GPU内存/模型
 
-### 方法三：API动态管理
+### 方法三：API管理
 
 #### 查看当前模型列表
 
@@ -316,3 +321,73 @@ python launch_multi_models.py --models /data/models/gte-modernbert-base /data/mo
                               --port 8771 --env-preset performance --env "PT_HPU_LAZY_MODE=0"
 
 ```
+
+#### 服务状态检查
+```bash
+# 检查服务是否正常运行
+curl http://localhost:8000/v1/models
+
+# 测试embedding模型
+curl http://localhost:8000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model": "bge-reranker-v2-m3", "input": "测试文本"}'
+
+# 测试rerank模型
+curl http://localhost:8000/rerank \
+  -H "Content-Type: application/json" \
+  -d '{"query": "测试查询", "documents": ["文档1", "文档2"], "model": "bge-reranker-v2-m3"}'
+```
+
+
+### 单卡单模型部署
+
+适用于生产环境中单个embedding或rerank模型的部署场景：
+
+```bash
+#!/bin/bash
+# 设置环境变量
+export VLLM_CONTIGUOUS_PA="false"
+export VLLM_SKIP_WARMUP="false"
+export VLLM_PROMPT_BS_BUCKET_MIN="1"
+export VLLM_PROMPT_BS_BUCKET_STEP="1"
+export VLLM_PROMPT_BS_BUCKET_MAX="8"
+export VLLM_PROMPT_SEQ_BUCKET_MIN="256"
+export VLLM_PROMPT_SEQ_BUCKET_STEP="128"
+export VLLM_PROMPT_SEQ_BUCKET_MAX="4096"
+export VLLM_DECODE_BS_BUCKET_MIN="1"
+export VLLM_DECODE_BS_BUCKET_STEP="1"
+export VLLM_DECODE_BS_BUCKET_MAX="2"
+export VLLM_DECODE_BLOCK_BUCKET_MIN="1"
+export VLLM_DECODE_BLOCK_BUCKET_STEP="1"
+export VLLM_DECODE_BLOCK_BUCKET_MAX="2"
+export PT_HPU_LAZY_MODE="1"
+export VLLM_EXPONENTIAL_BUCKETING="false"
+export VLLM_PROMPT_SEQ_BUCKET_LIMIT="0"
+
+# 启动单模型服务
+vllm serve /models/${embedding_model} \
+    --port 8000 \
+    --served-model-name ${embedding_model} \
+    --tensor-parallel-size 1 \
+    --dtype bfloat16 \
+    --max_num_prefill_seqs 8 \
+    --disable-log-requests
+```
+
+#### 单卡单模型部署参数说明
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `--port` | 服务端口 | 8000 |
+| `--served-model-name` | 模型服务名称 | bge-reranker-v2-m3 |
+| `--tensor-parallel-size` | 张量并行大小（单卡设为1） | 1 |
+| `--dtype` | 数据类型 | bfloat16 |
+| `--max_num_prefill_seqs` | 最大预填充序列数 | 8 |
+| `--disable-log-requests` | 禁用requests 详细日志 | - |
+
+配置参数调优说明：
+max_num_prefill_seqs: 推荐配置为8, 性能在bert 模型，变长场景(512~2k) 场景中已经验证。
+VLLM_PROMPT_BS_BUCKET_MAX: 推荐配置为8，请保持和max_num_prefill_seqs 配置一致。
+VLLM_PROMPT_SEQ_BUCKET_MIN: 按照输入最短token配置
+VLLM_PROMPT_SEQ_BUCKET_STEP: 推荐配置为128
+VLLM_PROMPT_SEQ_BUCKET_MAX: 按照输入最长token配置，不建议唱过8192
