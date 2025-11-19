@@ -81,8 +81,17 @@ set_common_env(){
 
     # network
     default_host_ip=${host:-$(hostname -I | awk '{print $1}')}
-    default_ifname=$( ip -br addr show to ${default_host_ip} | awk '{print $1}' )
     export VLLM_HOST_IP=${VLLM_HOST_IP:-"${default_host_ip}"}
+    
+    if [[ "${default_host_ip}" == "127.0.0.1" || -z "${default_host_ip}" ]]; then
+    default_host_ip=$( \
+        hostname -I | tr ' ' '\n' | grep -v '127.0.0.1' | head -n 1 \
+        || ip route get 1.1.1.1 2>/dev/null | awk 'NR==1{print $7}' \
+    )
+    fi
+    
+    [ -z "${default_host_ip}" ] && echo "ERROR: No non-loopback IPv4 address found. Please check network configuration." >&2
+    default_ifname=$( ip -br addr show to "${default_host_ip}" | awk '{print $1}' )
     export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-"${default_ifname}"}
     export HCCL_SOCKET_IFNAME=${HCCL_SOCKET_IFNAME:-"${default_ifname}"}
 }
