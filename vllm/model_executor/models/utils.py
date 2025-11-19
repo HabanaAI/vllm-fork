@@ -654,7 +654,7 @@ def get_input_mask(hidden_states: torch.Tensor,
     """
     # input_ids: (B, T, H), valid_len: (B)
     seq_len = hidden_states.shape[1]
-    mask = torch.arange(seq_len).expand(len(valid_len),
+    mask = torch.arange(seq_len).to(hidden_states.device).expand(len(valid_len),
                                         seq_len) < valid_len.unsqueeze(1)
     # mask: (B, T)
     mask = mask.to(hidden_states.dtype)
