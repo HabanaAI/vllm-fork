@@ -1023,8 +1023,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     batch_size,
                     seq_len,
                     is_prompt,
-                    is_profile_run=False):
-        if is_prompt and batch_size * seq_len > self.max_seq_len_to_capture:
+                    is_profile_run=False,
+                    context_blocks=0):
+        if is_prompt and ((batch_size * seq_len +
+                           context_blocks * self.block_size) >
+                          self.max_seq_len_to_capture):
             return False
         if self.enforce_eager:
             return False
@@ -1032,7 +1035,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return False
         if self.skip_warmup:
             return True
-        return (batch_size, seq_len, is_prompt) in self.graphed_buckets
+        return (batch_size, seq_len, is_prompt, context_blocks
+                ) in self.graphed_buckets
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -1993,7 +1997,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_dummy_run=False,
                         context_blocks=0) -> None:
         use_graphs = (is_dummy_run) or self._use_graphs(
-            batch_size, seq_len, is_prompt, is_profile_run=is_profile_run)
+            batch_size, seq_len, is_prompt, is_profile_run=is_profile_run,
+            context_blocks=context_blocks)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
                          f"bs{batch_size}_"
@@ -2229,18 +2234,44 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 batch_seq > self.max_seq_len_to_capture:
                 captured_all = False
                 continue
-            graphed_bucket = (batch_size, seq_len, is_prompt)
-            if graphed_bucket in self.graphed_buckets:
-                continue
-            self.graphed_buckets.add(graphed_bucket)
-            self.log_warmup(phase, idx, num_candidates, batch_size, seq_len)
-            with HabanaMemoryProfiler() as mem_prof:
-                self.warmup_scenario(batch_size,
-                                     seq_len,
-                                     is_prompt,
-                                     kv_caches,
-                                     temperature=1.0 if batch_size
-                                     not in warmed_random_sampler_bs else 0)
+            if (is_prompt and self.scheduler_config.chunked_prefill_enabled
+                    and self.scheduler_config.prefill_chunk_size):
+                chunk_size = self.scheduler_config.prefill_chunk_size
+                max_chunks = self.max_model_len // chunk_size
+                if self.max_model_len % chunk_size > 0:
+                    max_chunks += 1
+                chunk_blocks = chunk_size // self.block_size
+                for chunk in range(max_chunks):
+                    context_blocks = chunk * chunk_blocks
+                    graphed_bucket = (batch_size, seq_len, is_prompt,
+                                      context_blocks)
+                    if graphed_bucket in self.graphed_buckets:
+                        continue
+                    self.graphed_buckets.add(graphed_bucket)
+                    self.log_warmup(phase, idx, num_candidates, batch_size,
+                                    seq_len, context_blocks=context_blocks)
+                    with HabanaMemoryProfiler() as mem_prof:
+                        self.warmup_scenario(
+                            batch_size,
+                            seq_len,
+                            is_prompt,
+                            kv_caches,
+                            temperature=1.0 if batch_size
+                            not in warmed_random_sampler_bs else 0,
+                            context_blocks=context_blocks)
+            else:
+                graphed_bucket = (batch_size, seq_len, is_prompt, 0)
+                if graphed_bucket in self.graphed_buckets:
+                    continue
+                self.graphed_buckets.add(graphed_bucket)
+                self.log_warmup(phase, idx, num_candidates, batch_size, seq_len)
+                with HabanaMemoryProfiler() as mem_prof:
+                    self.warmup_scenario(batch_size,
+                                         seq_len,
+                                         is_prompt,
+                                         kv_caches,
+                                         temperature=1.0 if batch_size
+                                         not in warmed_random_sampler_bs else 0)
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
@@ -2270,7 +2301,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt = phase == 'prompt'
             graphs = graph == 't'
             if graphs:
-                self.graphed_buckets.add((int(bs), int(seq_len), is_prompt))
+                self.graphed_buckets.add((int(bs), int(seq_len), is_prompt, 0))
             self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
                                  True)
             raise AssertionError("Finished profiling")
@@ -2868,10 +2899,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
+            num_blocks = self._num_blocks(attn_metadata)
             use_graphs = self._use_graphs(batch_size,
                                           seq_len,
                                           is_prompt,
-                                          is_profile_run=profile_run_mode)
+                                          is_profile_run=profile_run_mode,
+                                          context_blocks=num_blocks)
             self._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
             lora_mask: torch.Tensor = None
