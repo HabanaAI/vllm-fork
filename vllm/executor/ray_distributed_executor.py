@@ -169,13 +169,25 @@ class RayDistributedExecutor(DistributedExecutorBase):
                           **ray_remote_kwargs):
         num_gpus = envs.VLLM_RAY_PER_WORKER_GPUS
 
-        def retain_envs(var_name):
-            retain_var_list = [
-                'GLOO_SOCKET_IFNAME', 'HCCL_SOCKET_IFNAME',
-                'NCCL_SOCKET_IFNAME'
-            ]
-            return ('HPU' in var_name or 'RAY' in var_name
-                    or 'VLLM' in var_name or var_name in retain_var_list)
+        def should_sync_env(name):
+            """Check if an environment variable should be synchronized.
+
+            Args:
+            name (str): The name of the environment variable.
+
+            Returns:
+            bool: True if the environment variable should be synchronized,
+                  False otherwise.
+            """
+            forced_envs = set()
+            excluded_envs = {
+                'VLLM_HOST_IP', 'GLOO_SOCKET_IFNAME', 'NCCL_SOCKET_IFNAME',
+                'HCCL_SOCKET_IFNAME'
+            }
+            return (name not in excluded_envs
+                    and (name == "QUANT_CONFIG" or "INC" in name
+                         or 'HPU' in name or 'RAY' in name or 'VLLM' in name
+                         or name in forced_envs))
 
         # The driver dummy worker does not actually use any resources.
         # It holds the resource for the driver worker.
@@ -236,8 +248,9 @@ class RayDistributedExecutor(DistributedExecutorBase):
             else:
                 runtime_env_vars = {
                     k: v
-                    for k, v in os.environ.items() if retain_envs(k)
+                    for k, v in os.environ.items() if should_sync_env(k)
                 }
+                logger.info("Setting ray env with %s", runtime_env_vars)
                 worker = ray.remote(
                     num_cpus=0,
                     num_gpus=0,
