@@ -108,6 +108,12 @@ set_length(){
     if [ "$max_num_batched_tokens" -lt $PREFERED_BATCHED_TOKENS ]; then
         max_num_batched_tokens=$PREFERED_BATCHED_TOKENS
     fi
+    # Enforce maximum chunk size
+    if [ "$chunk_size" != "" ]; then
+        if [ "$chunk_size" -lt "$max_num_batched_tokens" ]; then
+            max_num_batched_tokens=$chunk_size
+        fi
+    fi
     # Ceiling max_num_batched_tokens to a multiple of BLOCK_SIZE
     max_num_batched_tokens=$( ceil $max_num_batched_tokens $BLOCK_SIZE )
 }
@@ -278,7 +284,7 @@ set_bucketing(){
 
     prompt_seq_min=$block_size
     prompt_seq_step=$block_size
-    prompt_seq_max=$max_model_len
+    prompt_seq_max=$max_num_batched_tokens
     export VLLM_PROMPT_SEQ_BUCKET_MIN=${VLLM_PROMPT_SEQ_BUCKET_MIN:-$prompt_seq_min}
     export VLLM_PROMPT_SEQ_BUCKET_STEP=${VLLM_PROMPT_SEQ_BUCKET_STEP:-$prompt_seq_step}
     export VLLM_PROMPT_SEQ_BUCKET_MAX=${VLLM_PROMPT_SEQ_BUCKET_MAX:-$prompt_seq_max}
