@@ -2086,8 +2086,8 @@ class Scheduler:
             if remaining_token_budget >= scheduler_config.prefill_chunk_size:
                 remaining_token_budget = scheduler_config.prefill_chunk_size
             else:
-                # If we cannot sequence has to be chunked, we make sure the
-                # context blocks are prefill_chunk_size
+                # If we sequence has to be chunked, we make sure the context
+                # blocks are multiple of prefill_chunk_size
                 if num_new_tokens > remaining_token_budget:
                     remaining_token_budget = 0
         num_new_tokens = min(num_new_tokens, remaining_token_budget)
