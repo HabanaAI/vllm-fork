@@ -2183,7 +2183,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
         for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
             if (is_prompt and self.scheduler_config.chunked_prefill_enabled
-                    and self.scheduler_config.prefill_chunk_size):
+                    and self.scheduler_config.prefill_chunk_size
+                    and batch_size <= (
+                            self.scheduler_config.max_num_batched_tokens
+                            // self.scheduler_config.prefill_chunk_size
+                    )):
                 chunk_size = self.scheduler_config.prefill_chunk_size
                 max_chunks = self.max_model_len // chunk_size
                 if self.max_model_len % chunk_size > 0:
@@ -2197,6 +2201,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.warmup_scenario(batch_size, seq_len, is_prompt,
                                          kv_caches,
                                          context_blocks=context_blocks)
+                    gc.collect()
             else:
                 self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                                 len(buckets), batch_size, seq_len)
@@ -2235,7 +2240,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 captured_all = False
                 continue
             if (is_prompt and self.scheduler_config.chunked_prefill_enabled
-                    and self.scheduler_config.prefill_chunk_size):
+                    and self.scheduler_config.prefill_chunk_size
+                    and batch_size <= (
+                            self.scheduler_config.max_num_batched_tokens
+                            // self.scheduler_config.prefill_chunk_size
+                    )):
                 chunk_size = self.scheduler_config.prefill_chunk_size
                 max_chunks = self.max_model_len // chunk_size
                 if self.max_model_len % chunk_size > 0:
