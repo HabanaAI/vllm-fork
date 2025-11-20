@@ -680,7 +680,9 @@ class HpuModelAdapter(torch.nn.Module):
                               attn_metadata.num_prefills)
               attn_bias = None
               if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
-                  assert batch_size == 1, "Chunked prefill with dynamic block_list only supports batch_size=1"
+                  assert batch_size == 1, (
+                      "Chunked prefill with dynamic block_list only supports bs=1"
+                  )
               for i in range(batch_size):
                   single_attn_bias = self._set_attn_bias_chunked(
                       int(seq_len), context_lens_t[i], query_lens_t[i], device,
@@ -1864,9 +1866,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             computed_block_nums = seq_group_metadata.computed_block_nums
             if (self.scheduler_config is not None
+                    and self.scheduler_config is not None
                     and self.scheduler_config.chunked_prefill_enabled
-                    and not (computed_block_nums is None
-                             or computed_block_nums == [])):
+                    and self.cache_config.enable_prefix_caching):
                 raise RuntimeError(
                     "chunked prefill cannot be used with prefix caching "
                     "now.")
@@ -1896,7 +1898,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     # Prefill has chunked before.
                     block_table = seq_group_metadata.block_tables[seq_id]
                     if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
-                        assert context_len % self.block_size == 0, "context len must be multiple of block size in dynamic chunked prefill mode"
+                        assert context_len % self.block_size == 0, (
+                            "context len must be multiple of block size in "
+                            "dynamic chunked prefill mode"
+                        )
                         prefix_blocks = context_len // self.block_size
                         prefix_block_tables.append(block_table[:prefix_blocks])
                     else:
@@ -2030,11 +2035,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         for _ in range(batch_size_padding))
 
         real_num_seqs = len(query_lens)
-        if self.scheduler_config.chunked_prefill_enabled and envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
-            assert target_query_len <= self.max_num_batched_tokens, f"{target_query_len=} exceeds {self.max_num_batched_tokens=} for chunked prefill"
+        bs = len(seq_group_metadata_list)
+        if (self.scheduler_config.chunked_prefill_enabled
+                and envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT):
+            assert target_query_len <= self.max_num_batched_tokens, (
+                f"{target_query_len=} exceeds "
+                f"{self.max_num_batched_tokens=} for chunked prefill"
+            )
+
             max_prompt_len = self.max_num_batched_tokens
         else:
-            bs = len(seq_group_metadata_list)
             if bs > 1 and self.use_merged_prefill:
                 bs = 1
             max_prompt_len = max(
@@ -2069,7 +2079,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self.vllm_config.cache_config.enable_prefix_caching:
                 assert self.scheduler_config.max_num_prefill_seqs == 1
             assert bs == 1, (
-                "Prefix caching or chunked prefill with multiple sequences is not supported yet.")
+                "Prefix caching or chunked prefill with multiple sequences "
+                "is not supported yet."
+            )
             # prefix caching or chunked prefill
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
@@ -2079,9 +2091,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     ([_PAD_BLOCK_ID] * (max_num_block - len(bt)))
                     for bt in prefix_block_tables))
 
-            if self.scheduler_config.chunked_prefill_enabled and not envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
-                if max_prompt_len < max_num_block * self.block_size:
-                    max_prompt_len = max_num_block * self.block_size
+            if (self.scheduler_config.chunked_prefill_enabled
+                    and not envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT
+                    and max_prompt_len < max_num_block * self.block_size):
+                max_prompt_len = max_num_block * self.block_size
             pad_len = len(prefix_block_list)
             prefix_block_list = pad_list(prefix_block_list, pad_len,
                                          _PAD_BLOCK_ID)
@@ -2765,6 +2778,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 prefill_reqs.append(seq_group_meta)
             else:
                 decode_reqs.append(seq_group_meta)
+        if self.scheduler_config.enable_chunked_prefill and len(decode_reqs) != 0:
+            decode_reqs, real_decode_batch_size, decode_batch_size_padded = (
+                    self._add_dummy_seq(decode_reqs, False, align_worker))
+            seq_group_metadata_list=[]
+            if len(prefill_reqs) != 0:
+                for req in prefill_reqs:
+                    seq_group_metadata_list.append(req)
+            for req in decode_reqs:
+                    seq_group_metadata_list.append(req)
+            batch_size_padded = len(seq_group_metadata_list)
 
         # Prepare input tensors.
         (
@@ -3571,6 +3594,145 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not is_dummy_run:
             gc.collect()
 
+    def warmup_scenario_mix(self,
+                        batch_size,
+                        seq_len,
+                        ctx,
+                        is_prompt,
+                        kv_caches,
+                        is_pt_profiler_run=False,
+                        is_lora_profile_run=False,
+                        temperature=0,
+                        img_args=None,
+                        num_iters=3,
+                        align_worker=False,
+                        is_dummy_run=False) -> None:
+        phase = 'mix'
+        use_graphs = is_dummy_run or self._use_graphs(batch_size, seq_len)
+        buckets = self.bucketing_manager.decode_buckets
+        num_candidates =  len(buckets)
+        for idx, (decode_bs, _, decode_ctx) in enumerate(reversed(buckets)):
+            scenario_name = ("warmup_"
+                         f"{phase}_"
+                         f"prefill_bs{batch_size}_"
+                         f"prefill_seq{seq_len}_"
+                         f"prefill_ctx{ctx}_"
+                         f"decode_bs{decode_bs}_"
+                         f"decode_ctx{decode_ctx}_"
+                         f"graphs{'T' if use_graphs else 'F'}")
+
+            self.log_warmup(f"Graph/{'mix'}/{'decode'}", idx, num_candidates, decode_bs, 1,
+                                decode_ctx)
+            dummy_lora_requests: List[LoRARequest] = []
+            dummy_lora_requests_per_seq: List[LoRARequest] = []
+            if self.lora_config and is_lora_profile_run:
+                assert self.lora_manager is not None
+                with self.lora_manager.dummy_lora_cache():
+                    for idx in range(self.lora_config.max_loras):
+                        lora_id = idx + 1
+                        dummy_lora_request = LoRARequest(
+                            lora_name=f"warmup_{lora_id}",
+                            lora_int_id=lora_id,
+                            lora_local_path="/not/a/real/path",
+                        )
+                        self.lora_manager.add_dummy_lora(dummy_lora_request,
+                                                        rank=LORA_WARMUP_RANK)
+                        dummy_lora_requests.append(dummy_lora_request)
+                    dummy_lora_requests_per_seq = [
+                        dummy_lora_requests[idx % len(dummy_lora_requests)]
+                        for idx in range(batch_size)
+                    ]
+            self.profiler.start('internal', scenario_name)
+            times = num_iters if use_graphs or is_pt_profiler_run else 1
+            seqs=[]
+            seqs_prefill = self.create_dummy_seq_group_metadata(
+                                0,
+                                seq_len + ctx * self.block_size,
+                                True,
+                                lora_request=dummy_lora_requests_per_seq[i]
+                                if dummy_lora_requests_per_seq else None,
+                                img_args=img_args,
+                                temperature=temperature,
+                                ctx=ctx)
+
+            seqs.append(seqs_prefill)
+            blocks = [decode_ctx // decode_bs for _ in range(decode_bs)]
+            blocks[0] += decode_ctx % decode_bs
+            for i, b in enumerate(blocks):
+                seqs_decode = self.create_dummy_seq_group_metadata(
+                    i,
+                    b * self.block_size - 1,
+                    False,
+                    lora_request=dummy_lora_requests_per_seq[i]
+                    if dummy_lora_requests_per_seq else None,
+                    temperature=temperature,
+                    ctx=decode_ctx)
+                seqs.append(seqs_decode)
+
+            if not is_dummy_run:
+                torch.hpu.synchronize()
+            profiler = None
+            if is_pt_profiler_run and self.is_driver_worker:
+                profiler = setup_profiler()
+                profiler.start()
+            for time_index in range(times):
+                inputs = self.prepare_model_input_align_worker(
+                    seqs, align_worker=align_worker)
+                # Chendi: Necessary fix for warmup with TP>1
+                if time_index == 0:
+                    if self.is_driver_worker:
+                        broadcast_tensor_dict(
+                            {"input_tokens": inputs.input_tokens}, src=0)
+                    else:
+                        broadcast_tensor_dict(src=0)
+                if self._is_fla_model():
+                    self.add_fla_dummy_data(inputs)
+                if is_prompt or self.is_single_step:
+                    intermediate_tensors = None
+                    if not get_pp_group().is_first_rank:
+                        intermediate_tensors = \
+                            self.model.make_empty_intermediate_tensors(
+                                batch_size=batch_size,
+                                context_size=seq_len if is_prompt else 1,
+                                dtype=self.model_config.dtype,
+                                device=self.device)
+                    self.execute_model(inputs,
+                                    kv_caches,
+                                    intermediate_tensors=intermediate_tensors,
+                                    warmup_mode=True,
+                                    ctx_blocks=ctx,
+                                    is_dummy_run=is_dummy_run,
+                                    is_pt_profiler_run=is_pt_profiler_run)
+                else:  # decode with multi-step
+                    inputs = dataclasses.replace(inputs,
+                                                is_first_multi_step=True,
+                                                is_last_step=False)
+                    self.execute_model(inputs,
+                                    kv_caches,
+                                    warmup_mode=True,
+                                    num_steps=2,
+                                    seqs=seqs,
+                                    ctx_blocks=ctx)
+                    inputs = dataclasses.replace(inputs,
+                                                is_first_multi_step=False,
+                                                is_last_step=True)
+                    self.execute_model(inputs,
+                                    kv_caches,
+                                    warmup_mode=True,
+                                    num_steps=2,
+                                    seqs=seqs,
+                                    ctx_blocks=ctx)
+                if not is_dummy_run:
+                    torch.hpu.synchronize()
+                if profiler:
+                    profiler.step()
+            if profiler:
+                profiler.stop()
+            self.profiler.end()
+            if not is_dummy_run:
+                gc.collect()
+
+
     def remove_all_loras(self):
         if not self.lora_manager:
             raise RuntimeError("LoRA is not enabled.")
@@ -3664,6 +3826,30 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      torch.distributed.ReduceOp.MAX)
             total_mem += used_mem
             total_batch_seq += batch_seq
+
+        if self.scheduler_config.chunked_prefill_enabled and is_prompt:
+            for idx, (batch_size, query_len, ctx) in enumerate(reversed(buckets)):
+                # Graph memory usage is proportional to seq dimension in a batch
+                phase = f"Graph/{'mix'}/{'prompt'}"
+                seq_len = query_len + ctx * self.block_size
+                batch_seq = batch_size * seq_len
+                self.log_warmup(phase, idx, num_candidates, batch_size, query_len,
+                                ctx)
+                with HabanaMemoryProfiler() as mem_prof:
+                    self.warmup_scenario_mix(
+                        batch_size,
+                        query_len,
+                        ctx,
+                        is_prompt,
+                        kv_caches,
+                        temperature=1.0
+                        if batch_size not in warmed_random_sampler_bs else 0,
+                    )
+                warmed_random_sampler_bs.add(batch_size)
+                used_mem = align_workers(mem_prof.consumed_device_memory,
+                                        torch.distributed.ReduceOp.MAX)
+                total_mem += used_mem
+                total_batch_seq += batch_seq
 
         if is_prompt and self.is_mm_run():
             #For multimodal total_batch_seq and total_mem, we store it in the
@@ -4110,9 +4296,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def _check_config(self, batch_size, seq_len, ctx, attn_metadata,
                       warmup_mode):
         is_prefix_caching = self.vllm_config.cache_config.enable_prefix_caching
+        is_chunked_prefill = self.vllm_config.scheduler_config.enable_chunked_prefill
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
-        if is_prefix_caching:
+        if is_prefix_caching or is_chunked_prefill:
             phase = self._phase(attn_metadata)
             num_blocks = self._num_blocks(attn_metadata)
             cfg = (batch_size, seq_len, num_blocks, phase)
@@ -4124,7 +4311,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         if not seen and not warmup_mode:
             logger.warning("Configuration: %s was not warmed-up!",
                            (phase.value, batch_size, seq_len,
-                            num_blocks) if is_prefix_caching else
+                            num_blocks) if is_prefix_caching or is_chunked_prefill else
                            (phase, batch_size, seq_len))
 
     def create_lora_mask(self, input_tokens: torch.Tensor, lora_ids: List[int],

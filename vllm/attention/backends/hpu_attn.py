@@ -611,7 +611,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 position_bias = None
 
                 if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
-                    assert prefill_batch_size == 1, "Only batch size 1 is supported for chunked prefill with dynamic block list."
+                    assert prefill_batch_size == 1, (
+                        "Only batch size 1 is supported for chunked prefill with "
+                        "dynamic block list."
+                    )
                     key_attn = attn_data.key.view(kv_shape)
                     value_attn = attn_data.value.view(kv_shape)
                     common_args['need_context'] = True
