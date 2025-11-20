@@ -2083,8 +2083,13 @@ class Scheduler:
             # If prefill_chunk_size is specified, chunk with the specific size
             # The prefill_chunk_size must be dividable by the block size
             assert scheduler_config.prefill_chunk_size % block_size == 0
-            remaining_token_budget = min(
-                remaining_token_budget, scheduler_config.prefill_chunk_size)
+            if remaining_token_budget >= scheduler_config.prefill_chunk_size:
+                remaining_token_budget = scheduler_config.prefill_chunk_size
+            else:
+                # If we cannot sequence has to be chunked, we make sure the
+                # context blocks are prefill_chunk_size
+                if num_new_tokens > remaining_token_budget:
+                    remaining_token_budget = 0
         num_new_tokens = min(num_new_tokens, remaining_token_budget)
 
         return num_new_tokens
