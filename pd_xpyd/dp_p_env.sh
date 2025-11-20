@@ -30,8 +30,6 @@ if [[ "$model_len" -eq 131072 ]]; then
 
     CHUNKED_PREFILL_ENABLED=1
     export VLLM_CONTIGUOUS_PA=false
-    export VLLM_PROMPT_SEQ_BUCKET_STEP=4096
-    export VLLM_PROMPT_BS_BUCKET_STEP=2
     export VLLM_GPU_MEMORY_UTILIZATION=0.6
     export VLLM_GRAPH_RESERVED_MEM=0.43823
     export VLLM_GRAPH_PROMPT_RATIO=1
@@ -58,6 +56,11 @@ export VLLM_DECODE_BS_BUCKET_MAX=1
 export VLLM_DECODE_BLOCK_BUCKET_MIN=2
 export VLLM_DECODE_BLOCK_BUCKET_STEP=1
 export VLLM_DECODE_BLOCK_BUCKET_MAX=2
+
+if [[ "$model_len" -eq 131072 ]]; then
+    export VLLM_PROMPT_SEQ_BUCKET_STEP=4096
+    export VLLM_PROMPT_BS_BUCKET_STEP=2
+fi
 
 echo " environments are reseted "
 
