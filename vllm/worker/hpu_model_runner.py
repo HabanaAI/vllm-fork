@@ -1365,11 +1365,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     seq_group_metadata.sampling_params.temperature == 0.0
                     for seq_group_metadata in seq_group_metadata_list)
                 temperature = 0.0 if has_greedy_samples else 1.0
-                first_real_seq = seq_group_metadata_list[0]
-                top_k = first_real_seq.sampling_params.top_k if first_real_seq.sampling_params else -1
-                top_p = first_real_seq.sampling_params.top_p if first_real_seq.sampling_params else 1.0
+            logger.info(f"libin debug greedy {has_greedy_samples=}")
             dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
-                -1, 0, is_prompt, temperature=temperature, top_k=top_k, top_p=top_p)
+                -1, 0, is_prompt, temperature=temperature)
             seq_group_metadata_list.extend(dummy_seq_group_metadata
                                            for _ in range(batch_size_padding))
         return seq_group_metadata_list, real_batch_size, batch_size_padded
@@ -2879,16 +2877,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         img_args=None,
                                         temperature=0,
                                         presence_penalty=0.0,
-                                        top_p=1.0,
-                                        top_k=-1,
                                         ctx=0):
         if self.is_pooler:
             sampling_params = None
         else:
             sampling_params = SamplingParams(temperature=temperature,
-                                             presence_penalty=presence_penalty,
-                                             top_p=top_p,
-                                             top_k=top_k)
+                                             presence_penalty=presence_penalty,)
         num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
         computed_block_nums = None
@@ -3047,11 +3041,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         times = num_iters if use_graphs or is_pt_profiler_run else 1
         presence_penalty = 1.0 if os.getenv('VLLM_WARMUP_WITH_PENALTY',
                                             '0') == '1' else 0.0
-        top_p = 0.1 if os.getenv('VLLM_WARMUP_WITH_PENALTY',
-                                 '0') == '1' else 1.0
-        temperature = 1.0 if os.getenv('VLLM_WARMUP_WITH_PENALTY',
-                                       '0') == '1' else 0.0
-        top_k = int(os.getenv('VLLM_WARMUP_WITH_TOP_K', '-1'))
+
         if is_prompt:
             seqs = [
                 self.create_dummy_seq_group_metadata(
@@ -3063,8 +3053,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     img_args=img_args,
                     temperature=temperature,
                     presence_penalty=presence_penalty,
-                    top_p=top_p,
-                    top_k=top_k,
                     ctx=ctx) for i in range(batch_size)
             ]
         else:
@@ -3079,8 +3067,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature,
                     presence_penalty=presence_penalty,
-                    top_p=top_p,
-                    top_k=top_k,
                     ctx=ctx) for i, b in enumerate(blocks)
             ]
         if not is_dummy_run:
