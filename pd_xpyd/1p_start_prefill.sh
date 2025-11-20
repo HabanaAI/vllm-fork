@@ -13,13 +13,22 @@ echo "Using Mooncake config: $MOONCAKE_CONFIG_PATH"
 
 source "$BASH_DIR"/dp_p_env.sh
 
-
 if [ "$INC_FP8" -eq 1 ]; then
   kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"
   echo "<prefill>it's inc fp8 kv cache mode"
 else
   kv_cache_dtype_arg=""
   echo "<prefill>it's bf16 kv cache mode"
+fi
+
+EXTRA_ARGS=()
+
+if [[ "$CHUNKED_PREFILL_ENABLED" == "1" ]]; then
+    EXTRA_ARGS+=("--use-padding-aware-scheduling" "false")
+    EXTRA_ARGS+=("--enable-chunked-prefill")
+    EXTRA_ARGS+=("--prefill-chunk-size" "$max_num_batched_tokens")
+else
+    EXTRA_ARGS+=("--use-padding-aware-scheduling")
 fi
 
 # Define the Python command as an array
@@ -35,10 +44,10 @@ CMD=(
     --disable-async-output-proc
     --disable-log-requests
     --max-num-batched-tokens "$max_num_batched_tokens"
-    --use-padding-aware-scheduling
     --use-v2-block-manager
     --distributed_executor_backend mp
     $kv_cache_dtype_arg
+    "${EXTRA_ARGS[@]}"
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
 )
 
