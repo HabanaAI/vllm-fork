@@ -122,8 +122,9 @@ class VisionBuckets:
                 multimodal_buckets = [int(i) for i in envvar.split(',')]
             self.multimodal_buckets = self._process_buckets(multimodal_buckets)
         self.graphed_buckets = set()
-        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
-                                          'false').lower() == 'true'
+
+        self.skip_warmup = 1 if os.environ.get(
+            'VLLM_SKIP_WARMUP', 'false').lower() in ['true', '1'] else 0
 
     def _process_buckets(self, buckets):
         if not self.is_batch_based:
