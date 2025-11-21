@@ -1686,9 +1686,6 @@ class SchedulerConfig:
             and not self.use_padding_aware_scheduling:
             raise ValueError("max_num_prefill_seqs can be only "
                              "used with padding-aware-scheduling. ")
-        if self.use_padding_aware_scheduling and self.chunked_prefill_enabled:
-            raise ValueError("Padding-aware scheduling currently "
-                             "does not work with chunked prefill ")
 
     @property
     def is_multi_step(self) -> bool:

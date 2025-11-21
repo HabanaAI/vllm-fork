@@ -1399,10 +1399,17 @@ class Scheduler:
         inter token latency because decodes requests don't need to be blocked
         by prefill requests.
         """
-        budget = SchedulingBudget(
-            token_budget=self.scheduler_config.max_num_batched_tokens,
-            max_num_seqs=self.scheduler_config.max_num_seqs,
-        )
+        if self.scheduler_config.use_padding_aware_scheduling:
+            budget = PaddingAwareSchedulingBudget(
+                token_budget=self.scheduler_config.max_num_batched_tokens,
+                max_num_seqs=self.scheduler_config.max_num_seqs,
+                max_num_prefill_seqs=self.scheduler_config.max_num_prefill_seqs
+            )
+        else:
+            budget = SchedulingBudget(
+                token_budget=self.scheduler_config.max_num_batched_tokens,
+                max_num_seqs=self.scheduler_config.max_num_seqs,
+            )
         curr_loras: Set[int] = set()
 
         prefills = SchedulerPrefillOutputs.create_empty()
