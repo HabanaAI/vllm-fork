@@ -2908,12 +2908,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            num_blocks = self._num_blocks(attn_metadata)
+            context_blocks = self._num_blocks(attn_metadata) if is_prompt else 0
             use_graphs = self._use_graphs(batch_size,
                                           seq_len,
                                           is_prompt,
                                           is_profile_run=profile_run_mode,
-                                          context_blocks=num_blocks)
+                                          context_blocks=context_blocks)
             self._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
             lora_mask: torch.Tensor = None
