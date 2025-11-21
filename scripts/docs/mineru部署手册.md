@@ -1,13 +1,13 @@
 # MinerU Gaudi 部署指南
 
-本指南提供在 MinerU v2.5.4 上使用 Intel Gaudi 作为硬件加速器通过 pipeline后端/VLLM 后端进行部署的详细步骤。
+本指南提供在 MinerU v2.5.4 和 MinerU v2.6.4 上使用 Intel Gaudi 作为硬件加速器通过 pipeline后端/VLLM 后端进行部署的详细步骤。
 
 ## 前提条件
 
 - 已安装 Intel Gaudi 软件栈
 - 支持 Gaudi 对应驱动版本的基础Docker镜像
 
-## 使用MinerU v2.5.4
+## 使用MinerU v2.5.4,v2.6.4
 
 ### 1. 启动docker
 
@@ -55,10 +55,30 @@ https://github.com/opendatalab/MinerU/blob/master/mineru.template.json
 
 ```bash
 git clone https://github.com/HabanaAI/vllm-fork.git -b aice/v1.22.0
-pip install -e . -i https://mirrors.aliyun.com/pypi/simple
 git clone https://github.com/vllm-project/vllm.git
 cp -r vllm/vllm/v1/sample/logits_processor vllm-fork/vllm/v1/sample/logits_processor
+cd vllm-fork
+VLLM_TARGET_DEVICE=hpu pip install . -i https://mirrors.aliyun.com/pypi/simple
 ```
+
+以下修改针对minerU 2.5.4 及2.6.x 版本中出现的问题
+mineru.cli.client:parse_doc:211 - name 'LogitsProcessor' is not defined
+在docker 内部修改 MinerULogitsProcessor 实现
+ /usr/local/lib/python3.10/dist-packages/mineru_vl_utils/__init__.py
+原有代码
+ 7 __lazy_attrs__ = {
+ 8     "MinerUClient": (".mineru_client", "MinerUClient"),
+ 9     "MinerUSamplingParams": (".mineru_client", "MinerUSamplingParams"),
+ 10     "MinerULogitsProcessor": (".logits_processor.vllm_v1_no_repeat_ngram", \
+        "VllmV1NoRepeatNGramLogitsProcessor"),
+ 11}
+修改为
+ 7 __lazy_attrs__ = {
+ 8     "MinerUClient": (".mineru_client", "MinerUClient"),
+ 9     "MinerUSamplingParams": (".mineru_client", "MinerUSamplingParams"),
+ 10     "MinerULogitsProcessor": (".logits_processor.vllm_v0_no_repeat_ngram", \
+        "VllmV0NoRepeatNGramLogitsProcessor"),
+ 11}
 
 #### 4.2 在Gaudi上运行vlm-vllm-engine backend
 
@@ -94,7 +114,7 @@ export VLLM_FP32_SOFTMAX_VISION=true
 #### 4.2.2 使用命令行方式运行Mineru
 
 ```bash
-mineru -p <input_path> -o <output_path>  -b vlm-vllm-engine 
+mineru -p <input_path> -o <output_path>  -b vlm-vllm-engine
 ```
 
 #### 4.2.3 使用 http-client/server 方式运行Mineru
@@ -218,3 +238,49 @@ vim /usr/local/lib/python3.10/dist-packages/ultralytics/nn/autobackend.py
 ```bash
 $ MINERU_DEVICE_MODE=hpu mineru -p ./test.pdf -o ./ -d hpu  -b pipeline -m ocr
 ```
+
+### 6. 针对MinerU v2.6.4 相关更新
+
+#### 6.1 部署方式
+
+在v2.6.4 上部署vllm-backend和pipeline backend命令与v2.5.4相同，可以参考前面5个章节内容进行
+
+#### 6.2 新功能支持
+
+MinerU 天枢API 服务部署在Gaudi上的支持。
+天枢服务主要提供面向企业基的增强服务部署,在Gaudi上已经验证了单卡单worker部署方式。
+天枢服务包括但不限于如下功能:
+##### 企业级功能
+- ✅ **异步处理** - 客户端立即响应（~100ms）,无需等待处理完成
+- ✅ **任务持久化** - SQLite 存储,服务重启任务不丢失
+- ✅ **优先级队列** - 重要任务优先处理
+- ✅ **自动清理** - 定期清理旧结果文件,保留数据库记录
+
+项目链接
+https://github.com/opendatalab/MinerU/tree/master/projects/mineru_tianshu
+
+##### 部署步骤
+''' bash
+cd MinerU/projects/mineru_tianshu
+pip install -r requirements.txt
+python start_all.py --workers-per-device 1 --devices auto 2>&1 \
+       | tee tianshu.log >/dev/null &
+
+'''
+#### API 访问
+Gaudi 目前支持vlm-vllm-engine访问方式
+'''
+curl -X 'POST' \
+  'http://10.239.129.55:8000/api/v1/tasks/submit' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'file=@test.pdf;type=application/pdf' \
+  -F 'backend=vlm-vllm-engine' \
+  -F 'lang=ch' \
+  -F 'method=auto' \
+  -F 'formula_enable=true' \
+  -F 'table_enable=true' \
+  -F 'priority=0'
+'''
+详细API 参考
+http://localhost:8000/docs
