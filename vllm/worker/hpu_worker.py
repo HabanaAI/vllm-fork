@@ -586,11 +586,15 @@ def init_worker_distributed_environment(
 
     # A small all_reduce for warmup & checking conformance.
     device = hpu_device_string()
-    dummy_tensor_hpu = torch.ones(1).to(device)
+    # Hack for rackscale
+    # Needed as to 1.24-130 or otherwise the assert is triggered
+    dummy_tensor_hpu = torch.ones(32).to(device)
     if not envs.VLLM_PP_USE_CPU_COMS:
         torch.distributed.all_reduce(dummy_tensor_hpu)
-        assert dummy_tensor_hpu.item(
-        ) == parallel_config.world_size * parallel_config.data_parallel_size
+        print(f"[{torch.distributed.get_rank()}]dummy_tensor_hpu: {dummy_tensor_hpu}, world_size: {torch.distributed.get_world_size()}, data_parallel_size: {parallel_config.data_parallel_size}",flush=True)
+        #assert dummy_tensor_hpu.item(
+        #) == parallel_config.world_size * parallel_config.data_parallel_size
+        assert(torch.all(dummy_tensor_hpu==parallel_config.world_size * parallel_config.data_parallel_size))
     else:
         get_tp_group().all_reduce(dummy_tensor_hpu)
         assert dummy_tensor_hpu.item() == parallel_config.tensor_parallel_size

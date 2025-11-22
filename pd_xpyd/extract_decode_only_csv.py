@@ -18,6 +18,9 @@ HEADER = [
     "Mean TPOT (ms)",
     "Medium TPOT (ms)",
     "P99 TPOT (ms)",
+    "Mean ITL (ms)",
+    "Median ITL (ms)",
+    "P99 ITL (ms)",
 ]
 
 
@@ -27,7 +30,7 @@ def parse_namespace(ns_line: str) -> Dict[str, str]:
     This is a heuristic parser robust to quoted strings and simple tokens.
     """
     # Extract inside Namespace(...)
-    m = re.search(r"Namespace\((.*)\)\s*$", ns_line.strip())
+    m = re.search(r"Namespace\((.*)\)\s*$", ns_line.strip(), flags=re.S)
     if not m:
         return {}
     payload = m.group(1)
@@ -69,6 +72,26 @@ def parse_namespace(ns_line: str) -> Dict[str, str]:
 ROUND_LABEL_RE = re.compile(r"(?P<label>\d+(?:st|nd|rd|th)\s+ROUND)" )
 
 
+def _extract_namespace_line(segment: str) -> Optional[str]:
+    lines = segment.splitlines()
+    collector: List[str] = []
+    open_parens = 0
+    collecting = False
+    for line in lines:
+        stripped = line.strip()
+        if not collecting and stripped.startswith('Namespace('):
+            collecting = True
+        if collecting:
+            collector.append(stripped)
+            open_parens += stripped.count('(')
+            open_parens -= stripped.count(')')
+            if open_parens <= 0:
+                break
+    if not collector or open_parens > 0:
+        return None
+    return ''.join(collector)
+
+
 def iter_round_segments(text: str) -> List[Tuple[str, str]]:
     """Split the text by ROUND markers and return labelled segments."""
     matches = list(ROUND_LABEL_RE.finditer(text))
@@ -88,7 +111,7 @@ def iter_2nd_round_segments(text: str) -> Iterable[str]:
             yield segment
 
 
-def extract_metrics(text: str) -> Optional[Tuple[int, float, float, float]]:
+def extract_metrics(text: str) -> Optional[Tuple[int, float, float, float, Optional[float], Optional[float], Optional[float]]]:
     # Successful requests and TPOT metrics
     sr = re.search(r"Successful requests:\s+(\d+)", text)
     mean = re.search(r"Mean TPOT \(ms\):\s+([0-9.]+)", text)
@@ -96,7 +119,22 @@ def extract_metrics(text: str) -> Optional[Tuple[int, float, float, float]]:
     p99 = re.search(r"P99 TPOT \(ms\):\s+([0-9.]+)", text)
     if not (sr and mean and med and p99):
         return None
-    return int(sr.group(1)), float(mean.group(1)), float(med.group(1)), float(p99.group(1))
+    itl_mean_match = re.search(r"Mean ITL \(ms\):\s+([0-9.]+)", text)
+    itl_med_match = re.search(r"Median ITL \(ms\):\s+([0-9.]+)", text)
+    itl_p99_match = re.search(r"P99 ITL \(ms\):\s+([0-9.]+)", text)
+
+    def _to_float(match: Optional[re.Match]) -> Optional[float]:
+        return float(match.group(1)) if match else None
+
+    return (
+        int(sr.group(1)),
+        float(mean.group(1)),
+        float(med.group(1)),
+        float(p99.group(1)),
+        _to_float(itl_mean_match),
+        _to_float(itl_med_match),
+        _to_float(itl_p99_match),
+    )
 
 
 def choose_lengths(ns: Dict[str, str]) -> Tuple[Optional[int], Optional[int], str]:
@@ -138,8 +176,8 @@ def choose_lengths(ns: Dict[str, str]) -> Tuple[Optional[int], Optional[int], st
     return in_len, out_len, dataset
 
 
-def build_row(ns: Dict[str, str], metrics: Tuple[int, float, float, float]) -> Tuple[List[str], Tuple[str, ...]]:
-    succ, mean_tpot, med_tpot, p99_tpot = metrics
+def build_row(ns: Dict[str, str], metrics: Tuple[int, float, float, float, Optional[float], Optional[float], Optional[float]]) -> Tuple[List[str], Tuple[str, ...]]:
+    succ, mean_tpot, med_tpot, p99_tpot, mean_itl, med_itl, p99_itl = metrics
 
     in_len, out_len, dataset = choose_lengths(ns)
     req_rate = ns.get('request_rate', '')
@@ -157,16 +195,22 @@ def build_row(ns: Dict[str, str], metrics: Tuple[int, float, float, float]) -> T
         f"{mean_tpot:.2f}",
         f"{med_tpot:.2f}",
         f"{p99_tpot:.2f}",
+        f"{mean_itl:.2f}" if mean_itl is not None else "",
+        f"{med_itl:.2f}" if med_itl is not None else "",
+        f"{p99_itl:.2f}" if p99_itl is not None else "",
     ]
     key = (row[0], row[1], row[2], row[3], row[4], row[5])
     return row, key
 
 
-def parse_segment(seg: str) -> Optional[Tuple[List[str], Tuple[int, float, float, float], str, Tuple[str, ...]]]:
-    ns_line_match = re.search(r"^Namespace\(.*\)$", seg, flags=re.M)
-    if not ns_line_match:
+MetricTuple = Tuple[int, float, float, float, Optional[float], Optional[float], Optional[float]]
+
+
+def parse_segment(seg: str) -> Optional[Tuple[List[str], MetricTuple, str, Tuple[str, ...]]]:
+    ns_line = _extract_namespace_line(seg)
+    if not ns_line:
         return None
-    ns = parse_namespace(ns_line_match.group(0))
+    ns = parse_namespace(ns_line)
     metrics_start = seg.find("============ Serving Benchmark Result ============")
     if metrics_start == -1:
         return None
@@ -186,7 +230,7 @@ def _concurrency_sort_key(conc: str) -> Tuple[int, str]:
 
 
 def extract_rows(text: str, best_of_rounds: bool = False) -> List[List[str]]:
-    rows_by_key: Dict[Tuple[str, ...], List[Tuple[List[str], Tuple[int, float, float, float]]]] = {}
+    rows_by_key: Dict[Tuple[str, ...], List[Tuple[List[str], MetricTuple]]] = {}
     conc_for_key: Dict[Tuple[str, ...], str] = {}
     round_segments = iter_round_segments(text)
 

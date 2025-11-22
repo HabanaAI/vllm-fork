@@ -1,0 +1,5 @@
+declare -A ROLE_HOST
+declare -A ROLE_IP
+ROLE_HOST[P0]="G16"; ROLE_IP[P1]="localhost"
+ROLE_HOST[D0]="G13"; ROLE_IP[D0]="10.239.15.67"
+ROLE_HOST[D1]="G15"; ROLE_IP[D1]="10.239.15.50"

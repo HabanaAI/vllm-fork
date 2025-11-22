@@ -4,11 +4,8 @@
 # ***************************** DO NOT CHANGE SETTINGS *************************************** #
 
 # system settings
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/libfabric/lib:/usr/lib/habanalabs/:/usr/local/lib/
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}:/usr/lib/habanalabs/:/usr/local/lib/
 export REQUIRED_VERSION=1.22.0
-export LIBFABRIC_ROOT=/opt/libfabric-1.22.0
-export LD_LIBRARY_PATH=$LIBFABRIC_ROOT/lib:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 # HPU settings
 export PT_HPU_LAZY_MODE=1
@@ -38,26 +35,13 @@ block_size=128
 
 # clear envs
 unset VLLM_HPU_LOG_STEP_GRAPH_COMPILATION PT_HPU_METRICS_GC_DETAILS GRAPH_VISUALIZATION
-#<<<<<<< HEAD
-#unset HABANA_PROFILE VLLM_PROFILER_ENABLED VLLM_TORCH_PROFILER_DIR HABANA_PROFILE_WRITE_HLTV
-#=======
-export VLLM_HPU_LOG_STEP_GRAPH_COMPILATION=true
-export PT_HPU_METRICS_GC_DETAILS=1
-#export GRAPH_VISUALIZATION=1
+
 
 #hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on --gaudi2 --merged "hltv,csv"
 #hl-prof-config --use-template profile_api_with_nics  --fuser on --trace-analyzer on
-hl-prof-config --use-template profile_api_with_nics -b 32768 --trace-analyzer on --fuser on --gaudi3 
+hl-prof-config --use-template profile_api_with_nics -b 32768 --trace-analyzer on --fuser on --gaudi3 || true
 
 
-#export HABANA_PROFILE=1
-#export VLLM_PROFILER_ENABLED=full
-#export VLLM_TORCH_PROFILER_DIR=/workspace/
-#export HABANA_PROFILE_WRITE_HLTV=1
-
-#unset VLLM_HPU_LOG_STEP_GRAPH_COMPILATION PT_HPU_METRICS_GC_DETAILS GRAPH_VISUALIZATION
-
-#>>>>>>> kf-fork/deepseek_r1_ww33_kf
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
 unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET_MAX
@@ -68,9 +52,9 @@ unset QUANT_CONFIG VLLM_REQUANT_FP8_INC VLLM_ENABLE_RUNTIME_DEQUANT VLLM_HPU_MAR
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 DEBUG_LOG=1
-DEBUG_GRAPH=0
+DEBUG_GRAPH=1
 DEBUG_PROFILE=0
-INC_FP8=0
+INC_FP8=1
 BENCHMARK_MODE=0
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG END ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
@@ -117,7 +101,6 @@ if [ "$INC_FP8" -eq 1 ]; then
   export VLLM_HPU_MARK_SCALES_AS_CONST=false
 fi
 
-INC_FP8=0
 
 if [ "$INC_FP8" -eq 1 ]; then
   #model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
@@ -125,11 +108,34 @@ if [ "$INC_FP8" -eq 1 ]; then
     model_path=/host/mnt/disk6/hf_models/DeepSeek-R1-G2-inc/
   elif [ "$(hostname)" == "3FG15" ] || [ "$(hostname)" == "3FG16" ]; then
     model_path=/host/mnt/disk2/hf_models/DeepSeek-R1-G2-inc
+  elif [ "$(hostname)" == "G15" ] || [ "$(hostname)" == "G16" ] || [ "$(hostname)" == "G13" ]; then
+    model_path=/host/mnt/ceph1/hf_models/DeepSeek-R1-G2-static
+  elif [ "$(hostname)" == "sys11" ] || [ "$(hostname)" == "sys12" ] \
+  || [ "$(hostname)" == "lnc13" ] || [ "$(hostname)" == "lnc-sys21" ] \
+  || [ "$(hostname)" == "sys22" ] || [ "$(hostname)" == "sys31" ] \
+  || [ "$(hostname)" == "sys32" ] || [ "$(hostname)" == "sys33" ] \
+  || [ "$(hostname)" == "lnc-sys21" ]; then
+    model_path=/host/mnt/kefei/HF_Models/DeepSeek-R1
+  elif [ "$(hostname)" == "skyriver01" ] || [ "$(hostname)" == "skyriver02" ]; then
+    model_path=/host/mnt/disk001/hf_models/DeepSeek-R1
   else
     model_path=/host/mnt/disk001/HF_Models/DeepSeek-R1
   fi
 else
-  model_path=/host/mnt/disk002/HF_Models/DeepSeek-R1-Gaudi3/
+  echo "hostname: $(hostname)"
+  if [ "$(hostname)" == "G15" ] || [ "$(hostname)" == "G16" ] || [ "$(hostname)" == "G13" ]; then
+    model_path=/host/mnt/ceph1/hf_models/DeepSeek-R1-G2-dynamic
+  elif [ "$(hostname)" == "sys11" ] || [ "$(hostname)" == "sys12" ] \
+  || [ "$(hostname)" == "lnc13" ] || [ "$(hostname)" == "lnc-sys21" ] \
+  || [ "$(hostname)" == "sys22" ] || [ "$(hostname)" == "sys31" ] \
+  || [ "$(hostname)" == "sys32" ] || [ "$(hostname)" == "sys33" ] \
+  || [ "$(hostname)" == "lnc-sys21" ]; then
+    model_path=/host/mnt/kefei/HF_Models/DeepSeek-R1-Gaudi3/
+  elif [ "$(hostname)" == "skyriver01" ] || [ "$(hostname)" == "skyriver02" ]; then
+    model_path=/host/mnt/disk001/hf_models/DeepSeek-R1-Gaudi3/
+  else
+    model_path=/host/mnt/disk002/HF_Models/DeepSeek-R1-Gaudi3/
+  fi
 fi
 
 unset QUANT_CONFIG VLLM_REQUANT_FP8_INC VLLM_ENABLE_RUNTIME_DEQUANT VLLM_HPU_MARK_SCALES_AS_CONST

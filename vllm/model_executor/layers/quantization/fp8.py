@@ -994,7 +994,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             s1 = t1.shape
             s2 = t2_int32.shape
             s3 = t3_bf16.shape
-
             # Flatten tensors
             f1 = t1.contiguous().reshape(-1)         # bf16
             f2 = t2_int32.contiguous().reshape(-1)   # int32
@@ -1135,7 +1134,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     x_fp8 = x
 
             batched_tokens = x.shape[0]
-#<<<<<<< HEAD
+
             kwargs = {}
             if self.enable_moe_chunk:
                 chunk_size = self.chunk_size_list[-1]
@@ -1148,13 +1147,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     "total_experts": 256,
                 }
 
-#=======
-#            chunk_size = int(os.environ.get("PT_HPU_MOE_THRESHOLD", 256))
-#            kwargs = {
-#                "chunk_size": chunk_size,
-#                "total_experts": 256,
-#            }
-#>>>>>>> kf-fork/deepseek_r1_ww33_kf
             if batched_tokens > self.moe_slice_length:
                 final_hidden_states_list = []
                 n_slice = (batched_tokens + self.moe_slice_length -
@@ -1285,22 +1277,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 assert not use_partial_experts, "Partial experts not supported with VLLM_REQUANT_FP8_INC"
 
                 if layer.dp_size > 1:
-#<<<<<<< HEAD
-#                    cu_tokens_across_dp_cpu = get_forward_context(
-#                    ).dp_metadata.cu_tokens_across_dp_cpu
-#
-#                    topk_ids_across_dp = get_forward_context(
-#                    ).dp_metadata.topk_ids_across_dp
-#                    topk_ids = layer.multicast_fn(topk_ids.to(torch.int32),
-#                                                cu_tokens_across_dp_cpu,
-#                                                topk_ids_across_dp).long()
-#
-#                    topk_weights_across_dp = get_forward_context(
-#                    ).dp_metadata.topk_weights_across_dp
-#                    topk_weights = layer.multicast_fn(topk_weights,
-#                                                    cu_tokens_across_dp_cpu,
-#                                                    topk_weights_across_dp)
-#=======
                     if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0'):
                         cu_tokens_across_dp_cpu = get_forward_context(
                         ).dp_metadata.cu_tokens_across_dp_cpu

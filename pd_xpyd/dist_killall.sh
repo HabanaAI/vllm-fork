@@ -1,16 +1,23 @@
-#workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-kf/pd_xpyd
-workdir=/host/mnt/ctrl/disk1/kf/vllm-fork-deepseek_r1/pd_xpyd
+#!/usr/bin/env bash
 
-source env.sh
+#set -euo pipefail
 
-echo "Kill on 1P"
-bash ./killall.sh
-sleep 1
-echo ${ROLE_IP[D0]},${ROLE_IP[D1]}
-ssh root@${ROLE_IP[D0]} "cd $workdir; bash ./killall.sh"
+ENV_FILE=${1:-env.sh}
+BASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+source "$BASE_DIR/$ENV_FILE"
 
-sleep 1
-echo "[SSH] Kill on D2 ${ROLE_IP[D1]}"
-ssh root@${ROLE_IP[D1]} "cd $workdir; bash ./killall.sh"
+nodes=(P0 P1 D0 D1 D2 D3)
 
+for node in "${nodes[@]}"; do
+  host_var="ROLE_HOST[$node]"
+  ip_var="ROLE_IP[$node]"
+  host=${ROLE_HOST[$node]:-}
+  ip=${ROLE_IP[$node]:-}
+  if [[ -z $ip ]]; then
+    echo "Skipping $node; ROLE_IP[$node] not set"
+    continue
+  fi
+  echo "Killing on $node host=${host:-unknown} ip=$ip"
+  ssh root@$ip "cd $BASE_DIR; bash ./killall.sh" || echo "Failed to kill on $ip"
+done

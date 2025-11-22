@@ -44,7 +44,8 @@ class MooncakeStoreConfig:
             device = device_names
         elif isinstance(device_names, list):
             rank_id = torch.distributed.get_rank()
-            rank_id = rank_id % 8
+            dev_count = torch.hpu.device_count()
+            rank_id = rank_id % dev_count
             device_name_count = len(device_names)
             if rank_id >= device_name_count:
                 raise ValueError(f"Expect {rank_id + 1} device names, "

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 #set -x
 
 # machine id, EP, TP, DP Index, DP Host IP
@@ -9,33 +10,35 @@ timestamp=$(date +"%Y%m%d_%H%M%S")
 log_dir="xpyd_logs"
 mkdir -p "$log_dir"
 
-export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
-echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
+export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_`hostname`.json
+DECODE_DP_SIZE=$((DECODE_EP_SIZE / DECODE_TP_SIZE))
+DP_RANK=$((CARDS_PER_NODE / DECODE_TP_SIZE))
+if [ -z "${1:-}" ] || ! [[ "$1" =~ ^[0-9]+$ ]]; then
+  echo "Usage: $0 <DP_INDEX (integer)>" >&2
+  exit 1
+fi
+DP_INDEX=$1
 
-EP_SIZE=$2
-echo "EP_SIZE=$EP_SIZE"
-
-TP_SIZE=$3
-echo "TP_SIZE=$TP_SIZE"
-
-DP_SIZE=$((EP_SIZE / TP_SIZE))
-echo "DP_SIZE=$DP_SIZE"
-
-DP_RANK=$((8 / TP_SIZE))
-echo "DP_RANK=$DP_RANK"
-
-DP_INDEX=$4
-echo "DP_INDEX=$DP_INDEX"
-
-DP_HOST_IP=$5
-echo "DP_HOST_IP=$DP_HOST_IP"
-
-export VLLM_DP_SIZE=$DP_SIZE
-export VLLM_DP_MASTER_IP=$DP_HOST_IP
-export VLLM_EP_SIZE=$EP_SIZE
+echo "============================================================"
+echo "                 [ DP Start Decode CONFIG ]                "
+echo "============================================================"
+echo "🌙 MOONCAKE_CONFIG_PATH : $MOONCAKE_CONFIG_PATH"
+echo "🔢 DECODE_EP_SIZE       : $DECODE_EP_SIZE"
+echo "🔢 DECODE_TP_SIZE       : $DECODE_TP_SIZE"
+echo "🔢 DECODE_DP_SIZE       : $DECODE_DP_SIZE"
+echo "💻 CARDS_PER_NODE       : $CARDS_PER_NODE"
+echo "🏅 DP_RANK              : $DP_RANK"
+echo "🆔 DP_INDEX             : $DP_INDEX"
+echo "🌐 DP_MASTER_IP         : $DP_MASTER_IP"
+echo "============================================================"
 
 
-if [ "$DP_SIZE" -eq 1 ]; then
+export VLLM_DP_SIZE=$DECODE_DP_SIZE
+export VLLM_DP_MASTER_IP=$DP_MASTER_IP
+export VLLM_EP_SIZE=$DECODE_EP_SIZE
+
+
+if [ "$DECODE_DP_SIZE" -eq 1 ]; then
   unset VLLM_DP_SIZE
   unset VLLM_DP_MASTER_IP
   unset VLLM_DP_MASTER_PORT
@@ -49,18 +52,102 @@ else
   echo "<decode>it's bf16 kv cache mode"
 fi
 
-#<<<<<<< HEAD
-#=======
-export VLLM_TORCH_PROFILER_DIR=./profiles
-export VLLM_PROFILER_ENABLED=true
-export VLLM_PROFILE_CONFIG_PATH=profile_config.json
-export HABANA_PROFILE_WRITE_HLTV=1
-export HABANA_PROFILE=profile_api_with_nics
+#export VLLM_TORCH_PROFILER_DIR=./profiles
+#export VLLM_PROFILER_ENABLED=true
+#export VLLM_PROFILE_CONFIG_PATH=profile_config.json
+#export HABANA_PROFILE_WRITE_HLTV=1
+#export HABANA_PROFILE=profile_api_with_nics
 #export HABANA_PROFILE=profile_api
-
 
 # Control whether to apply numactl bindings (1=enable, 0=disable)
 NUMACTL_ENABLED=${VLLM_USE_NUMACTL:-1}
+
+# Optional blacklist of CPUs (comma-separated list of cores or ranges).
+# Example: export VLLM_CPU_BLACKLIST="0-3,120-123"
+export VLLM_CPU_BLACKLIST="110-129,350-369"
+CPU_BLACKLIST_RAW=${VLLM_CPU_BLACKLIST:-}
+
+expand_cpu_list() {
+  local raw_list=$1
+  local part start end
+  IFS=',' read -r -a parts <<< "$(echo "$raw_list" | tr -d ' ')"
+  for part in "${parts[@]}"; do
+    if [[ -z "$part" ]]; then
+      continue
+    fi
+    if [[ $part =~ ^([0-9]+)-([0-9]+)$ ]]; then
+      start=${BASH_REMATCH[1]}
+      end=${BASH_REMATCH[2]}
+      for ((cpu=start; cpu<=end; cpu++)); do
+        printf '%s\n' "$cpu"
+      done
+    elif [[ $part =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$part"
+    fi
+  done
+}
+
+apply_cpu_blacklist() {
+  local cpu_list=$1
+  if [[ -z "$CPU_BLACKLIST_RAW" || -z "$cpu_list" ]]; then
+    printf '%s' "$cpu_list"
+    return
+  fi
+
+  # Build blacklist set
+  declare -A blacklist_set=()
+  while read -r bl_cpu; do
+    [[ -z "$bl_cpu" ]] && continue
+    blacklist_set[$bl_cpu]=1
+  done < <(expand_cpu_list "$CPU_BLACKLIST_RAW")
+
+  # Filter whitelist
+  mapfile -t whitelist < <(expand_cpu_list "$cpu_list")
+  if [[ ${#whitelist[@]} -eq 0 ]]; then
+    printf ''
+    return
+  fi
+
+  local filtered=()
+  for cpu in "${whitelist[@]}"; do
+    if [[ -z ${blacklist_set[$cpu]+_} ]]; then
+      filtered+=("$cpu")
+    fi
+  done
+
+  if [[ ${#filtered[@]} -eq 0 ]]; then
+    printf ''
+    return
+  fi
+
+  local out=""
+  local start=${filtered[0]}
+  local prev=$start
+  local idx cur
+
+  for ((idx=1; idx<${#filtered[@]}; idx++)); do
+    cur=${filtered[$idx]}
+    if (( cur == prev + 1 )); then
+      prev=$cur
+      continue
+    fi
+    if (( start == prev )); then
+      out+="$start,"
+    else
+      out+="$start-$prev,"
+    fi
+    start=$cur
+    prev=$cur
+  done
+
+  if (( start == prev )); then
+    out+="$start"
+  else
+    out+="$start-$prev"
+  fi
+
+  printf '%s' "$out"
+}
 
 # Build CPU/NUMA bindings from hl-smi topology if available
 if command -v hl-smi >/dev/null 2>&1; then
@@ -91,7 +178,6 @@ if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
   done
 fi
 
-#>>>>>>> kf-fork/deepseek_r1_ww33_kf
 for ((i=0; i<$DP_RANK; i++))
 do
   RANK=$((DP_INDEX * DP_RANK + i))
@@ -103,6 +189,14 @@ do
   MEM_BIND_VAR="MEM_BIND_${MOD_ID}"
   CPU_BIND="${!CPU_BIND_VAR}"
   MEM_BIND="${!MEM_BIND_VAR}"
+
+  if [ -n "$CPU_BIND" ]; then
+    CPU_BIND=$(apply_cpu_blacklist "$CPU_BIND")
+    if [ -z "$CPU_BIND" ]; then
+      echo "[WARN] CPU binding for module ${MOD_ID} became empty after applying blacklist. Disabling numactl for this rank." >&2
+      NUMACTL_ENABLED=0
+    fi
+  fi
 
   # Optional: split CPU binding into non-overlapping subgroups per module
   # Enable with VLLM_SPLIT_CPU_BIND=1. Assumes CPU_BIND has comma-separated
@@ -156,14 +250,14 @@ do
     fi
     unset __cpu_chunks __num_chunks
   fi
-
+  
   CMD=(
     python3 -m vllm.entrypoints.openai.api_server
     --model "$model_path"
     --port "$port"
     --max-model-len "$model_len"
     --gpu-memory-utilization "$VLLM_GPU_MEMORY_UTILIZATION"
-    -tp "$TP_SIZE"
+    -tp "$DECODE_TP_SIZE"
     --max-num-seqs "$max_num_seqs"
     --trust-remote-code
     --disable-log-requests
@@ -171,7 +265,6 @@ do
     --use-padding-aware-scheduling
     --use-v2-block-manager
     --distributed_executor_backend mp
-#<<<<<<< HEAD
 #    --enable-reasoning
 #    --reasoning-parser deepseek_r1
 #    --preemption-mode swap
@@ -183,7 +276,6 @@ do
 #  if [ -n "$XPYD_LOG" ]; then
 #    timestamp=$(date +"%Y%m%d_%H%M%S")
 #    log_file="$XPYD_LOG/log_rank${RANK}_${timestamp}.log"
-#=======
     $kv_cache_dtype_arg
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
@@ -193,36 +285,17 @@ do
     echo "MEM_BIND: $MEM_BIND"
     echo "HLS_MODULE_ID: $MOD_ID"
     echo "DP_RANK: $RANK"
-#>>>>>>> kf-fork/deepseek_r1_ww33_kf
   fi
 
   extra_env=()
-#  if [ "$i" -eq 0 ] && [ "$RANK" -eq 0 ]; then
-#    extra_env+=(VLLM_PROFILER_ENABLED=true)
-#  fi
 
   # Execute command
   if [ "$DP_RANK" -ne 1 ]; then
-#<<<<<<< HEAD
-#    if [ -n "$XPYD_LOG" ]; then
-#      echo "env VLLM_DP_RANK=$RANK ${CMD[*]} (logging to $log_file)"
-#      env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${extra_env[@]}" "${CMD[@]}" 2>&1 | tee "$log_file" &
-#    else
-#      echo "env VLLM_DP_RANK=$RANK ${CMD[*]} (no logging)"
-#      env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${extra_env[@]}" "${CMD[@]}" &
-#    fi
-#  else
-#    if [ -n "$XPYD_LOG" ]; then
-#      echo "${CMD[*]} (logging to $log_file)"
-#      "${CMD[@]}" 2>&1 | tee "$log_file" &
-#    else
-#      echo "${CMD[*]} (no logging)"
-#=======
     if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
       echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]}"
       env HLS_MODULE_ID="$MOD_ID" VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" 2>&1 | tee "$log_file" &
     else
-      echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK ${CMD[*]}"
+      echo "VLLM_DP_RANK_LOCAL=$i VLLM_DP_RANK=$RANK ${CMD[*]}"
       env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" 2>&1 | tee "$log_file" &
     fi
   else
@@ -231,7 +304,6 @@ do
       env HLS_MODULE_ID="$MOD_ID" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" &
     else
       echo "${CMD[*]}"
-#>>>>>>> kf-fork/deepseek_r1_ww33_kf
       "${CMD[@]}" &
     fi
   fi

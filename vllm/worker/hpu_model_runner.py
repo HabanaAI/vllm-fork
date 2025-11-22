@@ -3252,7 +3252,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 sync_recv_kv_caches(model, model_input,
                                                     attn_metadata, kv_caches)
                         now = time.time()
-                        logger.info("KV transfer recv time: %s", now - cur_time)
+                        rank = (torch.distributed.get_rank()
+                                if torch.distributed.is_initialized() else -1)
+                        logger.info("KV transfer recv time: %.3f s (rank=%s pid=%s)",
+                                    now - cur_time, rank, os.getpid())
                     
                     profiler_args = {
                         'real_seq_len': model_input.seq_lens,
@@ -3383,12 +3386,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 event.synchronize()
                                 now = time.time()
                                 logger.info("event sync time: %s", now - cur_time)
-                            #for tsr in input_tokens_list:
-                            #    _ = tsr.sum().item()
-                            #for tsr in kv_caches_send_list:
-                            #    _ = tsr.sum().item()
-                            #for tsr in hidden_states_list:
-                            #    _ = tsr.sum().item()
+                            # INSERT_YOUR_CODE
+                            #for i, kv_cache in enumerate(kv_caches_send_list):
+                            #    print(f"kv_caches_send_list[{i}] shape: {kv_cache.shape}")
                             get_kv_transfer_group(
                             ).send_kv_caches_and_hidden_states_cpu(
                                 input_tokens_list, kv_caches_send_list,

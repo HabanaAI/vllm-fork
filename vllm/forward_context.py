@@ -129,7 +129,6 @@ def set_forward_context(attn_metadata: Any,
             topk_weights_across_dp = torch.empty((batchsize * dp_size, num_experts_per_tok),\
                 device=device, dtype=router_logits_dtype)
 #=======
-            hidden_states_dtype = torch.float8_e4m3fn if activation_scheme == "static" else router_logits_dtype
             hidden_states_across_dp = None
             topk_ids_across_dp = None
             topk_weights_across_dp = None

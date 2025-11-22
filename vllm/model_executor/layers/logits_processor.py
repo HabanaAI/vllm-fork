@@ -52,7 +52,7 @@ class LogitsProcessor(nn.Module):
         self.soft_cap = soft_cap
         # Whether to use gather or all-gather to gather the logits.
         parallel_config = get_current_vllm_config().parallel_config
-        self.use_all_gather = current_platform.is_tpu() \
+        self.use_all_gather = current_platform.is_tpu() or current_platform.is_hpu() \
             or envs.VLLM_USE_V1 \
             or parallel_config.distributed_executor_backend == "external_launcher" # noqa
 

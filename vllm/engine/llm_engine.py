@@ -1873,7 +1873,8 @@ class LLMEngine:
             # Debug print for tracking profiler start conditions
             if rank_allowed and role_allowed:
                 batch_type = "D" if is_decode_batch else "P"
-                if current_rank == 0:
+                #if current_rank == 0:
+                if False:
                     print(
                         f"[Profiler Debug] Checking start conditions (batch_type={batch_type}): "
                         f"target_inflight={target_inflight}, "
@@ -1907,6 +1908,8 @@ class LLMEngine:
             else:
                 instance._profile_waiting_for_prompt_run = False
                 d_ok = block_condition_ok
+            if want_d and not is_decode_batch:
+                d_ok = False
             p_ok = True  # no block-size gating for P
             start_allowed = False
             if is_disagg:
