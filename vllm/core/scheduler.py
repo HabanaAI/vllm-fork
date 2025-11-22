@@ -431,6 +431,16 @@ class Scheduler:
         need_fetch_kv: bool = False,
     ) -> None:
         self.scheduler_config = scheduler_config
+
+        overwrite = bool(
+            int(os.environ.get("VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL", 0))
+        )
+        if overwrite != self.scheduler_config.use_padding_aware_scheduling:
+            self.scheduler_config.use_padding_aware_scheduling = overwrite
+            logger.warning(
+                "<scheduler> use_padding_aware_scheduling is overwrited to %s",
+                self.scheduler_config.use_padding_aware_scheduling)
+
         self.cache_config = cache_config
         # Note for LoRA scheduling: the current policy is extremely
         # simple and NOT fair. It can lead to starvation of some
@@ -1219,6 +1229,11 @@ class Scheduler:
                 max_prefill_seq_len = max(
                     [seq.get_num_new_tokens() for seq in seq_group.get_seqs()])
                 can_schedule_kwargs['is_prefill'] = True
+                if (self.scheduler_config.chunked_prefill_enabled and
+                        self.scheduler_config.prefill_chunk_size):
+                    max_prefill_seq_len = min(
+                            max_prefill_seq_len, self.scheduler_config.prefill_chunk_size
+                    )
                 can_schedule_kwargs['max_seq_len'] = max_prefill_seq_len
             if (num_new_tokens_uncached == 0
                     or not budget.can_schedule(**can_schedule_kwargs)):
@@ -1399,10 +1414,17 @@ class Scheduler:
         inter token latency because decodes requests don't need to be blocked
         by prefill requests.
         """
-        budget = SchedulingBudget(
-            token_budget=self.scheduler_config.max_num_batched_tokens,
-            max_num_seqs=self.scheduler_config.max_num_seqs,
+        if self.scheduler_config.use_padding_aware_scheduling:
+            budget = PaddingAwareSchedulingBudget(
+                token_budget=self.scheduler_config.max_num_batched_tokens,
+                max_num_seqs=self.scheduler_config.max_num_seqs,
+                max_num_prefill_seqs=self.scheduler_config.max_num_prefill_seqs
         )
+        else:
+            budget = SchedulingBudget(
+                token_budget=self.scheduler_config.max_num_batched_tokens,
+                max_num_seqs=self.scheduler_config.max_num_seqs,
+            )
         curr_loras: Set[int] = set()
 
         prefills = SchedulerPrefillOutputs.create_empty()
