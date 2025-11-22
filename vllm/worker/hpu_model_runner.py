@@ -1333,6 +1333,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ctx = seq_group_metadata_list[0].computed_block_nums
         ctx = 0 if ctx is None else sum(ctx)
         batch_size_padded = real_batch_size
+
         if is_prompt:
             first_key = next(iter(seq_group_metadata_list[0].seq_data))
             seq_len = len(seq_group_metadata_list[0].seq_data[first_key].
@@ -1365,7 +1366,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     seq_group_metadata.sampling_params.temperature == 0.0
                     for seq_group_metadata in seq_group_metadata_list)
                 temperature = 0.0 if has_greedy_samples else 1.0
-            logger.info(f"libin debug greedy {has_greedy_samples=}")
+
             dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
                 -1, 0, is_prompt, temperature=temperature)
             seq_group_metadata_list.extend(dummy_seq_group_metadata
@@ -1796,6 +1797,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               pad=0,
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
+
         image_index_tensor = None
         if self.model_is_mrope:
             input_positions = \
@@ -1843,6 +1845,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         num_seqs = self.max_num_prefill_seqs \
             if self.use_merged_prefill else real_num_seqs
+        
         seq_lens_tensor = make_cpu_tensor([seq_lens],
                                           max_len=num_seqs,
                                           pad=0,
@@ -2142,11 +2145,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
-
+        ori_len = len(block_list)
+        #if ori_len == 520 or ori_len == 123 or ori_len ==400 or ori_len == 41 or ori_len == 287:
+            #import remote_pdb;remote_pdb.set_trace()
         block_list = padding_fn(block_list, _PAD_BLOCK_ID)
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
-
+        logger.info(f"libin debug decode block_list padding {len(block_list) - ori_len} {ori_len=} {len(block_list)=}")
         if self.interleaved_sliding_window is not None:
             window_block_list = window_padding_fn(window_block_list,
                                                   _PAD_BLOCK_ID)
@@ -2193,6 +2198,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     batch_size_padded = align_tp_groups(
                         batch_size_padded, torch.distributed.ReduceOp.MAX)
             batch_size_padding = batch_size_padded - real_batch_size
+
             if batch_size_padding > 0:
                 encoder_seq_lens.extend(encoder_seq_lens[0]
                                         for _ in range(batch_size_padding))
@@ -2532,7 +2538,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             batch_type = BatchType.PREFILL
         else:
             batch_type = BatchType.DECODE
-
+        logger.info(f"libin debug prepare_input {batch_type=} {batch_size_padded=} {real_batch_size=}")
         metadata_dict = {
             "input_tokens": input_tokens,
             "input_positions": input_positions,
@@ -2856,7 +2862,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
         multi_modal_data = MultiModalKwargs(multi_modal_data)
-
+        logger.info(f"gre{sampling_params}")
         seq_group = SequenceGroupMetadata(
             request_id=str(group_id),
             is_prompt=True,
@@ -2875,14 +2881,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         is_prompt,
                                         lora_request=None,
                                         img_args=None,
-                                        temperature=0,
-                                        presence_penalty=0.0,
+                                        temperature=1.0,
+                                        repetition_penalty=1.0,
                                         ctx=0):
         if self.is_pooler:
             sampling_params = None
         else:
             sampling_params = SamplingParams(temperature=temperature,
-                                             presence_penalty=presence_penalty,)
+                                             repetition_penalty=repetition_penalty)
         num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
         computed_block_nums = None
@@ -3039,8 +3045,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ]
         self.profiler.start('internal', scenario_name)
         times = num_iters if use_graphs or is_pt_profiler_run else 1
-        presence_penalty = 1.0 if os.getenv('VLLM_WARMUP_WITH_PENALTY',
-                                            '0') == '1' else 0.0
+        repetition_penalty = float(os.getenv('VLLM_WARMUP_WITH_PENALTY_GREEDY','1.0'))
+        temperature = 0.0 if os.getenv('VLLM_WARMUP_WITH_PENALTY_GREEDY') is not None else 1.0
 
         if is_prompt:
             seqs = [
@@ -3052,7 +3058,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     if dummy_lora_requests_per_seq else None,
                     img_args=img_args,
                     temperature=temperature,
-                    presence_penalty=presence_penalty,
+                    repetition_penalty=repetition_penalty,
                     ctx=ctx) for i in range(batch_size)
             ]
         else:
@@ -3066,7 +3072,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature,
-                    presence_penalty=presence_penalty,
+                    repetition_penalty=repetition_penalty,
                     ctx=ctx) for i, b in enumerate(blocks)
             ]
         if not is_dummy_run:
@@ -4084,6 +4090,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                  f'seq{seq_len}_'
                                                  f'ctx{ctx_blocks}'),
                                                 args=profiler_args):
+                    #logger.info(f"libin debug sampler (o.shape) if isinstance(o, torch.Tensor) ") for o in sampling_metadata
                     output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
