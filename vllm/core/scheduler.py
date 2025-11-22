@@ -1237,7 +1237,6 @@ class Scheduler:
                 can_schedule_kwargs['max_seq_len'] = max_prefill_seq_len
             if (num_new_tokens_uncached == 0
                     or not budget.can_schedule(**can_schedule_kwargs)):
-                print("break!!! num_new_tokens_uncached=", num_new_tokens_uncached)
                 break
 
             # Can schedule this request.
