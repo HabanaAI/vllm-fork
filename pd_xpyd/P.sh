@@ -32,6 +32,9 @@ fi
 echo "ENV_FILE=$ENV_FILE"
 source "$ENV_FILE"
 
+# This is to avoid open file soft limit
+ulimit -S -n 65536
+
 echo "=============================================="
 for var in $(compgen -A variable | grep '^USR_'); do
   echo "$var=${!var}"

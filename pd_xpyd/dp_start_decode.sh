@@ -61,7 +61,6 @@ fi
 
 # Control whether to apply numactl bindings (1=enable, 0=disable)
 NUMACTL_ENABLED=${VLLM_USE_NUMACTL:-1}
-
 # Optional blacklist of CPUs (comma-separated list of cores or ranges).
 # Example: export VLLM_CPU_BLACKLIST="0-3,120-123"
 export VLLM_CPU_BLACKLIST="110-129,350-369"
@@ -173,7 +172,12 @@ fi
 if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
   echo "[DEBUG] hl-smi topo -c -N output:"
   hl-smi topo -c -N | sed 's/^/[DEBUG] /'
-  for mid in 0 1 2 3 4 5 6 7; do
+  # Extract module IDs dynamically from hl-smi output
+  MODULE_IDS=$(hl-smi topo -c -N | awk '
+    NR<=2 { next }                                  # skip headers
+    $1 ~ /^[0-9]+$/ { print $1 }                    # extract module IDs
+  ' | sort -n | tr '\n' ' ')
+  for mid in $MODULE_IDS; do
     eval "echo [DEBUG] MOD $mid CPU_BIND=\${CPU_BIND_$mid} MEM_BIND=\${MEM_BIND_$mid}"
   done
 fi
@@ -184,7 +188,7 @@ do
   port=$((8200 + i))
 
   # Derive Habana module id for this rank and bind to the corresponding NUMA/CPU
-  MOD_ID=$((RANK % 8))
+  MOD_ID=$((i % 16))
   CPU_BIND_VAR="CPU_BIND_${MOD_ID}"
   MEM_BIND_VAR="MEM_BIND_${MOD_ID}"
   CPU_BIND="${!CPU_BIND_VAR}"

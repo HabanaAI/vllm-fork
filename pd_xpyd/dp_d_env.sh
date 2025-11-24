@@ -14,6 +14,15 @@ if [ "${PLATFORM_TYPE}" = "SEDV" ]; then
   export CONGESTION_CONTROL_ENABLE=1
   #export EXP_FLAGS=1
   #export CONGESTION_WINDOW=8 #32 or 16 or 32
+elif [ "${PLATFORM_TYPE}" = "WB" ]; then
+  echo "WB platform type detected"
+  export HCL_HLS3RACK_NUM_DEVICES=16
+  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=16
+  export HLS3_RACK_SCALEOUT_PORT_MASK=0
+  dev_name=`ip -o addr show | grep -E "inet 10\.240\." | awk '{print $2}'`
+  export GLOO_SOCKET_IFNAME=$dev_name
+  export ENABLE_EXPERIMENTAL_FLAGS=true
+  export CONGESTION_CONTROL_ENABLE=1
 elif [ "${PLATFORM_TYPE}" = "SKYRIVERV3" ]; then
   echo "SKYRIVERV3 platform type detected"
   export HCL_HLS3RACK_NUM_DEVICES=16
@@ -32,7 +41,7 @@ export VLLM_GRAPH_RESERVED_MEM=0.3
 # Enable packed allgather optimization
 export ENABLE_PACKED_ALLGATHER=1
 export SHARED_EXPERT_DISPOSITION=0
-export VLLM_USE_NUMACTL=0
+export VLLM_USE_NUMACTL=1
 export VLLM_SPLIT_CPU_BIND=0
 export VLLM_DEBUG_TOPO=1
 export VLLM_USE_ASYNC_RECV_KV_CACHES_OPT=0
