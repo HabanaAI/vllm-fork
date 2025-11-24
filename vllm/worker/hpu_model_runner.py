@@ -3045,8 +3045,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ]
         self.profiler.start('internal', scenario_name)
         times = num_iters if use_graphs or is_pt_profiler_run else 1
-        repetition_penalty = float(os.getenv('VLLM_WARMUP_WITH_PENALTY_GREEDY','1.0'))
-        temperature = 0.0 if os.getenv('VLLM_WARMUP_WITH_PENALTY_GREEDY') is not None else 1.0
+        repetition_penalty = float(os.getenv('VLLM_WARMUP_WITH_PENALITY_GREEDY','1.0'))
+        temperature = 0.0 if os.getenv('VLLM_WARMUP_WITH_PENALITY_GREEDY') is not None else 1.0
 
         if is_prompt:
             seqs = [
