@@ -85,7 +85,7 @@ from vllm.worker.model_runner_base import (
     _add_sampling_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict,
     _init_sampling_metadata_from_tensor_dict)
-
+from habana_frameworks.torch.hpu.metrics import metric_global
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
 
@@ -3100,6 +3100,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             context_size=seq_len if is_prompt else 1,
                             dtype=self.model_config.dtype,
                             device=self.device)
+
                 self.execute_model(inputs,
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
@@ -3111,6 +3112,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
                                              is_last_step=False)
+
                 self.execute_model(inputs,
                                    kv_caches,
                                    warmup_mode=True,
@@ -3896,7 +3898,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
-            if num_steps > 1 or use_delayed_sampling:
+            if num_steps > 1 or use_delayed_sampling or warmup_mode:
                 # in case of multi-step scheduling
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
@@ -4074,6 +4076,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                        sampling_metadata)
                 if self.do_mark_step:
                     htorch.core.mark_step()
+
+
+                    gc_metric = metric_global("graph_compilation")
+
+                    logger.info(f"libin debug before sample gc metrics {gc_metric.stats()=}")
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
@@ -4110,6 +4117,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_inputs.append(model_input)
                 if self.do_mark_step:
                     htorch.core.mark_step()
+                    gc_metric = metric_global("graph_compilation")
+
+                    print(f"libin debug after sample gc metrics {gc_metric.stats()=}")
                 if hasattr(self.model.sampler, '_sampling_tensors') and \
                     self.model.sampler._sampling_tensors is not None and \
                     self.model.sampler._do_penalties:
