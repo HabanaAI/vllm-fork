@@ -52,7 +52,7 @@ unset QUANT_CONFIG VLLM_REQUANT_FP8_INC VLLM_ENABLE_RUNTIME_DEQUANT VLLM_HPU_MAR
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 DEBUG_LOG=1
-DEBUG_GRAPH=1
+DEBUG_GRAPH=0
 DEBUG_PROFILE=0
 INC_FP8=1
 BENCHMARK_MODE=0
