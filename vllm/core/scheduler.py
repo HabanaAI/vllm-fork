@@ -431,6 +431,17 @@ class Scheduler:
         need_fetch_kv: bool = False,
     ) -> None:
         self.scheduler_config = scheduler_config
+        self.in_chunked_status = False
+
+        overwrite = bool(
+            int(os.environ.get("VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL", 0))
+        )
+        if overwrite != self.scheduler_config.use_padding_aware_scheduling:
+            self.scheduler_config.use_padding_aware_scheduling = overwrite
+            logger.warning(
+                "<scheduler> use_padding_aware_scheduling is overwrited to %s",
+                self.scheduler_config.use_padding_aware_scheduling)
+
         self.cache_config = cache_config
         # Note for LoRA scheduling: the current policy is extremely
         # simple and NOT fair. It can lead to starvation of some
@@ -1219,6 +1230,12 @@ class Scheduler:
                 max_prefill_seq_len = max(
                     [seq.get_num_new_tokens() for seq in seq_group.get_seqs()])
                 can_schedule_kwargs['is_prefill'] = True
+                if (self.scheduler_config.chunked_prefill_enabled and
+                        self.scheduler_config.prefill_chunk_size):
+                    max_prefill_seq_len = min(
+                            max_prefill_seq_len, self.scheduler_config.prefill_chunk_size
+                    )
+
                 can_schedule_kwargs['max_seq_len'] = max_prefill_seq_len
             if (num_new_tokens_uncached == 0
                     or not budget.can_schedule(**can_schedule_kwargs)):
@@ -1399,10 +1416,17 @@ class Scheduler:
         inter token latency because decodes requests don't need to be blocked
         by prefill requests.
         """
-        budget = SchedulingBudget(
-            token_budget=self.scheduler_config.max_num_batched_tokens,
-            max_num_seqs=self.scheduler_config.max_num_seqs,
+        if self.scheduler_config.use_padding_aware_scheduling:
+            budget = PaddingAwareSchedulingBudget(
+                token_budget=self.scheduler_config.max_num_batched_tokens,
+                max_num_seqs=self.scheduler_config.max_num_seqs,
+                max_num_prefill_seqs=self.scheduler_config.max_num_prefill_seqs
         )
+        else:
+            budget = SchedulingBudget(
+                token_budget=self.scheduler_config.max_num_batched_tokens,
+                max_num_seqs=self.scheduler_config.max_num_seqs,
+            )
         curr_loras: Set[int] = set()
 
         prefills = SchedulerPrefillOutputs.create_empty()
@@ -2006,23 +2030,33 @@ class Scheduler:
             # Chunk if a running request cannot fit in the given budget.
             # If number of seq > 1, it means it is doing beam search
             # in a decode phase. Do not chunk.
+            def has_been_chunked(seq):
+                num_prefilled = seq.get_num_computed_tokens()
+                chunked = seq.read_offset > 0 or seq.prefix_offset > 0 or num_prefilled > 0
+
+                return chunked
+
+            is_chunked = has_been_chunked(seq)
+
             num_uncached_new_tokens = self._chunk_new_tokens_to_schedule(
                 self.scheduler_config,
                 self.cache_config,
                 budget,
                 self._get_prompt_limit(seq_group),
                 num_uncached_new_tokens,
+                is_chunked,
             )
 
         return num_uncached_new_tokens, num_cached_new_tokens
 
-    @staticmethod
     def _chunk_new_tokens_to_schedule(
+        self,
         scheduler_config: SchedulerConfig,
         cache_config: CacheConfig,
         budget: SchedulingBudget,
         prompt_limit: int,
         num_new_tokens: int,
+        is_chunked=False
     ) -> int:
         """
         Chunks the number of new tokens to schedule based on the budget when
@@ -2085,10 +2119,14 @@ class Scheduler:
             assert scheduler_config.prefill_chunk_size % block_size == 0
             if remaining_token_budget >= scheduler_config.prefill_chunk_size:
                 remaining_token_budget = scheduler_config.prefill_chunk_size
+                if is_chunked:
+                    self.in_chunked_status = True
+                else:
+                    self.in_chunked_status = False
             else:
                 # If we sequence has to be chunked, we make sure the context
                 # blocks are multiple of prefill_chunk_size
-                if num_new_tokens > remaining_token_budget:
+                if (num_new_tokens > remaining_token_budget) or self.in_chunked_status:
                     remaining_token_budget = 0
         num_new_tokens = min(num_new_tokens, remaining_token_budget)
 
