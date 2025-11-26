@@ -213,6 +213,7 @@ class GptOssModel(nn.Module):
             self.config.vocab_size,
             self.config.hidden_size,
         )
+        self.config.num_hidden_layers = 1
         self.layers = torch.nn.ModuleList([
             TransformerBlock(
                 self.config,
@@ -536,6 +537,8 @@ class GptOssForCausalLM(nn.Module):
                     gate_weight = narrow_weight[:, :, 0::2]
                     up_weight = narrow_weight[:, :, 1::2]
                     narrow_weight = torch.cat([gate_weight, up_weight], dim=2)
+                if new_name not in params_dict:
+                    continue
                 param = params_dict[new_name]
 
                 param.copy_(narrow_weight)
@@ -551,6 +554,8 @@ class GptOssForCausalLM(nn.Module):
                 else:
                     narrow_weight = weight[:, tp_rank_start:tp_rank_end, :]
                 narrow_weight.contiguous()
+                if new_name not in params_dict:
+                    continue
                 param = params_dict[new_name]
 
                 param.copy_(narrow_weight)
@@ -571,6 +576,8 @@ class GptOssForCausalLM(nn.Module):
                     gate_bias = narrow_weight[:, 0::2]
                     up_bias = narrow_weight[:, 1::2]
                     narrow_weight = torch.cat([gate_bias, up_bias], dim=1)
+                if new_name not in params_dict:
+                    continue
                 param = params_dict[new_name]
 
                 param.copy_(narrow_weight)
@@ -586,12 +593,16 @@ class GptOssForCausalLM(nn.Module):
                     # (only load on rank 0 to avoid duplication)
                     if tp_rank != 0:
                         weight.zero_()
+                if new_name not in params_dict:
+                    continue
                 param = params_dict[new_name]
                 param.copy_(weight)
                 loaded_params.add(new_name)
             elif "sinks" in name:
                 # Handle attention sinks (distributed across ranks)
                 name = name.replace("self_attn", "attn")
+                if name not in params_dict:
+                    continue
                 param = params_dict[name]
                 narrow_weight = weight.narrow(0, head_start, heads_per_rank)
                 param.data.copy_(narrow_weight)
@@ -601,6 +612,8 @@ class GptOssForCausalLM(nn.Module):
                             "k" if "k_proj" in name else "v")
                 name = name.replace("self_attn", "attn")
                 param_name = name.replace(f"{shard_id}_proj", "qkv")
+                if new_name not in params_dict:
+                    continue
                 param = params_dict[param_name]
                 weight_loader = param.weight_loader
                 weight_loader(param, weight, loaded_shard_id=shard_id)
@@ -609,6 +622,8 @@ class GptOssForCausalLM(nn.Module):
                 # Handle all other weights with potential renaming
 
                 renamed_name = maybe_rename(name)
+                if renamed_name not in params_dict:
+                    continue
                 if renamed_name not in params_dict:
                     continue
                 param = params_dict[renamed_name]

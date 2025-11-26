@@ -254,6 +254,7 @@ if __name__ == "__main__":
         distributed_executor_backend = "ray"
     if args.ep_size > 1:
         param["enable_expert_parallel"] = True
+    # param["quantization"] = "inc"
     if args.tp_size == 1:
         llm = LLM(
             model=model, 
