@@ -405,7 +405,7 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
       - batch size max (`VLLM_PROMPT_BS_BUCKET_MAX`): `min(max_num_seqs, 64)`
       - sequence length min (`VLLM_PROMPT_SEQ_BUCKET_MIN`): `block_size`
       - sequence length step (`VLLM_PROMPT_SEQ_BUCKET_STEP`): `block_size`
-      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `max_model_len`
+      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `input_tokens` (or `max_model_len` if maximum input token size is not known)
 
     - Decode:
 
@@ -418,7 +418,7 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
   - Recommended Values:
     - Prompt:
 
-      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `input_tokens + output_tokens` rounded up to a multiple of `block_size` (especially recommended for models with high max_model_len)
+      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `input_tokens + output_tokens` rounded up to a multiple of `block_size` (especially recommended for models with high `max_model_len`)
     - Decode:
 
       - block size max (`VLLM_DECODE_BLOCK_BUCKET_MAX`): `max(128, (max_num_seqs*max_model_len/block_size)`
