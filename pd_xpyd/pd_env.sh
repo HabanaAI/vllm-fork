@@ -24,11 +24,11 @@ export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1
 export VLLM_RAY_DISABLE_LOG_TO_DRIVER="1"
 export VLLM_MLA_DISABLE_REQUANTIZATION=0
 export VLLM_MOE_N_SLICE=8
-export VLLM_EP_SIZE=8
+#export VLLM_EP_SIZE=8
 export VLLM_DELAYED_SAMPLING="false"
 export VLLM_MLA_PERFORM_MATRIX_ABSORPTION=0
 export VLLM_ENGINE_ITERATION_TIMEOUT_S=600
-export VLLM_USE_ASYNC_TRANSFER_IN_PD=0
+export VLLM_USE_ASYNC_TRANSFER_IN_PD=1
 export VLLM_ENGINE_ITERATION_TIMEOUT_S=600
 
 block_size=128
@@ -48,6 +48,17 @@ unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET
 unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
 unset QUANT_CONFIG VLLM_REQUANT_FP8_INC VLLM_ENABLE_RUNTIME_DEQUANT VLLM_HPU_MARK_SCALES_AS_CONST
 
+# mooncake rdma setting
+# Only set MC_MS_AUTO_DISC=0 when mooncake-transfer-engine version is 0.3.6 or higher
+mooncake_version="$(python3 -c 'import importlib.metadata; print(importlib.metadata.version("mooncake-transfer-engine"))' 2>/dev/null)"
+if [ -n "$mooncake_version" ]; then
+    # Use python -c to compare versions for improved readability
+    is_ge=$(python3 -c "from packaging import version; import sys; sys.exit(0) if version.parse('$mooncake_version') >= version.parse('0.3.6') else sys.exit(1)" 2>/dev/null)
+    if [ $? -eq 0 ]; then
+        export MC_MS_AUTO_DISC=0
+    fi
+fi
+
 # ***************************** DO NOT CHANGE SETTINGS END *************************************** #
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -59,7 +70,7 @@ BENCHMARK_MODE=0
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG END ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 if [ "$BENCHMARK_MODE" -eq 1 ]; then
-    export VLLM_USE_ASYNC_TRANSFER_IN_PD=0
+    export VLLM_USE_ASYNC_TRANSFER_IN_PD=1
 fi
 
 if [ "$DEBUG_LOG" == "1" ]; then
@@ -82,8 +93,9 @@ if [ "$DEBUG_PROFILE" == "1" ]; then
     hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on --gaudi2 --merged "hltv,csv"
 
     export HABANA_PROFILE=1
-    export VLLM_PROFILER_ENABLED=full
-    export VLLM_TORCH_PROFILER_DIR=/workspace/
+    export VLLM_PROFILER_ENABLED=1
+    export VLLM_PROFILE_CONFIG_PATH=./profile_config.json
+    export VLLM_TORCH_PROFILER_DIR=./profiles
     export HABANA_PROFILE_WRITE_HLTV=1
 fi
 

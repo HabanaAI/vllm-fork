@@ -16,7 +16,7 @@ if [ "${PLATFORM_TYPE}" = "SEDV" ]; then
   #export CONGESTION_WINDOW=8 #32 or 16 or 32
 elif [ "${PLATFORM_TYPE}" = "WB" ]; then
   echo "WB platform type detected"
-  export HCL_HLS3RACK_NUM_DEVICES=16
+  export HCL_HLS3RACK_NUM_DEVICES=4
   export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=16
   export HLS3_RACK_SCALEOUT_PORT_MASK=0
   dev_name=`ip -o addr show | grep -E "inet 10\.240\." | awk '{print $2}'`
@@ -106,7 +106,7 @@ export VLLM_USE_V1=0
 
 
 export VLLM_DP_MASTER_PORT=25940
-export VLLM_EP_SIZE=16
+#export VLLM_EP_SIZE=16
 
 ## warmup settings
 export VLLM_SKIP_WARMUP=True

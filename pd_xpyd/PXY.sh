@@ -164,7 +164,7 @@ fi
 
 mkdir -p pd_test_log
 
-log_file="pd_test_log/proxy.log"
+log_file="pd_test_log/proxy_$(hostname).log"
 
 MAX_SIZE=$((50*1024*1024))
 if [ -f "$log_file" ]; then
