@@ -446,7 +446,6 @@ class Scheduler:
         need_fetch_kv: bool = False,
     ) -> None:
         self.scheduler_config = scheduler_config
-        self.in_chunked_status = False
 
         overwrite = bool(
             int(os.environ.get("VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL", 0))
