@@ -3894,6 +3894,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"seq{seq_len}_"
                                     f"ctx{ctx_blocks}_"
                                     f"graphs{'T' if use_graphs else 'F'}")
+                
             else:
                 model_event_name = 'model_executable'
             if num_steps > 1 or use_delayed_sampling:
@@ -3919,10 +3920,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         'indicator_tokens') in execute_model_kwargs:
                     self.indicator_tokens = execute_model_kwargs[
                         'indicator_tokens']
-                elif not warmup_mode and (
-                        'indicator_tokens') in execute_model_kwargs:
-                    execute_model_kwargs[
-                        'indicator_tokens'] = self.indicator_tokens
+                #elif not warmup_mode and (
+                #        'indicator_tokens') in execute_model_kwargs:
+                #    execute_model_kwargs[
+                #        'indicator_tokens'] = self.indicator_tokens
 
             for i in range(num_steps):
                 if i != 0 and not self.is_driver_worker:
