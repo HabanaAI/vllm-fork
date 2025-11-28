@@ -9,12 +9,12 @@ export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 
 # params
-model_len=16384
-max_num_batched_tokens=16384
+model_len=131072
+max_num_batched_tokens=131072
 max_num_seqs=8
 input_min=128
-input_max=16384
-output_max=16384
+input_max=98304
+output_max=49152
 
 unset VLLM_CONTIGUOUS_PA VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL
 CHUNKED_PREFILL_ENABLED=0
