@@ -37,6 +37,10 @@ export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 #export VLLM_DECODE_BS_BUCKET_STEP=2
 #export VLLM_DECODE_BLOCK_BUCKET_STEP=2
 
+# reset limit to 0 for getting best perf.
+export VLLM_DECODE_BS_BUCKET_LIMIT=0
+export VLLM_DECODE_BLOCK_BUCKET_LIMIT=0
+
 echo " environments are reseted "
 
 env | grep VLLM_PROMPT_BS

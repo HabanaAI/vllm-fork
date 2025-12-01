@@ -78,6 +78,10 @@ export VLLM_DECODE_BLOCK_BUCKET_MIN=2
 export VLLM_DECODE_BLOCK_BUCKET_STEP=1
 export VLLM_DECODE_BLOCK_BUCKET_MAX=2
 
+# reset limit to 0 for getting best perf.
+export VLLM_PROMPT_BS_BUCKET_LIMIT=0
+export VLLM_PROMPT_SEQ_BUCKET_LIMIT=0
+
 if [[ "$model_len" -eq 131072 || "$model_len" -eq 163840 ]]; then
     export VLLM_PROMPT_SEQ_BUCKET_STEP=1024
     export VLLM_PROMPT_BS_BUCKET_STEP=2
