@@ -1622,10 +1622,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _is_fla_model(self):
         return hasattr(self.model_config.hf_config, "linear_conv_kernel_dim")
 
-    def _use_graphs(self, batch_size, seq_len):
+    def _use_graphs(self, batch_size, seq_len, ctx_blocks):
         if self.enforce_eager:
             return False
-        return batch_size * seq_len <= self.max_seq_len_to_capture
+        bucket = (batch_size, seq_len, ctx_blocks)
+        if seq_len > 1:
+            ctx_len = ctx_blocks * self.block_size
+            batched_tokens = batch_size * (seq_len + ctx_len)
+            return batched_tokens <= self.max_seq_len_to_capture and \
+                bucket in self.bucketing_manager.prompt_buckets
+        else:
+            return bucket in self.bucketing_manager.decode_buckets
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -3332,7 +3339,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         align_worker=False,
                         is_dummy_run=False) -> None:
         phase = 'prompt' if is_prompt else 'decode'
-        use_graphs = is_dummy_run or self._use_graphs(batch_size, seq_len)
+        use_graphs = is_dummy_run or self._use_graphs(batch_size, seq_len, ctx)
 
         scenario_name = ("warmup_"
                          f"{phase}_"
@@ -4228,7 +4235,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if self._is_fla_model():
                 use_graphs = not is_prompt
             else:
-                use_graphs = self._use_graphs(batch_size, seq_len)
+                use_graphs = self._use_graphs(batch_size, seq_len, ctx_blocks)
 
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
