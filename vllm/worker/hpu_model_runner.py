@@ -2818,15 +2818,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         lora_request=None,
                                         img_args=None,
                                         temperature=0,
-                                        presence_penalty=0.0,
-                                        top_p=1.0,
+                                        repetition_penalty=1.0,
                                         ctx=0):
         if self.is_pooler:
             sampling_params = None
         else:
             sampling_params = SamplingParams(temperature=temperature,
-                                             presence_penalty=presence_penalty,
-                                             top_p=top_p)
+                                             repetition_penalty=repetition_penalty)
         num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
         computed_block_nums = None
@@ -2984,12 +2982,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ]
         self.profiler.start('internal', scenario_name)
         times = num_iters if use_graphs or is_pt_profiler_run else 1
-        presence_penalty = 1.0 if os.getenv('VLLM_WARMUP_WITH_PENALTY',
-                                            '0') == '1' else 0.0
-        top_p = 0.1 if os.getenv('VLLM_WARMUP_WITH_PENALTY',
-                                 '0') == '1' else 1.0
-        temperature = 1.0 if os.getenv('VLLM_WARMUP_WITH_PENALTY',
-                                       '0') == '1' else 0.0
+        repetition_penalty = float(os.getenv('VLLM_WARMUP_WITH_PENALITY_GREEDY','1.0'))
+        temperature = 0.0 if os.getenv('VLLM_WARMUP_WITH_PENALITY_GREEDY') is not None else 1.0
         if is_prompt:
             seqs = [
                 self.create_dummy_seq_group_metadata(
@@ -3000,8 +2994,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     if dummy_lora_requests_per_seq else None,
                     img_args=img_args,
                     temperature=temperature,
-                    presence_penalty=presence_penalty,
-                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
                     ctx=ctx) for i in range(batch_size)
             ]
         else:
@@ -3015,8 +3008,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature,
-                    presence_penalty=presence_penalty,
-                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
                     ctx=ctx) for i, b in enumerate(blocks)
             ]
         if not is_dummy_run:
@@ -3843,7 +3835,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
-            if num_steps > 1 or use_delayed_sampling:
+            if num_steps > 1 or use_delayed_sampling or warmup_mode:
                 # in case of multi-step scheduling
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
