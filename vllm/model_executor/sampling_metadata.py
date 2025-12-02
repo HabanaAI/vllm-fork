@@ -582,7 +582,7 @@ class SamplingTensors:
                     )
                 if (output_tokens_cache is not None and
                     output_tokens_cache.device == device and
-                    len(output_tokens) > 0 and len(output_tokens_cache[0]) > 0):
+                    len(output_tokens) > 0 and len(output_tokens_cache[0]) > 0 and len(output_tokens[0]) > 0):
                     # Get the last element from each list
                     last_elements = [out[-1] for out in output_tokens]
                     lengths = [len(out)-1 for out in output_tokens]
