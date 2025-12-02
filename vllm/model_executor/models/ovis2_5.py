@@ -509,23 +509,27 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
 
     def pad_multimodal_data(self, pixel_values, image_grid_thw,
                             vision_buckets):
+        bs = image_grid_thw.shape[0]
+        p1, p2 = pixel_values.shape
+        pixels = p1 // bs
+        pixel_values = pixel_values.view(bs, pixels, pixel_values.shape[1])
         desired_number_of_pixels = vision_buckets.get_multimodal_bucket(
-            pixel_values.shape[0])
-        padding_len = desired_number_of_pixels - pixel_values.shape[0]
+            pixel_values.shape[1])
+        padding_len = desired_number_of_pixels - pixel_values.shape[1]
         if padding_len <= 0:
-            return pixel_values, image_grid_thw
+            return pixel_values.view(p1, p2), image_grid_thw
 
         h_orig, w_orig = image_grid_thw[0, 1].item(), image_grid_thw[0,
                                                                      2].item()
         pad_h, pad_w = self.find_padding(h_orig, w_orig,
                                          desired_number_of_pixels)
         if pad_h == 0 and pad_w == 0:
-            return pixel_values, image_grid_thw
+            return pixel_values.view(p1, p2), image_grid_thw
 
         constant_value = -100
         pixel_values = torch.cat([
             pixel_values,
-            torch.ones((padding_len, pixel_values.shape[1]),
+            torch.ones((padding_len, p1),
                        device=pixel_values.device) * constant_value
         ])
 
@@ -534,7 +538,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
                                       dtype=image_grid_thw.dtype)
 
         assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
-        return pixel_values, image_grid_thw
+        return pixel_values.view(p1, p2), image_grid_thw
 
     def _process_image_input(
             self, image_input: OvisImagePatchInputs) -> MultiModalEmbeddings:

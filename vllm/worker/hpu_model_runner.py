@@ -2145,13 +2145,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
-        ori_len = len(block_list)
-        #if ori_len == 520 or ori_len == 123 or ori_len ==400 or ori_len == 41 or ori_len == 287:
-            #import remote_pdb;remote_pdb.set_trace()
+        #ori_len = len(block_list)
         block_list = padding_fn(block_list, _PAD_BLOCK_ID)
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
-        logger.info(f"libin debug decode block_list padding {len(block_list) - ori_len} {ori_len=} {len(block_list)=}")
+        #logger.info(f"libin debug decode block_list padding {len(block_list) - ori_len} {ori_len=} {len(block_list)=}")
         if self.interleaved_sliding_window is not None:
             window_block_list = window_padding_fn(window_block_list,
                                                   _PAD_BLOCK_ID)
@@ -2538,7 +2536,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             batch_type = BatchType.PREFILL
         else:
             batch_type = BatchType.DECODE
-        logger.info(f"libin debug prepare_input {batch_type=} {batch_size_padded=} {real_batch_size=}")
+        #logger.info(f"libin debug prepare_input {batch_type=} {batch_size_padded=} {real_batch_size=}")
         metadata_dict = {
             "input_tokens": input_tokens,
             "input_positions": input_positions,
@@ -3921,10 +3919,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         'indicator_tokens') in execute_model_kwargs:
                     self.indicator_tokens = execute_model_kwargs[
                         'indicator_tokens']
-                elif not warmup_mode and (
-                        'indicator_tokens') in execute_model_kwargs:
-                    execute_model_kwargs[
-                        'indicator_tokens'] = self.indicator_tokens
+                #elif not warmup_mode and (
+                #        'indicator_tokens') in execute_model_kwargs:
+                #    execute_model_kwargs[
+                #        'indicator_tokens'] = self.indicator_tokens
 
             for i in range(num_steps):
                 if i != 0 and not self.is_driver_worker:
@@ -4076,11 +4074,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                        sampling_metadata)
                 if self.do_mark_step:
                     htorch.core.mark_step()
-
-
-                    gc_metric = metric_global("graph_compilation")
-
-                    logger.info(f"libin debug before sample gc metrics {gc_metric.stats()=}")
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
@@ -4097,7 +4090,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                  f'seq{seq_len}_'
                                                  f'ctx{ctx_blocks}'),
                                                 args=profiler_args):
-                    #logger.info(f"libin debug sampler (o.shape) if isinstance(o, torch.Tensor) ") for o in sampling_metadata
                     output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
@@ -4117,9 +4109,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_inputs.append(model_input)
                 if self.do_mark_step:
                     htorch.core.mark_step()
-                    gc_metric = metric_global("graph_compilation")
-
-                    print(f"libin debug after sample gc metrics {gc_metric.stats()=}")
                 if hasattr(self.model.sampler, '_sampling_tensors') and \
                     self.model.sampler._sampling_tensors is not None and \
                     self.model.sampler._do_penalties:
