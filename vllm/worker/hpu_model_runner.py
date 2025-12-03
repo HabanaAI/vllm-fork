@@ -3176,6 +3176,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def log_warmup_multimodal(self, phase, i, max_i, batch_size, seq_len,
                               img_args):
+        logger.info(f"libin debug log_warmup_mm {batch_size=}")
         free_mem = format_bytes(
             HabanaMemoryProfiler.current_free_device_memory())
         dim = "seq_len"
@@ -3197,12 +3198,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         num_candidates = len(buckets)
         captured_all = True
         warmed_random_sampler_bs: Set[int] = set()
+        batch_sizes = []
         for idx, (batch_size, query_len, ctx) in enumerate(reversed(buckets)):
             # Graph memory usage is proportional to seq dimension in a batch
             phase = f"Graph/{'prompt' if is_prompt else 'decode'}"
             if is_prompt:
                 seq_len = query_len + ctx * self.block_size
                 batch_seq = batch_size * seq_len
+                batch_sizes.append(batch_size)
             else:
                 batch_seq = batch_size
             graphed_bucket = (batch_size, query_len, ctx, is_prompt)
@@ -3237,7 +3240,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     else self.mm_total_mem, # type: ignore
                 total_batch_seq=0.001
                 if not hasattr(self, "mm_total_batch_seq") else
-                self.mm_total_batch_seq) # type: ignore
+                self.mm_total_batch_seq,
+                batch_sizes=list(dict.fromkeys(batch_sizes)) if 'Ovis2_5' in str(type(self.model.model)) else [1]) # type: ignore
 
             if mm_outputs is not None:
                 mm_total_mem, total_mm_batch_seq, mm_captured_all = mm_outputs
@@ -3251,39 +3255,46 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _warmup_multimodal_graph(self,
                                  kv_caches,
                                  starting_mem=0,
-                                 total_batch_seq=0.001):
+                                 total_batch_seq=0.001,
+                                 batch_sizes=[]):
 
         total_mem = starting_mem
         idx = 0
         phase = 'Graph/Multimodal'
         num_candidates = len(self.multimodal_buckets)
         captured_all = True
+        if len(batch_sizes) > num_candidates:
+            num_candidates = len(batch_sizes)
 
-        for idx, img_args in enumerate(self.multimodal_buckets):
-            batch_size = 1  # Note: Multimodal buckets do not change with bs
-            max_seq_len = self.bucketing_manager.get_max_prompt_shape()
-            seq_len = max_seq_len
-            batch_seq = 1 * img_args
-            graphed_multimodal_bucket = img_args
-            if graphed_multimodal_bucket in self.graphed_multimodal_buckets:
-                continue
-            self.graphed_multimodal_buckets.add(graphed_multimodal_bucket)
-            self.log_warmup_multimodal(phase, idx, num_candidates, batch_size,
-                                       seq_len, img_args)
+        for batch_size in batch_sizes:
+            for idx, img_args in enumerate(self.multimodal_buckets):
+                #batch_size = 1  # Note: Multimodal buckets do not change with bs
+                max_seq_len = self.bucketing_manager.get_max_prompt_shape()
+                seq_len = max_seq_len
+                batch_seq = batch_size * img_args
+                graphed_multimodal_bucket = img_args
+                if graphed_multimodal_bucket in self.graphed_multimodal_buckets and \
+                    'Ovis2_5' not in str(type(self.model.model)):
+                    continue
+                self.graphed_multimodal_buckets.add(graphed_multimodal_bucket)
 
-            with HabanaMemoryProfiler() as mem_prof:
-                self.warmup_scenario(batch_size=batch_size,
-                                     seq_len=seq_len,
-                                     ctx=0,
-                                     is_prompt=True,
-                                     kv_caches=kv_caches,
-                                     img_args=img_args)
+                self.log_warmup_multimodal(phase, idx, num_candidates, batch_size,
+                                        seq_len, img_args)
 
-            used_mem = align_workers(mem_prof.consumed_device_memory,
-                                     torch.distributed.ReduceOp.MAX)
-            total_mem += used_mem
-            total_batch_seq += batch_seq
+                with HabanaMemoryProfiler() as mem_prof:
+                    self.warmup_scenario(batch_size=batch_size,
+                                        seq_len=seq_len,
+                                        ctx=0,
+                                        is_prompt=True,
+                                        kv_caches=kv_caches,
+                                        img_args=img_args)
 
+                used_mem = align_workers(mem_prof.consumed_device_memory,
+                                        torch.distributed.ReduceOp.MAX)
+                total_mem += used_mem
+                total_batch_seq += batch_seq
+        if 'Ovis2_5' in str(type(self.model.model)):
+            self.graphed_multimodal_buckets = list(dict.fromkeys(self.graphed_multimodal_buckets))
         return total_mem, total_batch_seq, captured_all
 
     def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
