@@ -3258,9 +3258,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         phase = 'Graph/Multimodal'
         num_candidates = len(self.multimodal_buckets)
         captured_all = True
-        batch_size = [1]
-        if 'Ovis2_5' in str(type(self.model.model)):
-            batch_size = 
+
         for idx, img_args in enumerate(self.multimodal_buckets):
             batch_size = 1  # Note: Multimodal buckets do not change with bs
             max_seq_len = self.bucketing_manager.get_max_prompt_shape()
