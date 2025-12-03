@@ -485,6 +485,24 @@ class HpuModelAdapter(torch.nn.Module):
 
     def _set_attn_bias_chunked(self, seq_len, context_len, query_len, device,
                                dtype):
+        """
+        Construct the attention bias for chunked prefill.
+        example:
+            seq_len = 4
+            context_len = 4
+            Total KV length = 4 (cached) + 4 (new) = 8
+            Resulting attn_bias has shape [4, 8] and values:
+                [
+                    [ 0,  0,  0,  0,   0, -inf, -inf, -inf ],
+                    [ 0,  0,  0,  0,   0,  0,   -inf, -inf ],
+                    [ 0,  0,  0,  0,   0,  0,    0,   -inf ],
+                    [ 0,  0,  0,  0,   0,  0,    0,    0   ]
+                ]
+
+            - Columns 0..3: cached KV (visible to all queries in this example).
+            - Columns 4..7: new KV with causal upper-triangular masking.
+            - 0 indicates allowed attention; -inf indicates masked positions.
+        """
         con_len = context_len.item()
         past_mask = torch.arange(0, con_len, dtype=torch.int32, device=device)
         if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
@@ -952,7 +970,7 @@ class HpuModelAdapter(torch.nn.Module):
 
 class PreparePromptMetadata(NamedTuple):
     input_tokens: torch.Tensor
-    input_positions: torch.Tensor
+    input_positions: List[List[int]]
     attn_metadata: Optional[AttentionMetadata]
     seq_lens: List[int]
     query_lens: List[int]
@@ -984,7 +1002,7 @@ class PreparePromptMetadata(NamedTuple):
 
 class PrepareDecodeMetadata(NamedTuple):
     input_tokens: torch.Tensor
-    input_positions: torch.Tensor
+    input_positions: List[List[int]]
     attn_metadata: Optional[AttentionMetadata]
     lora_index_mapping: List[List[int]]
     lora_prompt_mapping: List[List[int]]
@@ -1881,7 +1899,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         token_types: List[List[int]] = []
         if len(seq_group_metadata_list) == 0:
             return PreparePromptMetadata.empty()
-
         is_enc_dec_model = self.model_config.is_encoder_decoder
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
@@ -1897,14 +1914,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 mamba_prefill_indices.append(mamba_prefill_index)
 
             computed_block_nums = seq_group_metadata.computed_block_nums
-            if (self.scheduler_config is not None
-                    and self.scheduler_config is not None
-                    and self.scheduler_config.chunked_prefill_enabled
-                    and self.cache_config.enable_prefix_caching):
-                raise RuntimeError(
-                    "chunked prefill cannot be used with prefix caching "
-                    "now.")
-
             token_chunk_size = seq_group_metadata.token_chunk_size
             seq_data = seq_group_metadata.seq_data[seq_id]
             context_len = seq_data.get_num_computed_tokens()
@@ -2108,7 +2117,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                  seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if any(context_lens):
-            if self.vllm_config.cache_config.enable_prefix_caching:
+            if not self.vllm_config.scheduler_config.enable_chunked_prefill:
                 assert self.scheduler_config.max_num_prefill_seqs == 1
             assert bs == 1, (
                 "Prefix caching or chunked prefill with multiple sequences "
@@ -2850,16 +2859,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  align_worker=align_worker)
 
         selected_token_indices = None
-        temp_query_lens = query_lens.copy()
+        mixed_query_lens = query_lens.copy()
         if self.scheduler_config.enable_chunked_prefill:
             for i in range(len(decode_input_tokens)):
-                temp_query_lens.append(1)
+                mixed_query_lens.append(1)
         if not self.is_pooler:
             generators = self.get_generators(finished_requests_ids)
             sampling_metadata = SamplingMetadata.prepare(
                 seq_group_metadata_list,
                 seq_lens,
-                temp_query_lens,
+                mixed_query_lens,
                 'cpu',
                 self.pin_memory,
                 generators=generators)
@@ -2938,7 +2947,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 for i, seq_group_metadata in enumerate(seq_group_metadata_list):
                     if seq_group_metadata.is_prompt:# and \
                     #   seq_group_metadata.do_sample:
-                        padding = max_len - temp_query_lens[i]
+                        padding = max_len - mixed_query_lens[i]
                         paddings.append(padding)
                     else:
                         paddings.append(0)
@@ -2947,12 +2956,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 # FIXME: We need to adjust selected_token_indices to accommodate
                 # for padding
                 max_len = input_tokens.size(1)
-                paddings = [max_len - q for q in temp_query_lens]
+                paddings = [max_len - q for q in mixed_query_lens]
             paddings = [0] + paddings[:-1]
             paddings = list(itertools.accumulate(paddings))
-            for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-                if  seq_group_metadata.is_prompt and not seq_group_metadata.do_sample:
-                    del paddings[i]
+            if self.scheduler_config.enable_chunked_prefill:
+                aligned_paddings = [
+                    paddings[i] for i, meta in enumerate(seq_group_metadata_list)
+                    if not (meta.is_prompt and not meta.do_sample)
+                ]
+                paddings = aligned_paddings
             paddings_prompt_logprobs = []
 
             for i, seq_group_metadata in enumerate(seq_group_metadata_list):
@@ -3007,7 +3019,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             "num_prefills": num_prefills,
             "batch_type": batch_type,
             "seq_lens": seq_lens,
-            "query_lens": temp_query_lens,
+            "query_lens": mixed_query_lens,
             "token_types": token_types
         }
         if prefill_attn_metadata is not None:
@@ -3496,9 +3508,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
             logger.info(logger_msg)
 
-        if max_batch_size < 1:
-            max_batch_size = 1
-            max_seq_len = self.max_num_batched_tokens
         logger.info("Profile run with bs=%s, seq_len=%s", \
                     max_batch_size, max_seq_len)
 
@@ -3722,6 +3731,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         num_iters=3,
                         align_worker=False,
                         is_dummy_run=False) -> None:
+        """
+        Warm up mixed prefill-decode execution graphs. The combined
+        seq-groups (prefill + decode) are executed together so that HPU
+        can record and cache execution graphs for mixed workloads. Used
+        when chunked prefill is enabled. Parameters follow the same
+        meaning as `warmup_scenario`, but the warmup is performed once
+        per decode-bucket to ensure coverage across all mixed
+        prefill-decode configurations.
+        """
         phase = 'mix'
         use_graphs = is_dummy_run or self._use_graphs(batch_size, seq_len)
         buckets = self.bucketing_manager.decode_buckets

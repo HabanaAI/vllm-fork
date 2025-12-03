@@ -1,11 +1,8 @@
 import os
 os.environ["VLLM_SKIP_WARMUP"] = "true"
 os.environ['VLLM_CONTIGUOUS_PA'] = 'false'
-os.environ['VLLM_MLA_DISABLE_REQUANTIZATION']='1'
 os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES']='true'
 os.environ['PT_HPU_WEIGHT_SHARING']='0'
-os.environ['VLLM_MLA_PERFORM_MATRIX_ABSORPTION']='0'
-os.environ['VLLM_MTP_PRINT_ACCPET_RATE']='0'
 os.environ['PT_HPU_LAZY_MODE']='1'
 os.environ['VLLM_DELAYED_SAMPLING']='false'
 #os.environ['VLLM_USE_V1']='1'
