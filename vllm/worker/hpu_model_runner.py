@@ -1622,7 +1622,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _is_fla_model(self):
         return hasattr(self.model_config.hf_config, "linear_conv_kernel_dim")
 
-    def _use_graphs(self, batch_size, seq_len, ctx_blocks):
+    def _use_graphs(self, batch_size, seq_len, ctx_blocks=0):
         if self.enforce_eager:
             return False
         bucket = (batch_size, seq_len, ctx_blocks)
