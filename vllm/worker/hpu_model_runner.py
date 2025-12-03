@@ -85,7 +85,7 @@ from vllm.worker.model_runner_base import (
     _add_sampling_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict,
     _init_sampling_metadata_from_tensor_dict)
-from habana_frameworks.torch.hpu.metrics import metric_global
+
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
 
@@ -652,6 +652,7 @@ class HpuModelAdapter(torch.nn.Module):
 
     def compute_input_embeddings_for_mm_optimized(self, warmup_mode, **kwargs):
         input_ids = kwargs['input_ids']
+        logger.info(f"libin debug compute_input {input_ids.shape=} {kwargs['grids']=}")
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
         if 'image_index' in kwargs:
             inputs_embeds = self.model.get_input_embeddings_hpu(
@@ -1333,7 +1334,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ctx = seq_group_metadata_list[0].computed_block_nums
         ctx = 0 if ctx is None else sum(ctx)
         batch_size_padded = real_batch_size
-
         if is_prompt:
             first_key = next(iter(seq_group_metadata_list[0].seq_data))
             seq_len = len(seq_group_metadata_list[0].seq_data[first_key].
@@ -2145,11 +2145,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
-        #ori_len = len(block_list)
+
         block_list = padding_fn(block_list, _PAD_BLOCK_ID)
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
-        #logger.info(f"libin debug decode block_list padding {len(block_list) - ori_len} {ori_len=} {len(block_list)=}")
+
         if self.interleaved_sliding_window is not None:
             window_block_list = window_padding_fn(window_block_list,
                                                   _PAD_BLOCK_ID)
@@ -2536,7 +2536,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             batch_type = BatchType.PREFILL
         else:
             batch_type = BatchType.DECODE
-        #logger.info(f"libin debug prepare_input {batch_type=} {batch_size_padded=} {real_batch_size=}")
+
         metadata_dict = {
             "input_tokens": input_tokens,
             "input_positions": input_positions,
@@ -2747,6 +2747,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     lora_request, seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
+
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
             img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
@@ -2860,7 +2861,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
         multi_modal_data = MultiModalKwargs(multi_modal_data)
-        logger.info(f"gre{sampling_params}")
+
         seq_group = SequenceGroupMetadata(
             request_id=str(group_id),
             is_prompt=True,
@@ -3261,7 +3262,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         phase = 'Graph/Multimodal'
         num_candidates = len(self.multimodal_buckets)
         captured_all = True
-
+        batch_size = [1]
+        if 'Ovis2_5' in str(type(self.model.model)):
+            batch_size = 
         for idx, img_args in enumerate(self.multimodal_buckets):
             batch_size = 1  # Note: Multimodal buckets do not change with bs
             max_seq_len = self.bucketing_manager.get_max_prompt_shape()
