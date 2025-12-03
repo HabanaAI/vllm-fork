@@ -573,11 +573,14 @@ class Proxy:
 
             kv_prepare_request = request.copy()
             kv_prepare_request["max_tokens"] = 1
+            kv_prepare_request["max_completion_tokens"] = 1
 
             start_time = time.time()
             prompt = kv_prepare_request.get("prompt")
             total_length = self.get_total_token_length(prompt)
-            max_tokens = request.get("max_tokens", 0)
+            max_tokens = request.get("max_completion_tokens", 0)
+            if max_tokens == 0:
+                max_tokens = request.get("max_tokens", 0)
             end_time = time.time()
             log_info_green(
                 f"create_completion -- prompt length: {total_length}, "
@@ -677,13 +680,17 @@ class Proxy:
             # add params to request
             kv_prepare_request = request.copy()
             kv_prepare_request["max_tokens"] = 1
+            kv_prepare_request["max_completion_tokens"] = 1
 
             start_time = time.time()
             # prefill stage
             total_length = sum(
                 self.get_total_token_length(msg['content'])
                 for msg in kv_prepare_request['messages'])
-            max_tokens = request.get("max_tokens", 0)
+            max_tokens = request.get("max_completion_tokens", 0)
+            if max_tokens == 0:
+                max_tokens = request.get("max_tokens", 0)
+
             end_time = time.time()
             log_info_green(
                 f"create_chat_completion -- prompt length: {total_length}, "
