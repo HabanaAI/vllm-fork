@@ -652,7 +652,7 @@ class HpuModelAdapter(torch.nn.Module):
 
     def compute_input_embeddings_for_mm_optimized(self, warmup_mode, **kwargs):
         input_ids = kwargs['input_ids']
-        logger.info(f"libin debug compute_input {input_ids.shape=} {kwargs['grids']=}")
+
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
         if 'image_index' in kwargs:
             inputs_embeds = self.model.get_input_embeddings_hpu(
@@ -1366,7 +1366,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     seq_group_metadata.sampling_params.temperature == 0.0
                     for seq_group_metadata in seq_group_metadata_list)
                 temperature = 0.0 if has_greedy_samples else 1.0
-
             dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
                 -1, 0, is_prompt, temperature=temperature)
             seq_group_metadata_list.extend(dummy_seq_group_metadata
@@ -1797,7 +1796,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               pad=0,
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
-
         image_index_tensor = None
         if self.model_is_mrope:
             input_positions = \
@@ -2196,7 +2194,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     batch_size_padded = align_tp_groups(
                         batch_size_padded, torch.distributed.ReduceOp.MAX)
             batch_size_padding = batch_size_padded - real_batch_size
-
             if batch_size_padding > 0:
                 encoder_seq_lens.extend(encoder_seq_lens[0]
                                         for _ in range(batch_size_padding))
@@ -2747,7 +2744,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     lora_request, seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
-
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
             img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
