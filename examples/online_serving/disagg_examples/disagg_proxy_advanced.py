@@ -541,6 +541,8 @@ class Proxy:
                 all(isinstance(x, int) for x in p) for p in prompt)):
                 # Already tokenized
                 return sum(len(p) for p in prompt)
+            elif all(isinstance(p, dict) and "text" in p for p in prompt):
+                return sum(len(self.tokenizer(p["text"])["input_ids"]) for p in prompt)
             else:
                 logger.error(
                     "Unsupported prompt format: %s / nested types. Value: %r",
