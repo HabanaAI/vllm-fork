@@ -1625,6 +1625,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _use_graphs(self, batch_size, seq_len, ctx_blocks=0):
         if self.enforce_eager:
             return False
+        if not self.skip_warmup:
+            return batch_size * seq_len <= self.max_seq_len_to_capture
         bucket = (batch_size, seq_len, ctx_blocks)
         if seq_len > 1:
             ctx_len = ctx_blocks * self.block_size
