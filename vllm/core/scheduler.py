@@ -1305,6 +1305,14 @@ class Scheduler:
                 budget.add_prefill_seqs(seq_group.request_id, num_new_seqs,
                                         max_prefill_seq_len)
 
+                # break early if we have reached the max number of prefill seqs
+                # otherwise it could not be able to get longest prefix
+                if current_platform.is_hpu() \
+                    and self.cache_config.enable_prefix_caching \
+                    and budget.num_curr_prefill_seqs >= \
+                        self.scheduler_config.max_num_prefill_seqs:
+                    break
+
         # Queue requests that couldn't be scheduled.
         waiting_queue.extendleft(leftover_waiting_sequences)
         if len(seq_groups) > 0:
