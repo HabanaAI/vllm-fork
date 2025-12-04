@@ -129,6 +129,10 @@ class WorkerBase:
         """Get vocabulary size from model configuration."""
         return self.model_config.get_vocab_size()
 
+    def shutdown(self) -> None:
+        """Clean up resources held by the worker."""
+        return
+
 
 class DelegateWorkerBase(WorkerBase):
     """
@@ -626,6 +630,10 @@ class WorkerWrapperBase:
 
     def __getattr__(self, attr):
         return getattr(self.worker, attr)
+
+    def shutdown(self) -> None:
+        if self.worker is not None:
+            self.worker.shutdown()
 
 
 def extract_previous_hidden_states(

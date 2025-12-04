@@ -134,9 +134,13 @@ class MooncakeStore(KVLookupBufferBase):
         raise NotImplementedError
 
     def close(self):
-        # MooncakeDistributedStore will automatically call the destructor, so
-        # it is unnecessary to close it manually.
-        pass
+        # MooncakeDistributedStore will close automatically in the following cases:
+        # 1. SIGINT, SIGTERM and SIGHUP are sent and there is no other signal handler
+        # 2. Normal exit
+        # If python process has another signal handler registered, the signal handler
+        # is responsible for calling to close
+        self.store.close()
+        logger.info("Mooncake store close successfully.")
 
     def put(
         self,

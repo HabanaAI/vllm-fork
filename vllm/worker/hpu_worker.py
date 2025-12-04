@@ -69,6 +69,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.rank = rank
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
+        self._shutdown = False
         if self.parallel_config and self.is_driver_worker:
             assert self.rank % self.parallel_config.tensor_parallel_size == 0, \
             "The driver worker must have TP rank 0."
@@ -520,7 +521,13 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             "Prompt Adapter is not implemented for HPU backend.")
 
     def shutdown(self):
+        # Make sure we call shutdown only once
+        if self._shutdown:
+            return
+
         self.model_runner.shutdown_inc()
+        self.model_runner.shutdown_kv_transfer()
+        self._shutdown = True
 
     @property
     def max_model_len(self) -> int:

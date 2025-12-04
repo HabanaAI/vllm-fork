@@ -131,7 +131,7 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
 
     def shutdown(self):
         if getattr(self, 'shutdown_workers', False):
-            self._run_workers("shutdown")
+            self._run_workers("shutdown", ignore_error=True)
             self.shutdown_workers = False
         if (worker_monitor := getattr(self, "worker_monitor",
                                       None)) is not None:
@@ -153,6 +153,7 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
         *args,
         async_run_tensor_parallel_workers_only: bool = False,
         max_concurrent_workers: Optional[int] = None,
+        ignore_error: bool = False,
         **kwargs,
     ) -> List[Any]:
         """Runs the given method on all workers.
@@ -180,9 +181,19 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
                 for worker in self.non_driver_workers
             ]
 
+        def execute_method(worker):
+            if not ignore_error:
+                return worker.execute_method(sent_method, *args, **kwargs)
+
+            try:
+                return worker.execute_method(sent_method, *args, **kwargs)
+            except Exception as e:
+                logger.warning("Error on execute method on worker: %s", str(e))
+                return None
+
         # Start all remote workers first.
         worker_outputs = [
-            worker.execute_method(sent_method, *args, **kwargs)
+            execute_method(worker)
             for worker in self.workers
         ]
 
@@ -191,7 +202,7 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
 
         # Get the results of the workers.
         return [driver_worker_output
-                ] + [output.get() for output in worker_outputs]
+                ] + [output.get() if output else None for output in worker_outputs]
 
     def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""

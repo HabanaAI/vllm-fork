@@ -92,7 +92,11 @@ class MooncakeStoreConnector(KVConnectorBase):
         Raises:
             NotImplementedError: This method must be implemented in subclasses.
         """
+        if self.kv_store is None:
+            return
+
         self.kv_store.close()
+        self.kv_store = None
 
     def send_kv_caches_and_hidden_states(
         self,

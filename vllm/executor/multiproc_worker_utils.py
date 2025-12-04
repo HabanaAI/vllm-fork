@@ -4,6 +4,7 @@ import asyncio
 import os
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from multiprocessing import Queue
@@ -126,6 +127,15 @@ class WorkerMonitor(threading.Thread):
                     logger.error("Worker %s pid %s died, exit code: %s",
                                  process.name, process.pid, process.exitcode)
             # Cleanup any remaining workers
+            # First try terminating for normal shutdown
+            if logger:
+                logger.info("Terminating local vLLM worker processes")
+            for worker in self.workers:
+                worker.terminate_worker()
+
+            # Wait for a few seconds to kill
+            time.sleep(3)
+
             if logger:
                 logger.info("Killing local vLLM worker processes")
             for worker in self.workers:
@@ -256,6 +266,9 @@ def _run_worker_process(
         logger.exception("Worker failed")
 
     logger.info("Worker exiting")
+
+    # Shut down the worker at process exiting
+    worker.shutdown()
 
 
 def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:

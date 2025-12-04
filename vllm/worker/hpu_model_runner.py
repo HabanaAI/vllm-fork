@@ -2607,6 +2607,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 attn_backend=self.attn_backend,
             ))
 
+    def shutdown_kv_transfer(self):
+        if self.vllm_config.kv_transfer_config is None:
+            return
+
+        try:
+            get_kv_transfer_group().close()
+        except Exception as e:
+            logger.warning("Failed to close KV Transfer: %s", str(e))
+
     def need_recv_kv(self, model_input, kv_caches, warmup_mode) -> bool:
         """Check if we need to receive kv-cache from the other worker.
         We need to receive KV when

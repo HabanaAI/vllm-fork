@@ -416,6 +416,10 @@ class LLMEngine:
 
         self.seq_id_to_seq_group: Dict[str, SequenceGroupBase] = {}
 
+    def shutdown(self):
+        """Shutdown and cleanup engine resources."""
+        self.model_executor.shutdown()
+
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
 

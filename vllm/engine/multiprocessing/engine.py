@@ -148,6 +148,7 @@ class MQLLMEngine:
         """Cleanup zeromq state on shutdown."""
         # Closes all sockets and destroys context.
         self.ctx.destroy(linger=0)
+        self.engine.shutdown()
         del self.engine
 
     @contextmanager
