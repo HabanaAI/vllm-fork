@@ -96,13 +96,20 @@ class MooncakeStore(KVLookupBufferBase):
             self.config = MooncakeStoreConfig.load_from_env()
             logger.info("Mooncake Configuration loaded successfully.")
 
-            self.store.setup(self.config.local_hostname,
-                             self.config.metadata_server,
-                             self.config.global_segment_size,
-                             self.config.local_buffer_size,
-                             self.config.protocol, self.config.device_name,
-                             self.config.master_server_address)
-
+            result = self.store.setup(
+                self.config.local_hostname,
+                self.config.metadata_server,
+                self.config.global_segment_size,
+                self.config.local_buffer_size,
+                self.config.protocol,
+                self.config.device_name,
+                self.config.master_server_address)
+            if result != 0:
+                error_msg = ("Failed to setup Mooncake store. "
+                             f"ErrorCode: {result}. "
+                             "Please make sure Mooncake master is "
+                             "running and check the configuration.")
+                raise RuntimeError(error_msg)
         except ValueError as e:
             logger.error("Configuration loading failed: %s", e)
             raise
