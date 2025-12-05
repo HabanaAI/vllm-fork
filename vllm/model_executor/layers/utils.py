@@ -4,6 +4,7 @@
 from typing import Callable, Optional
 
 import torch
+import habana_frameworks.torch as htorch
 
 from vllm import _custom_ops as ops
 from vllm import envs
@@ -46,8 +47,10 @@ def apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
     repetition_penalties: The repetition penalties of shape (num_seqs, )
     """
     num_seqs, vocab_size = logits.shape
+    htorch.core.mark_step()
     _, prompt_mask = get_token_bin_counts_and_mask(prompt_tokens_tensor,
                                                    vocab_size, num_seqs)
+    htorch.core.mark_step()
     output_bin_counts, output_mask = get_token_bin_counts_and_mask(
         output_tokens_tensor, vocab_size, num_seqs)
 

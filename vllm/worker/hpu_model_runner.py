@@ -4113,7 +4113,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     self.model.sampler._sampling_tensors is not None and \
                     self.model.sampler._do_penalties:
                     sampling_tensors = self.model.sampler._sampling_tensors
-                    if sampling_tensors.prompt_tokens.numel() > 0:
+                    if sampling_tensors.prompt_tokens.numel() > 0 and not warmup_mode:
                         # Cache the prompt_tokens tensor that's already on HPU
                         self.model.sampler._prompt_tokens_hpu_cache = sampling_tensors.prompt_tokens
                         self.model.sampler._output_tokens_hpu_cache = sampling_tensors.output_tokens
