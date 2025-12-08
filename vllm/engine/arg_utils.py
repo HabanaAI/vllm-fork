@@ -1232,6 +1232,8 @@ class EngineArgs:
             long_prefill_token_threshold=self.long_prefill_token_threshold,
             disable_hybrid_kv_cache_manager=self.
             disable_hybrid_kv_cache_manager,
+            delayed_prefix_caching_calculation=envs.
+            VLLM_SCHED_DELAYED_PREFIX_CACHING_CALCULATION,
         )
 
         lora_config = LoRAConfig(

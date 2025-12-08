@@ -1308,6 +1308,8 @@ class Scheduler:
                 # break early if we have reached the max number of prefill seqs
                 # otherwise it could not be able to get longest prefix
                 if current_platform.is_hpu() \
+                    and self.scheduler_config \
+                        .delayed_prefix_caching_calculation \
                     and self.cache_config.enable_prefix_caching \
                     and budget.num_curr_prefill_seqs >= \
                         self.scheduler_config.max_num_prefill_seqs:

@@ -2185,6 +2185,14 @@ class SchedulerConfig:
     like full attention and sliding window attention.
     """
 
+    delayed_prefix_caching_calculation: bool = False
+    """
+    When enabled (True) with APC and padding-aware scheduling active,
+    forces immediate exit from the prefill scheduling loop upon
+    reaching `max_num_prefill_seqs`. This optimization enables
+    identification of the longest contiguous sequence prefix available.
+    """
+
     def compute_hash(self) -> str:
         """
         WARNING: Whenever a new field is added to this config,

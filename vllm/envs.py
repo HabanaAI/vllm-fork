@@ -127,6 +127,7 @@ if TYPE_CHECKING:
     VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE: int = 163840
     VLLM_TOOL_PARSE_REGEX_TIMEOUT_SECONDS: int = 1
     VLLM_SLEEP_WHEN_IDLE: bool = False
+    VLLM_SCHED_DELAYED_PREFIX_CACHING_CALCULATION: bool = False
 
 
 def get_default_cache_root():
@@ -872,6 +873,14 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # latency penalty when a request eventually comes.
     "VLLM_SLEEP_WHEN_IDLE":
     lambda: bool(int(os.getenv("VLLM_SLEEP_WHEN_IDLE", "0"))),
+
+    # When enabled (True) with APC and padding-aware scheduling active,
+    # forces immediate exit from the prefill scheduling loop upon
+    # reaching `max_num_prefill_seqs`. This optimization enables
+    # identification of the longest contiguous sequence prefix available.
+    "VLLM_SCHED_DELAYED_PREFIX_CACHING_CALCULATION":
+    lambda: os.environ.get("VLLM_SCHED_DELAYED_PREFIX_CACHING_CALCULATION",
+                           "false").lower() in ("1", "true"),
 }
 
 # --8<-- [end:env-vars-definition]
