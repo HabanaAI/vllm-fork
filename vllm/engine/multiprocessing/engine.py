@@ -380,7 +380,15 @@ class MQLLMEngine:
         return self.engine.reset_prefix_cache()
 
 
+mp_engine_terminated = False
+
+
 def signal_handler(*_) -> None:
+    global mp_engine_terminated
+    if mp_engine_terminated:
+        logger.info("MQLLMEngine is already in progress of terminating.")
+        return
+    mp_engine_terminated = True
     raise KeyboardInterrupt("MQLLMEngine terminated")
 
 
