@@ -213,6 +213,7 @@ vim /usr/local/lib/python3.10/dist-packages/ultralytics/nn/autobackend.py
 参照如下修改warmup()，为其增加if self.device  == "hpu"分支:
 
 ```bash
+
     def warmup(self, imgsz=(1, 3, 640, 640)):
         """
         Warm up the model by running one forward pass with a dummy input.
@@ -230,6 +231,7 @@ vim /usr/local/lib/python3.10/dist-packages/ultralytics/nn/autobackend.py
             im = torch.empty(*imgsz, dtype=torch.half if self.fp16 else torch.float, device=self.device)  # input
             for _ in range(2 if self.jit else 1):
                 self.forward(im)  # warmup
+
 ```
 
 #### 5.3 使用命令行方式运行Mineru
@@ -259,16 +261,19 @@ MinerU 天枢API 服务部署在Gaudi上的支持。
 https://github.com/opendatalab/MinerU/tree/master/projects/mineru_tianshu
 
 ##### 部署步骤
-''' bash
+
+```bash
 cd MinerU/projects/mineru_tianshu
 pip install -r requirements.txt
 python start_all.py --workers-per-device 1 --devices auto 2>&1 \
        | tee tianshu.log >/dev/null &
 
-'''
+```
+
 #### API 访问
 Gaudi 目前支持vlm-vllm-engine访问方式
-'''
+
+```bash
 curl -X 'POST' \
   'http://10.239.129.55:8000/api/v1/tasks/submit' \
   -H 'accept: application/json' \
@@ -280,6 +285,110 @@ curl -X 'POST' \
   -F 'formula_enable=true' \
   -F 'table_enable=true' \
   -F 'priority=0'
-'''
+```
+
 详细API 参考
 http://localhost:8000/docs
+
+## 7. MinerU 2.6.4 多卡部署
+
+### 7.1 启动docker
+
+请按照前面的步骤生成minerU docker 镜像，保存为
+miner_2.6.4:latest。将需要部署的卡index号放入docker，
+比如这里使用1,3号卡。
+
+```bash
+index_ids="1,3"
+docker run -it --name minerU --runtime=habana \
+           -e HABANA_VISIBLE_DEVICES=${index_ids} \
+           -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+           -v /mnt/disk8:/data --cap-add=sys_nice --net=host \
+           --ipc=host --workdir=/workspace \
+           miner_2.6.4:latest
+```
+
+镜像内安装minerU过程和之前文档一致
+
+### 7.2 修改代码并安装天枢推理引擎
+
+```bash
+cd MinerU/projects/mineru_tianshu
+#添加如下patch
+diff --git a/projects/mineru_tianshu/litserve_worker.py \
+ b/projects/mineru_tianshu/litserve_worker.py
+index 6283a208..ca0f84c6 100644
+--- a/projects/mineru_tianshu/litserve_worker.py
++++ b/projects/mineru_tianshu/litserve_worker.py
+@@ -97,6 +97,7 @@ class MinerUWorkerAPI(ls.LitAPI):
+             device_mode = os.environ['MINERU_DEVICE_MODE']
+  
++        device_mode = "auto"
+         # 配置显存
+         if os.getenv('MINERU_VIRTUAL_VRAM_SIZE', None) is None:
+             if device_mode.startswith("cuda") or device_mode.startswith("npu"):
+@@ -107,7 +108,12 @@ class MinerUWorkerAPI(ls.LitAPI):
+                     os.environ['MINERU_VIRTUAL_VRAM_SIZE'] = '8'  # 默认值
+             else:
+                 os.environ['MINERU_VIRTUAL_VRAM_SIZE'] = '1'
++
++        os.environ['MINERU_VIRTUAL_VRAM_SIZE'] = '32'
++        device_id = str(device).split(':')[-1]
++        os.environ['HABANA_VISIBLE_MODULES'] = device_id
+  
+         # 初始化 MarkItDown（如果可用）
+         if MARKITDOWN_AVAILABLE:
+             self.markitdown = MarkItDown()
+
+#安装天枢
+pip install -r requirements.txt
+```
+
+### 7.3 启动服务
+
+启动前请声明4.2.1中的环境变量，并跳过warmup
+保证export VLLM_SKIP_WARMUP=True
+
+启动命令：
+
+```bash
+cd MinerU/projects/mineru_tianshu
+source env.sh
+python start_all.py --workers-per-device 1 --device 2,3 \
+       --accelerator mps
+```
+
+注意：
+- `--workers-per-device` 由于hpu进程数量限制只能为1
+- `--device` 后面的id需要用hl-smi在docker内查询module_id得到
+
+具体查询方式如下：
+
+```bash
+hl-smi -Q index,module_id -f csv
+index, module_id
+0, 2
+1, 3
+```
+
+### 7.4 启动后测试
+
+提交两个大文档，hl-smi可以看到两个process都在对应卡上有算力消耗。
+
+```bash
+#!/bin/bash
+for i in 1 2
+do
+curl -X 'POST' \
+  'http://127.0.0.1:8000/api/v1/tasks/submit' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'file=@fund.pdf;type=application/pdf' \
+  -F 'backend=vlm-vllm-engine' \
+  -F 'lang=ch' \
+  -F 'method=auto' \
+  -F 'formula_enable=true' \
+  -F 'table_enable=true' \
+  -F 'priority=0'
+done
+```
