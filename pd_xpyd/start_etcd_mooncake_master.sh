@@ -9,7 +9,7 @@ sleep 5s
 
 # Define commands as arrays
 ETCD_CMD=(etcd --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://localhost:2379)
-MOON_CMD=(mooncake_master -max_threads 64 -port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2)
+MOON_CMD=(mooncake_master -rpc_thread_num 64 -rpc_port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2)
 
 # Check if XPYD_LOG is set
 if [ -n "$XPYD_LOG" ]; then
