@@ -83,6 +83,8 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
         self.w2_list = torch.nn.ModuleList(
             [MoeFP8Matmul() for _ in range(num_experts)]
         )
+        self.enable_moe_slice = os.environ.get('VLLM_SUPPORT_MOE_SLICE',
+                                                       'false').lower() == 'true'
         self.enable_moe_chunk = (
             os.environ.get("VLLM_SUPPORT_MOE_CHUNK", "false").lower() == "true"
         )

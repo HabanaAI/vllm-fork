@@ -516,6 +516,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         self.enable_dmoe_dynamic_scale = os.environ.get("VLLM_DMOE_DYNAMIC_SCALE", False) in ["1", "true"]
         self.use_static_moe = os.environ.get("VLLM_USE_STATIC_MOE", "0") in ["1", "true"]
         self.optimize_with_partial_experts = os.environ.get("VLLM_OPTIMIZE_WITH_PARTIAL_EXPERTS", "0") in ["1", "true"]
+        self.enable_moe_slice = os.environ.get('VLLM_SUPPORT_MOE_SLICE',
+                                                'false').lower() == 'true'
         self.enable_moe_chunk = os.environ.get('VLLM_SUPPORT_MOE_CHUNK',
                                                 'false').lower() == 'true'
         self.chunk_size_list = [
@@ -654,6 +656,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                         layer.quant_config.weight_block_size
                     )
                 moe_op.enable_moe_chunk = self.enable_moe_chunk
+                moe_op.enable_moe_chunk = self.enable_moe_slice
                 moe_op.chunk_size_list = self.chunk_size_list
                 moe_op.token_boundary_list = self.token_boundary_list
                 moe_op.moe_slice_length = self.moe_slice_length
