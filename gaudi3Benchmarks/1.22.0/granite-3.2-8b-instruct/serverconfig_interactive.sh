@@ -1,0 +1,27 @@
+#granite-3.2-8b-instruct for interactive with batch size 10 with SLA TTFT <2s 
+
+VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+VLLM_EXPONENTIAL_BUCKETING=true \
+PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
+FUSER_ENABLE_LOW_UTILIZATION=true \
+ENABLE_FUSION_BEFORE_NORM=true \
+VLLM_WEIGHT_LOAD_FORCE_SYNC=1 \
+PT_HPU_LAZY_MODE=1 \
+PT_HPU_WEIGHT_SHARING=0 \
+VLLM_FUSED_BLOCK_SOFTMAX=true \
+VLLM_DELAYED_SAMPLING=false \
+python3 -m vllm.entrypoints.openai.api_server \
+    --model=ibm-granite/granite-3.2-8b-instruct \
+    --port 8080 \
+    --max-num-seqs=10 \
+    --dtype=bfloat16 \
+    --gpu-memory-util 0.95 \
+    --tensor-parallel-size=1 \
+    --max-model-len=131072 \
+    --block-size=128 \
+    --disable-log-requests \
+    --use-v2-block-manager \
+    --use-padding-aware-scheduling \
+    --disable-log-stats \
+    --trust-remote-code 2>&1 | tee granite-3.2-8b-instruct_server.txt
+
