@@ -1522,7 +1522,6 @@ class Glm4vForConditionalGeneration(nn.Module, SupportsMultiModal,
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config
-        quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
 
         self.config = config
@@ -1536,7 +1535,8 @@ class Glm4vForConditionalGeneration(nn.Module, SupportsMultiModal,
         self.visual = glm_visionTransformer(
             config.vision_config,
             norm_eps=getattr(config, "rms_norm_eps", 1e-5),
-            quant_config=quant_config,
+            # The vision part never supports quant
+            quant_config=None,
             prefix=maybe_prefix(prefix, "visual"),
         )
 
