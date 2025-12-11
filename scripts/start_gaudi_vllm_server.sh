@@ -171,6 +171,8 @@ echo "    max_num_seqs: ${max_num_seqs}"
 echo "    max_model_len: ${max_model_len}"
 if [[ "$chunk_size" != "" ]]; then
     echo "    chunked prefill enabled with max-num-batched-tokens: ${chunk_size}"
+    # Append enable-chunked-prefill flag to extra_params without disrupting existing values
+    extra_params+=("--enable-chunked-prefill")
 fi
 
 case_name=serve_${model_name}_${dtype}_${DEVICE_NAME}_len${max_model_len}_bs${max_num_seqs}_ps${max_num_prefill_seqs}
@@ -184,11 +186,6 @@ set_config
 
 echo "Changed environment variables:" |& tee "${log_file}"
 echo -e "${changed_env}\n" |& tee -a "${log_file}"
-
-bonus_args=""
-if [[ "$chunk_size" != "" ]]; then
-    bonus_args+=" --enable-chunked-prefill "
-fi
 
 command_string=$(echo ${NUMA_CTL_CMD} \
 python3 -m vllm.entrypoints.openai.api_server \
@@ -208,7 +205,6 @@ python3 -m vllm.entrypoints.openai.api_server \
     --trust-remote-code \
     --seed 2025 \
     --distributed_executor_backend "${dist_backend}" \
-    ${bonus_args} \
     "${extra_params[@]}")
 
 echo "Start a vLLM server for ${model_name} on Gaudi $DEVICE_NAME with command:" |& tee -a "${log_file}"
