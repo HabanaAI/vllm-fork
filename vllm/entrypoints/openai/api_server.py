@@ -116,8 +116,88 @@ _running_tasks: set[asyncio.Task] = set()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
+        # Get the engine client
+        engine_client: EngineClient = app.state.engine_client
+
+        # for Ovis2.5
+        model_name = ""
+
+        try:
+            # get_model_config is async in most vLLM versions
+            model_config = await engine_client.get_model_config()
+            model_name = model_config.model
+        except Exception:
+            if hasattr(app.state, "args"):
+                model_name = app.state.args.model
+
+        model_name = model_name.lower()
+
+        if "ovis2.5" in model_name:
+            import numpy as np
+            from PIL import Image
+
+            from vllm.sampling_params import SamplingParams
+
+            logger.info(
+                "[Warmup] Detected Ovis2.5 (%s)."
+                "Triggering specialized Batch-64 warmup...", model_name)
+            try:
+                # Setup Data
+                width = 1568
+                height = 2016
+                TARGET_BATCH_SIZE = 64  # Covers 52 inputs case
+
+                random_data = np.random.randint(0,
+                                                255, (height, width, 3),
+                                                dtype=np.uint8)
+                dummy_image = Image.fromarray(random_data)
+
+                prompt_text = "<image>" + (" warmup" * 591) + "!"
+
+                # Construct the inputs dictionary
+                warmup_inputs = {
+                    "prompt": prompt_text,
+                    "multi_modal_data": {
+                        "image": dummy_image
+                    },
+                }
+                sampling_params = SamplingParams(max_tokens=2, temperature=0)
+
+                # Define a helper for a single request
+                async def run_single_warmup(idx):
+                    req_id = f"[Warmup] warmup_req_multimodal_{idx}"
+                    logger.info("[Warmup] Sending request %s", req_id)
+
+                    # Pass the dictionary as the prompt argument
+                    results_generator = engine_client.generate(
+                        prompt=warmup_inputs,
+                        sampling_params=sampling_params,
+                        request_id=req_id,
+                    )
+
+                    # Iterate to force execution
+                    async for _ in results_generator:
+                        pass
+
+                # Create all tasks
+                tasks = [
+                    run_single_warmup(i) for i in range(TARGET_BATCH_SIZE)
+                ]
+
+                # Run CONCURRENTLY to trigger Batch Size 64 compilation
+                logger.info("[Warmup] Sending %d concurrent requests...",
+                            TARGET_BATCH_SIZE)
+                await asyncio.gather(*tasks)
+
+                logger.info("[Warmup] Ovis2.5 Graph compilation complete!")
+            except Exception as e:
+                logger.warning("[Warmup] Warmup failed (non-fatal): %s", e)
+        else:
+            logger.info(
+                "[Warmup] Model '%s' does not match Ovis2.5."
+                "Skipping specialized warmup.", model_name)
+
         if app.state.log_stats:
-            engine_client: EngineClient = app.state.engine_client
 
             async def _force_log():
                 while True:
