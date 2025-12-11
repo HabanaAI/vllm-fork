@@ -511,7 +511,7 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
         if modality in ("image", "image_embeds"):
             if model_type == "chatglm":
                 return "<|begin_of_image|><|endoftext|><|end_of_image|>"
-            if model_type == "glm4v":
+            if model_type in ("glm4v", "glm4v_moe"):
                 return "<|begin_of_image|><|image|><|end_of_image|>"
             if model_type in {"ernie4_5_moe_vl", "ernie4_5_vl"}:
                 return f"Picture {current_count}:<|IMAGE_START|><|image@placeholder|><|IMAGE_END|>" # noqa: E501
@@ -570,7 +570,7 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
         elif modality == "video":
             if model_type == "internvl_chat":
                 return "<video>"
-            if model_type == "glm4v":
+            if model_type in ("glm4v", "glm4v_moe"):
                 return "<|begin_of_video|><|video|><|end_of_video|>"
             if model_type in ("qwen2_vl", "qwen2_5_vl", "keye", "Keye"):
                 return "<|vision_start|><|video_pad|><|vision_end|>"
