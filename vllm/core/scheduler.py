@@ -447,15 +447,6 @@ class Scheduler:
     ) -> None:
         self.scheduler_config = scheduler_config
 
-        overwrite = self.scheduler_config.enable_chunked_prefill and \
-            os.getenv("VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL", "false").lower() in ("1", "true") 
-        if overwrite != self.scheduler_config.use_padding_aware_scheduling:
-            self.scheduler_config.use_padding_aware_scheduling = overwrite
-            logger.warning(
-                "<scheduler> use_padding_aware_scheduling is overwrited to %s",
-                " by the VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL env var."
-                self.scheduler_config.use_padding_aware_scheduling)
-
         self.cache_config = cache_config
         # Note for LoRA scheduling: the current policy is extremely
         # simple and NOT fair. It can lead to starvation of some
