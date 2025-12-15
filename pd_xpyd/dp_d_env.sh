@@ -3,7 +3,13 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.7
+export VLLM_USE_NUMACTL=1
+
+# This is to avoid logic in torch.distributed.hccl.__init__.py _setup_module_id overwriting
+# this env var incorrectly
+export HLS_MODULE_ID=-1
+
+export VLLM_GPU_MEMORY_UTILIZATION=0.8
 export VLLM_GRAPH_RESERVED_MEM=0.3
 export VLLM_GRAPH_PROMPT_RATIO=0
 
@@ -19,10 +25,14 @@ input_max=16384
 output_max=16384
 
 # ***************************************  bucketing ******************************************* #
-unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
-unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
-unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET_MAX
-unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
+unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX VLLM_PROMPT_BS_BUCKET_LIMIT
+unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX VLLM_PROMPT_SEQ_BUCKET_LIMIT
+unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET_MAX VLLM_DECODE_BS_BUCKET_LIMIT
+unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX VLLM_DECODE_BLOCK_BUCKET_LIMIT
+
+# Set limit to 0 for getting best perf
+# Set limit to 0.1 to balance perf and warmup time
+export BUCKET_PADDING_RATIO=0.1
 
 set_bucketing
 
@@ -37,10 +47,6 @@ export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 #export VLLM_DECODE_BS_BUCKET_STEP=2
 #export VLLM_DECODE_BLOCK_BUCKET_STEP=2
 
-# reset limit to 0 for getting best perf.
-export VLLM_DECODE_BS_BUCKET_LIMIT=0
-export VLLM_DECODE_BLOCK_BUCKET_LIMIT=0
-
 echo " environments are reseted "
 
 env | grep VLLM_PROMPT_BS
@@ -49,7 +55,7 @@ env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 # ***************************************  bucketing ends ************************************* #
 
-SWAP_SPACE=64 # GB, memory per rank for preemption.swap.
+SWAP_SPACE=8 # GB, memory per rank for preemption.swap.
 
 # decode specific settings
 export VLLM_DP_SIZE=2
@@ -59,8 +65,12 @@ export VLLM_DP_MASTER_PORT=25940
 export VLLM_EP_SIZE=16
 
 # warmup settings
-export VLLM_SKIP_WARMUP=True
-#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache,false,131072
+#export VLLM_SKIP_WARMUP=True
+if [ "$INC_FP8" -eq 1 ]; then
+  export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_fp8_inc_d_cache,false,262144,false
+else
+  export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_bf16_d_cache,false,131072,false
+fi
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="true"
