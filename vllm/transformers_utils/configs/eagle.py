@@ -44,7 +44,8 @@ class EAGLEConfig(PretrainedConfig):
             self.truncated_vocab_size = self.model.vocab_size if \
                 truncated_vocab_size is None else truncated_vocab_size
 
-        if 'DeepSeekMTPModel' in model.architectures and method == 'eagle':
+        if ('DeepSeekMTPModel' in self.model.architectures) \
+            and method == 'eagle':
             self.eagle_proposer = True
 
         if not envs.VLLM_USE_V1 and \
