@@ -59,11 +59,14 @@ PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10
 DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
 ```
 
-### 3. Start prefill server(s):
+### 3. Start mooncake/etcd service:
+source start_etcd_mooncake_master.sh
+
+### 4. Start prefill server(s):
 
 ```bash
-source 1p_start_prefill.sh $machine master (master means the mooncake/etcd master will be launched on this node)
-source 1p_start_prefill.sh $machine (start prefill node without mooncake/ected master)
+source 1p_start_prefill.sh $machine (start prefill node)
+
 ```
 
 ### 4. Start decode servers(s): source dp0_xp2d_start_decode.sh / source dp1_xp2d_start_decode.sh
