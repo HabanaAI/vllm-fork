@@ -1,13 +1,7 @@
 #!/bin/bash
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
-# for backward compatible. following nodes are started as mooncake master node
-if [ "$2" == "master" ] || [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
-    source "$BASH_DIR"/start_etcd_mooncake_master.sh
-    echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
-fi
-
-sleep 30
+sleep 20
 
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g10}.json
 

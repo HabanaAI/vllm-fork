@@ -41,6 +41,17 @@ unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET
 unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX VLLM_DECODE_BLOCK_BUCKET_LIMIT
 unset QUANT_CONFIG VLLM_REQUANT_FP8_INC VLLM_ENABLE_RUNTIME_DEQUANT VLLM_HPU_MARK_SCALES_AS_CONST
 
+# mooncake rdma setting
+# Only set MC_MS_AUTO_DISC=0 when mooncake-transfer-engine version is 0.3.6 or higher
+mooncake_version="$(python3 -c 'import importlib.metadata; print(importlib.metadata.version("mooncake-transfer-engine"))' 2>/dev/null)"
+if [ -n "$mooncake_version" ]; then
+    # Use python -c to compare versions for improved readability
+    is_ge=$(python3 -c "from packaging import version; result = version.parse('$mooncake_version') >= version.parse('0.3.6'); print('1' if result else '0')" 2>/dev/null)
+    if [ "$is_ge" = "1" ]; then
+        export MC_MS_AUTO_DISC=0
+    fi
+fi
+
 # ***************************** DO NOT CHANGE SETTINGS END *************************************** #
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

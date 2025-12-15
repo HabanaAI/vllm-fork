@@ -8,8 +8,24 @@ pkill -f etcd
 sleep 5s
 
 # Define commands as arrays
-ETCD_CMD=(rm -rf default.etcd && etcd --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://localhost:2379)
-MOON_CMD=(mooncake_master -max_threads 64 -port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2)
+data_dir="default_`hostname`.etcd"
+echo data_dir:$data_dir
+rm -rf $data_dir
+ETCD_CMD=(etcd --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://localhost:2379 --data-dir $data_dir)
+# Determine mooncake-transfer-engine version
+mooncake_version="$(python3 -c 'import importlib.metadata; print(importlib.metadata.version("mooncake-transfer-engine"))' 2>/dev/null)"
+if [ -n "$mooncake_version" ]; then
+    # Check if version >= 0.3.6 using Python version parsing
+    is_ge=$(python3 -c "from packaging import version; result = version.parse('$mooncake_version') >= version.parse('0.3.6'); print('1' if result else '0')" 2>/dev/null)
+    if [ "$is_ge" = "1" ]; then
+        MOON_CMD=(mooncake_master -rpc_thread_num 64 -rpc_port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2)
+    else
+        MOON_CMD=(mooncake_master -max_threads 64 -port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2)
+    fi
+else
+    # Default/fallback to old version
+    MOON_CMD=(mooncake_master -max_threads 64 -port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2)
+fi
 
 # Check if XPYD_LOG is set
 if [ -n "$XPYD_LOG" ]; then
