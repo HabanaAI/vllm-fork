@@ -410,7 +410,10 @@ class Qwen2_5_VisionAttention(nn.Module):
                     q_i = q[:, start_idx:end_idx]
                     k_i = k[:, start_idx:end_idx]
                     v_i = v[:, start_idx:end_idx]
-                    a_i = attn_mask[start_idx:end_idx, start_idx:end_idx]
+                    if attn_mask is not None:
+                        a_i = attn_mask[start_idx:end_idx, start_idx:end_idx]
+                    else:
+                        a_i = None
                     q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                      for x in [q_i, k_i, v_i])
                     output_i = FusedSDPA.apply(q_i, k_i, v_i, a_i, 0.0, False,
@@ -426,10 +429,13 @@ class Qwen2_5_VisionAttention(nn.Module):
                 (batch_size, _, seq_len_N_t, _) = q1.shape
                 (batch_size, _, seq_len_N_s, _) = k1.shape
                 mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
-                attn_mask = fullatt_block_attn_mask.reshape(
-                    batch_size, 1, seq_len_N_t, seq_len_N_s,
-                    -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
-                assert attn_mask.shape == mask_shape
+                if fullatt_block_attn_mask is not None:
+                    attn_mask = fullatt_block_attn_mask.reshape(
+                        batch_size, 1, seq_len_N_t, seq_len_N_s,
+                        -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
+                    assert attn_mask.shape == mask_shape
+                else:
+                    attn_mask = None
 
                 if q1.shape[2] <= 65536:  # need to investigate this crosspoint
                     fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0,
