@@ -106,5 +106,6 @@ if [ "$INC_FP8" -eq 1 ]; then
   export RUNTIME_SCALE_PATCHING=1
 fi
 #Fall back to FA2
-export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=0
+#export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=0
 
+export INC_APPLY_OOT_PATCH=1

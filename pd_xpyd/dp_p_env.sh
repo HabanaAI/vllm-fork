@@ -95,6 +95,14 @@ env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 # ***************************************  bucketing ends ************************************* #
 
+# FA3 Env Settings
+export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=1
+export PT_HPU_QKV_SLICE_SEQ_LEN_THLD=4096
+export PT_HPU_SDPA_BR_FACTOR=4096       # slice size on the query
+export PT_HPU_SDPA_BC_FACTOR=4096       # siice size on the kv
+export VLLM_FUSEDSDPA_QKV_SLICE_CHUNK_SIZE=4096 # qkv slice size in fp8 FSDPA
+export PT_HPU_QKV_SLICE_IMPL="slice_qkv"    # select the fp8 fsdpa impl
+
 # prefill specific setting
 export VLLM_SKIP_PREFILL_SAMPLING=1
 export VLLM_DP_SIZE=1
