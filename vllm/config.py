@@ -1693,8 +1693,12 @@ class SchedulerConfig:
                                "is experimental and may lead to unexpected "
                                "behaviors.")
             else:
-                raise ValueError("Padding-aware scheduling currently "
-                                "does not work with chunked prefill ")
+                self.use_padding_aware_scheduling = False
+                logger.warning("Disabling padding-aware scheduling since "
+                               "chunked prefill is enabled. To enable "
+                               "padding-aware scheduling with chunked prefill, "
+                               "set the environment variable "
+                               "VLLM_PADDING_AWARE_IN_CHUNKED_PREFILL=true")
 
     @property
     def is_multi_step(self) -> bool:
