@@ -629,8 +629,11 @@ class Qwen3_VisionTransformerStaticShape(Qwen3_VisionTransformer):
                     attention_mask.squeeze(1).unsqueeze(0) * attention_mask
 
                 extra_forward_kwargs = {}
+                padded_len = pixel_values_curr_img_padded.shape[0]
+                if padded_len == curr_img_size:
+                    # If there is no pad, attn_mask is not needed
+                    fullatt_block_attn_mask = None
                 if htorch.utils.internal.is_lazy():
-                    padded_len = pixel_values_curr_img_padded.shape[0]
                     use_graph = vision_buckets.use_graph(padded_len)
                     extra_forward_kwargs.update(
                         {"bypass_hpu_graphs": not use_graph})
