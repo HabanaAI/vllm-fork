@@ -130,6 +130,28 @@ class MediaConnector:
                 f"{self.allowed_media_domains}. Input URL domain: "
                 f"{url_spec.hostname}")
 
+    @overload
+    def load_from_url(
+        self,
+        url: str,
+        media_io: MediaIO[_M],
+        *,
+        fetch_timeout: Optional[int] = ...,
+        load_type: Literal["PIL"] = "PIL",
+    ) -> _M:
+        ...
+
+    @overload
+    def load_from_url(
+        self,
+        url: str,
+        media_io: MediaIO[_M],
+        *,
+        fetch_timeout: Optional[int] = ...,
+        load_type: Literal["bytes"],
+    ) -> bytes:
+        ...
+
     def load_from_url(
         self,
         url: str,
