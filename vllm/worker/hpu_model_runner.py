@@ -450,6 +450,15 @@ class HpuModelAdapter(torch.nn.Module):
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
         self._rotary_prepare_cos_sin = self._get_prepare_cos_sin()
+        ##enable eagle proposer
+        if vllm_config.speculative_config is not None:
+            archs = vllm_config.model_config.hf_config.architectures
+            print("archs ", archs)
+            if vllm_config.speculative_config.method=='eagle' and \
+                ('DeepseekV3ForCausalLM' in archs or \
+                  'EagleDeepSeekMTPModel' in archs
+                 ):
+                self.eagle_proposer = True
 
     def _get_rotary_embedding_module(self, model: torch.nn.Module):
         """
@@ -812,6 +821,8 @@ class HpuModelAdapter(torch.nn.Module):
                                  virtual_engine,
                                  dp_awared_padding=self.dp_awared_padding):
             hidden_states = self.model(*args, **kwargs)
+            if self.eagle_proposer:
+                all_hidden_states = hidden_states
             if self._rotary_prepare_cos_sin is not None and \
                 not self.model_is_mrope:
                 self._reset_rotary_cos_sin()
@@ -821,8 +832,10 @@ class HpuModelAdapter(torch.nn.Module):
             if selected_token_indices is not None:
                 hidden_states = hidden_states.index_select(
                     0, selected_token_indices)
-
-        return hidden_states
+        if self.eagle_proposer:
+            return hidden_states, all_hidden_states
+        else:
+            return hidden_states
 
     def compute_logits(self, *args, **kwargs):
         return self.model.compute_logits(*args, **kwargs)
@@ -1250,6 +1263,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     and not self.lora_config)
         self.use_delayed_sampling = get_config(
         ).use_delayed_sampling and can_use_delayed_sampling
+        ##enable eagle proposer
+        if vllm_config.speculative_config is not None:
+            archs = vllm_config.model_config.hf_config.architectures
+            if vllm_config.speculative_config.method=='eagle' and \
+                ('EagleDeepSeekMTPModel' in archs or \
+                 'DeepseekV3ForCausalLM' in archs):
+                self.eagle_proposer = True
 
     def _set_gc_threshold(self) -> None:
         """
@@ -1642,7 +1662,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _use_graphs(self, batch_size, seq_len, ctx_blocks=0):
         if self.enforce_eager:
             return False
-        if not self.skip_warmup:
+        if not self.skip_warmup or self.eagle_proposer:
             return batch_size * seq_len <= self.max_seq_len_to_capture
         bucket = (batch_size, seq_len, ctx_blocks)
         if seq_len > 1:
@@ -4323,8 +4343,26 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if previous_hidden_states is not None:
                 # HPU will pad up to block_size,
                 # pad previous_hidden_states as well
-                previous_hidden_states = previous_hidden_states.unsqueeze(
-                    1).expand(-1, input_tokens.shape[-1], -1)
+                if self.eagle_proposer:
+                    #for eagle draft model (bs,padded_seq,hidden)
+                    if len(previous_hidden_states.shape
+                           ) == 3 and previous_hidden_states.shape[
+                               1] < input_tokens.shape[-1]:
+                        padding = torch.zeros(
+                            (previous_hidden_states.shape[0],
+                             input_tokens.shape[-1] -
+                             previous_hidden_states.shape[1],
+                             previous_hidden_states.shape[2]),
+                            dtype=previous_hidden_states.dtype,
+                            device=previous_hidden_states.device)
+                        previous_hidden_states = torch.cat(
+                            [previous_hidden_states, padding], dim=1)
+                    if len(previous_hidden_states.shape) < 3:
+                        previous_hidden_states = previous_hidden_states. \
+                        unsqueeze(1).expand(-1, input_tokens.shape[-1], -1)
+                else:
+                    previous_hidden_states = previous_hidden_states.unsqueeze(
+                        1).expand(-1, input_tokens.shape[-1], -1)
                 batch_size_padding = batch_size - previous_hidden_states.shape[
                     0]
                 if batch_size_padding > 0:
@@ -4449,10 +4487,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
-                        hidden_states = self.model.forward(
-                            **execute_model_kwargs,
-                            selected_token_indices=sampling_metadata.
-                            selected_token_indices)
+                        if self.eagle_proposer:
+                            hidden_states, all_hidden_states = self.model. \
+                            forward(**execute_model_kwargs,
+                                selected_token_indices=sampling_metadata.
+                                selected_token_indices)
+                        else:
+                            hidden_states = self.model.forward(
+                                **execute_model_kwargs,
+                                selected_token_indices=sampling_metadata.
+                                selected_token_indices)
                         if warmup_mode and not is_dummy_run:
                             torch.hpu.synchronize()
                             import torch.distributed as dist
@@ -4533,6 +4577,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         logits=logits,
                         sampling_metadata=sampling_metadata,
                     )
+                    if self.eagle_proposer:
+                        output.all_hidden_states = all_hidden_states
+
                     if num_steps > 1:
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(

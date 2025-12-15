@@ -24,7 +24,7 @@ from vllm.model_executor.layers.typical_acceptance_sampler import (
 from vllm.platforms import current_platform
 from vllm.sequence import (VLLM_INVALID_TOKEN_ID,
                            CompletionSequenceGroupOutput, ExecuteModelRequest,
-                           HiddenStates, SequenceGroupMetadata,
+                           HiddenStates, SequenceData, SequenceGroupMetadata,
                            get_all_seq_ids_and_request_ids)
 from vllm.spec_decode.batch_expansion import BatchExpansionTop1Scorer
 
@@ -193,11 +193,6 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
                         draft_worker_kwargs[
                             "model_runner_cls"] = GeneralTP1DraftModelRunner
                 else:
-                    if draft_model_config.hf_config.model_type == "eagle":
-                        raise NotImplementedError(
-                            f"{draft_model_config.hf_config.model_type} "
-                            "does not support TP > 1 yet")
-
                     allow_zero_draft_token_step = False
 
                 # Load lm_head weight for eagle in init_device
@@ -347,6 +342,14 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
         self._disable_log_stats = disable_log_stats
         self._num_spec_prefill_steps = num_spec_prefill_steps
 
+        if 'DeepseekV3ForCausalLM' in \
+            self.scorer_worker.model_runner.vllm_config.model_config. \
+            architectures and self.scorer_worker.model_runner. \
+            speculative_config is not None and \
+            self.scorer_worker.model_runner.speculative_config. \
+            method == 'eagle':
+            self.eagle_proposer = True
+
     def init_device(self) -> None:
         """Initialize both scorer and proposer models.
         """
@@ -360,15 +363,54 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
         self.proposer_worker.load_model()
 
         if self._enable_lm_head_weight_load:
-            # NOTE(Shangming): gather lm_head weight when tp enabled
-            target_lm_head_weight: torch.Tensor = tensor_model_parallel_gather(
-                self.scorer_worker.model_runner.model_runner.model.lm_head.\
-                    weight.data,
-                    dim=0,
-            )
+            if self.eagle_proposer:
+                self.proposer_worker.model_runner.model.model.lm_head = \
+                    self.scorer_worker.model_runner.model_runner.model.lm_head
+            else:
+                # NOTE(Shangming): gather lm_head weight when tp enabled
+                target_lm_head_weight: torch.Tensor = \
+                    tensor_model_parallel_gather( \
+                    self.scorer_worker.model_runner.model_runner.model.lm_head.\
+                        weight.data,
+                        dim=0,
+                )
 
-            self.proposer_worker.maybe_load_lm_head_weight(
-                target_lm_head_weight)
+                self.proposer_worker.maybe_load_lm_head_weight(
+                    target_lm_head_weight)
+
+        if self.eagle_proposer:
+            # share embed_tokens with the target model if needed
+            target_embed_tokens_weight: torch.Tensor = \
+                self.scorer_worker.model_runner.model_runner.model.model.model.\
+                    embed_tokens.weight.data
+
+            if torch.distributed.get_world_size() == 1 \
+                and self.proposer_worker.model_runner.model.model. \
+                    model.embed_tokens. \
+                    weight.shape == target_embed_tokens_weight.shape:
+                logger.info(
+                    "Assuming the EAGLE head shares the same vocab embedding" \
+                    " with the target model."
+                )
+                del self.proposer_worker.model_runner.model.model. \
+                    model.embed_tokens.weight
+                self.proposer_worker.model_runner.model.model.model. \
+                    embed_tokens.weight = target_embed_tokens_weight
+            else:
+                if self.proposer_worker.model_runner.model.model.model.\
+                    embed_tokens.weight.shape == self.scorer_worker. \
+                    model_runner.model_runner.model.model.model.embed_tokens.\
+                    weight.shape:
+                    del self.proposer_worker.model_runner.model.model.\
+                        model.embed_tokens.weight
+                    self.proposer_worker.model_runner.model.model.model.\
+                        embed_tokens.weight = self.scorer_worker.model_runner.\
+                        model_runner.model.model.model.embed_tokens.\
+                        weight.data.clone()
+                    logger.info(
+                        "The EAGLE head's vocab embedding was loaded " \
+                        " separately from the target model."
+                        )
 
         self._metrics.init_tensors(self.rank, device_type=self.device)
         if model_parallel_is_initialized():
@@ -707,18 +749,55 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
             # We prepare the prefill hidden states here so that there no
             # additional complexity in worker for spec_decode vs non_spec_decode
             # flow and execute_model doesn't need additional modifications.
-            execute_model_req.previous_hidden_states = \
-                prepare_prefill_hidden_states(
-                    sampler_output.prefill_hidden_states)
+            if not self.eagle_proposer:
+                execute_model_req.previous_hidden_states = \
+                    prepare_prefill_hidden_states(
+                        sampler_output.prefill_hidden_states)
+            else:
+                execute_model_req.previous_hidden_states = \
+                    HiddenStates(sampler_output.all_hidden_states)
+            #adjust input of eagle proposer
+            if self.eagle_proposer:
+                draft_seq_group_metadata_list = []
+                for i, seq_group_meta in enumerate(
+                        execute_model_req.seq_group_metadata_list):
+                    key = list(seq_group_meta.seq_data.keys())[0]
+                    seq_data = seq_group_meta.seq_data[key]
+                    prompt_token_ids = seq_data.prompt_token_ids
+                    sample_token_ids = sampler_output.sampled_token_ids[i]
+                    input_len = len(prompt_token_ids)
+                    input_ids = [None] * input_len
+                    input_ids[:-1] = prompt_token_ids[1:]
+                    input_ids[-1] = sample_token_ids
+                    seq_data = {}
+                    seq_data[key] = SequenceData.from_seqs(input_ids)
+                    seq_group_meta_data = SequenceGroupMetadata(
+                        request_id=seq_group_meta.request_id,
+                        is_prompt=True,
+                        seq_data=seq_data,
+                        sampling_params=seq_group_meta.sampling_params,
+                        block_tables=seq_group_meta.block_tables,
+                        do_sample=seq_group_meta.do_sample,
+                        token_chunk_size=None,
+                        state=seq_group_meta.state,
+                        token_type_ids=seq_group_meta.token_type_ids,
+                    )
+                    draft_seq_group_metadata_list.append(seq_group_meta_data)
+                draft_execute_model_req = execute_model_req.clone(
+                    draft_seq_group_metadata_list)
             for i in range(self._num_spec_prefill_steps):
                 execute_model_req.spec_step_idx = i
-                self.proposer_worker.execute_model(execute_model_req)
+                if self.eagle_proposer:
+                    self.proposer_worker.execute_model(draft_execute_model_req)
+                    del draft_execute_model_req
+                else:
+                    self.proposer_worker.execute_model(execute_model_req)
 
         sampler_output_to_return = (self._serialize_sampler_output_no_logprobs(
             execute_model_req=execute_model_req, sampler_output=sampler_output)
                                     if self._disable_logprobs else
                                     [sampler_output])
-
+        del execute_model_req
         # Clear device tensors from sampler output. This reduces communication
         # overhead when the engine runs in a different process than the workers.
         sampler_output.sampled_token_probs = None
@@ -784,11 +863,50 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
         # Pass last hidden states from target model to proposer
         execute_model_req.previous_hidden_states = self.previous_hidden_states
         self.previous_hidden_states = None
+        draft_execute_model_req = execute_model_req
+        #adjust input of eagle proposer
+        if self.eagle_proposer:
+            draft_seq_group_metadata_list = []
+            for i, seq_group_meta in enumerate(
+                    execute_model_req.seq_group_metadata_list):
+                key = list(seq_group_meta.seq_data.keys())[0]
+                seq_data = seq_group_meta.seq_data[key]
+                prompt_token_ids = seq_data.prompt_token_ids
+                output_token_ids = seq_data.get_output_token_ids()
+                input_len = len(prompt_token_ids)
+                input_ids = [None] * input_len
+                input_ids[:-1] = prompt_token_ids[1:]
+                input_ids[-1] = output_token_ids[0]
+
+                seq_data = {}
+                if len(output_token_ids) > 1:
+                    out_token_ids = output_token_ids[1:]
+                    seq_data[key] = SequenceData.from_seqs(
+                        input_ids, out_token_ids)
+                else:
+                    seq_data[key] = SequenceData.from_seqs(input_ids)
+
+                seq_group_meta_data = SequenceGroupMetadata(
+                    request_id=seq_group_meta.request_id,
+                    is_prompt=False,
+                    seq_data=seq_data,
+                    sampling_params=seq_group_meta.sampling_params,
+                    block_tables=seq_group_meta.block_tables,
+                    do_sample=seq_group_meta.do_sample,
+                    token_chunk_size=None,
+                    state=seq_group_meta.state,
+                    token_type_ids=seq_group_meta.token_type_ids,
+                )
+                draft_seq_group_metadata_list.append(seq_group_meta_data)
+            draft_execute_model_req = None
+            draft_execute_model_req = execute_model_req.clone(
+                draft_seq_group_metadata_list)
 
         with Timer() as proposal_timer:
             # Generate proposals using draft worker.
             proposals = self.proposer_worker.get_spec_proposals(
-                execute_model_req, self._seq_with_bonus_token_in_last_step)
+                draft_execute_model_req,
+                self._seq_with_bonus_token_in_last_step)
 
         if not self._allow_zero_draft_token_step and proposals.no_proposals:
             #TODO: Fix it #5814
@@ -1294,6 +1412,12 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
     def stop_profile(self):
         if isinstance(self.scorer_worker, WorkerBase):
             self.scorer_worker.stop_profile()
+
+    def shutdown(self):
+        if isinstance(self.scorer_worker, WorkerBase):
+            self.scorer_worker.shutdown()
+        if isinstance(self.proposer_worker, WorkerBase):
+            self.proposer_worker.shutdown()
 
 
 def split_num_cache_blocks_evenly(scorer_cache_block_size_bytes: int,

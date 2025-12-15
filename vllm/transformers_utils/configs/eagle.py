@@ -44,8 +44,21 @@ class EAGLEConfig(PretrainedConfig):
             self.truncated_vocab_size = self.model.vocab_size if \
                 truncated_vocab_size is None else truncated_vocab_size
 
-        if not envs.VLLM_USE_V1:
-            kwargs["architectures"] = ["EAGLEModel"]
+        if 'DeepSeekMTPModel' in model.architectures and method == 'eagle':
+            self.eagle_proposer = True
+
+        if not envs.VLLM_USE_V1 and \
+            ((self.model is None) or (self.model is not None \
+                and 'EagleDeepSeekMTPModel' not in self.model.architectures)):
+            if self.eagle_proposer:  #method == "eagle":
+                assert self.model is not None, \
+                    "model should not be None when method is eagle"
+                kwargs["architectures"] = [
+                    f"Eagle{arch}" if not arch.startswith("Eagle") \
+                        else arch for arch in self.model.architectures
+                ]
+            else:
+                kwargs["architectures"] = ["EAGLEModel"]
         else:
             # Eagle model name should follow naming convention of
             # LlamaForCausalLM -> EagleLlamaForCausalLM
