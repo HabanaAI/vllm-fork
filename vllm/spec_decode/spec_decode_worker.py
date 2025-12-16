@@ -350,6 +350,8 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
             method == 'eagle':
             self.eagle_proposer = True
 
+        self.draft_seq_data_dict = {}
+
     def init_device(self) -> None:
         """Initialize both scorer and proposer models.
         """
@@ -783,6 +785,9 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
                         token_type_ids=seq_group_meta.token_type_ids,
                     )
                     draft_seq_group_metadata_list.append(seq_group_meta_data)
+                    self.draft_seq_data_dict[key] = copy.deepcopy(
+                        seq_data[key])
+
                 draft_execute_model_req = execute_model_req.clone(
                     draft_seq_group_metadata_list)
             for i in range(self._num_spec_prefill_steps):
@@ -871,21 +876,12 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
                     execute_model_req.seq_group_metadata_list):
                 key = list(seq_group_meta.seq_data.keys())[0]
                 seq_data = seq_group_meta.seq_data[key]
-                prompt_token_ids = seq_data.prompt_token_ids
                 output_token_ids = seq_data.get_output_token_ids()
-                input_len = len(prompt_token_ids)
-                input_ids = [None] * input_len
-                input_ids[:-1] = prompt_token_ids[1:]
-                input_ids[-1] = output_token_ids[0]
-
                 seq_data = {}
-                if len(output_token_ids) > 1:
-                    out_token_ids = output_token_ids[1:]
-                    seq_data[key] = SequenceData.from_seqs(
-                        input_ids, out_token_ids)
-                else:
-                    seq_data[key] = SequenceData.from_seqs(input_ids)
-
+                out_token_ids = output_token_ids[-1]
+                self.draft_seq_data_dict[key].append_token_id(
+                    out_token_ids, 0.0)
+                seq_data[key] = self.draft_seq_data_dict[key]
                 seq_group_meta_data = SequenceGroupMetadata(
                     request_id=seq_group_meta.request_id,
                     is_prompt=False,
