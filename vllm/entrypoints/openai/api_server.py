@@ -4,11 +4,13 @@
 import asyncio
 import atexit
 import gc
+import hashlib
 import importlib
 import inspect
 import json
 import multiprocessing
 import os
+import secrets
 import signal
 import socket
 import tempfile
@@ -1073,7 +1075,26 @@ def build_app(args: Namespace) -> FastAPI:
                             status_code=HTTPStatus.BAD_REQUEST)
 
     # Ensure --api-key option from CLI takes precedence over VLLM_API_KEY
-    if token := args.api_key or envs.VLLM_API_KEY:
+    if tokens := [key for key in (args.api_key or [envs.VLLM_API_KEY]) if key]:
+
+        def verify_token(headers) -> bool:
+            authorization_header_value = headers.get("Authorization")
+            if not authorization_header_value:
+                return False
+
+            scheme, _, param = authorization_header_value.partition(" ")
+            if scheme.lower() != "bearer":
+                return False
+
+            param_hash = hashlib.sha256(param.encode("utf-8")).digest()
+
+            token_match = False
+            for token_hash in [
+                    hashlib.sha256(t.encode("utf-8")).digest() for t in tokens
+            ]:
+                token_match |= secrets.compare_digest(param_hash, token_hash)
+
+            return token_match
 
         @app.middleware("http")
         async def authentication(request: Request, call_next):
@@ -1084,7 +1105,7 @@ def build_app(args: Namespace) -> FastAPI:
                 url_path = url_path[len(app.root_path):]
             if not url_path.startswith("/v1"):
                 return await call_next(request)
-            if request.headers.get("Authorization") != "Bearer " + token:
+            if not verify_token(request.headers):
                 return JSONResponse(content={"error": "Unauthorized"},
                                     status_code=401)
             return await call_next(request)
