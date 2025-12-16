@@ -687,7 +687,7 @@ class ModelConfig:
                 mm_processor_kwargs=self.mm_processor_kwargs,
                 disable_mm_preprocessor_cache=self.
                 disable_mm_preprocessor_cache,
-                enable_mm_embeds=self.enable_mm_embeds,
+                enable_mm_embeds=bool(self.enable_mm_embeds),
             )
 
         if self.limit_mm_per_prompt:
