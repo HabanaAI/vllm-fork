@@ -330,7 +330,7 @@ def test_parse_chat_messages_empty_pil_image_with_uuid(
         "role": "user",
         "content": "<|image_1|>\nWhat's in this image?",
     }]
-    _assert_mm_data_is_image_input(mm_data, 1, skipped_image_indices=[0])
+    _assert_mm_data_is_image_input(mm_data, 1)
 
 
 def test_parse_chat_messages_empty_image_embeds_with_uuid(
