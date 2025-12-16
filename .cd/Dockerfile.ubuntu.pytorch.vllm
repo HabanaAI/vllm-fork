@@ -3,16 +3,16 @@
 
 # Parameterize base image components
 ARG DOCKER_URL=vault.habana.ai/gaudi-docker
-ARG VERSION=1.21.1
+ARG VERSION=1.22.2
 ARG BASE_NAME=ubuntu22.04
-ARG PT_VERSION=2.6.0
+ARG PT_VERSION=2.7.1
 ARG REVISION=latest
 ARG REPO_TYPE=habanalabs
 
 FROM ${DOCKER_URL}/${VERSION}/${BASE_NAME}/${REPO_TYPE}/pytorch-installer-${PT_VERSION}:${REVISION}
 
 # Parameterize commit/branch for vllm-fork checkout
-ARG VLLM_FORK_COMMIT=v0.7.2+Gaudi-1.21.0
+ARG VLLM_FORK_COMMIT=v0.9.0.1+Gaudi-1.22.2
 
 ENV OMPI_MCA_btl_vader_single_copy_mechanism=none
 
@@ -35,7 +35,10 @@ RUN mkdir -p $VLLM_PATH && \
 ENV VLLM_TARGET_DEVICE=hpu
 RUN pip install -v -r $VLLM_PATH/requirements-hpu.txt
 RUN pip install -v -e $VLLM_PATH --no-build-isolation
-RUN pip install -v -e $VLLM_PATH/tests/vllm_test_utils --no-build-isolation
+
+# Install additional Python packages
+RUN pip install datasets && \
+    pip install pandas
 
 # Copy utility scripts and configuration
 RUN mkdir -p /root/scripts/
