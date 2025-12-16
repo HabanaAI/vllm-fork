@@ -350,7 +350,7 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
             method == 'eagle':
             self.eagle_proposer = True
 
-        self.draft_seq_data_dict = {}
+        self.draft_seq_data_dict: dict[str, Any] = {}
 
     def init_device(self) -> None:
         """Initialize both scorer and proposer models.
