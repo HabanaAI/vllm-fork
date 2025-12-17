@@ -16,6 +16,8 @@ import vllm.envs as envs
 from vllm.engine.arg_utils import AsyncEngineArgs, optional_type
 from vllm.entrypoints.chat_utils import (ChatTemplateContentFormatOption,
                                          validate_chat_template)
+from vllm.entrypoints.constants import (H11_MAX_HEADER_COUNT_DEFAULT,
+                                        H11_MAX_INCOMPLETE_EVENT_SIZE_DEFAULT)
 from vllm.entrypoints.openai.serving_models import (LoRAModulePath,
                                                     PromptAdapterPath)
 from vllm.entrypoints.openai.tool_parsers import ToolParserManager
@@ -279,6 +281,20 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         help=
         "If set to True, enable tracking server_load_metrics in the app state."
     )
+    parser.add_argument(
+        "--h11-max-incomplete-event-size",
+        type=int,
+        default=H11_MAX_INCOMPLETE_EVENT_SIZE_DEFAULT,
+        help=
+        "Maximum size (bytes) of an incomplete HTTP event (header or body) for"
+        "h11 parser. Helps mitigate header abuse. Default: 4194304 (4 MB).")
+    parser.add_argument(
+        "--h11-max-header-count",
+        type=int,
+        default=H11_MAX_HEADER_COUNT_DEFAULT,
+        help=
+        "Maximum number of HTTP headers allowed in a request for h11 parser."
+        "Helps mitigate header abuse. Default: 256.")
 
     return parser
 
