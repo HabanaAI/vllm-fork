@@ -76,6 +76,9 @@ def test_can_initialize(model_arch: str, monkeypatch: pytest.MonkeyPatch):
                        _initialize_kv_caches_v1), monkeypatch.context() as m):
         if model_info.v0_only:
             m.setenv("VLLM_USE_V1", "0")
+        extra_args = {}
+        if model_arch in ("PrithviGeoSpatialMAE", "Terratorch"):
+            extra_args["enable_mm_embeds"] = True
         LLM(
             model_info.default,
             tokenizer=model_info.tokenizer,
@@ -88,4 +91,5 @@ def test_can_initialize(model_arch: str, monkeypatch: pytest.MonkeyPatch):
             max_model_len=model_info.max_model_len,
             load_format="dummy",
             hf_overrides=hf_overrides,
+            **extra_args,
         )
