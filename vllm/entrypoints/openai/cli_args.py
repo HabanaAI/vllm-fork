@@ -221,8 +221,14 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         "--h11_max_incomplete_event_size",
         action="store_true",
         default=4194304,
-        help="Maximum size (bytes) of an incomplete HTTP event (header or body) for
-    h11 parser. Helps mitigate header abuse. Default: 4194304 (4 MB).")
+        help="Maximum size (bytes) of an incomplete HTTP event (header or body) for "
+        "h11 parser. Helps mitigate header abuse. Default: 4194304 (4 MB).")
+    parser.add_argument(
+        "--h11_max_header_count",
+        action="store_true",
+        default=256,
+        help="Maximum number of HTTP headers allowed in a request for h11 parser."
+        "Helps mitigate header abuse. Default: 256."
     parser.add_argument(
         "--enable-auto-tool-choice",
         action="store_true",
