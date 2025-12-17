@@ -413,21 +413,25 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
         new_output_token_ids = [*seq_data.get_output_token_ids(), *token_ids]
         mrope_position_delta = seq_data.mrope_position_delta
 
-        new_seq_data_dict = {
-            target_seq_id:
-            SequenceData(
-                prompt_token_ids,
-                _output_token_ids=array(VLLM_TOKEN_ID_ARRAY_TYPE,
-                                        new_output_token_ids),
-            ),
-        }
-        # This is a hack. Technically, spec decoding should compute
-        # num_lookahead slots at one shot, but instead, it expands the batch
-        # and evaluate one by one right now. context_len is seq_len - 1 because
-        # the kv cache is filled by a previous batch in the batch expansion.
-        for data in new_seq_data_dict.values():
-            data.update_num_computed_tokens(data.get_len() - 1)
-            data.mrope_position_delta = mrope_position_delta
+        if len(token_ids) == 0:
+            new_seq_data_dict = {target_seq_id: seq_data}
+        else:
+            new_seq_data_dict = {
+                target_seq_id:
+                SequenceData(
+                    prompt_token_ids,
+                    _output_token_ids=array(VLLM_TOKEN_ID_ARRAY_TYPE,
+                                            new_output_token_ids),
+                ),
+            }
+            # This is a hack. Technically, spec decoding should compute
+            # num_lookahead slots at one shot, but instead, it expands the
+            # batch and evaluate one by one right now. context_len is
+            # seq_len - 1 because the kv cache is filled by a previous
+            # batch in the batch expansion.
+            for data in new_seq_data_dict.values():
+                data.update_num_computed_tokens(data.get_len() - 1)
+                data.mrope_position_delta = mrope_position_delta
 
         return SequenceGroupMetadata(
             request_id=seq_group_metadata.request_id,
