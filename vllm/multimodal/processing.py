@@ -1165,6 +1165,14 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
         supported_mm_limits = self.info.get_supported_mm_limits()
         allowed_mm_limits = self.info.get_allowed_mm_limits()
 
+        mm_config = self.info.ctx.model_config.get_multimodal_config()
+        if not mm_config.enable_mm_embeds:
+            for modality, items in mm_items.items():
+                if isinstance(items, (EmbeddingItems, DictEmbeddingItems)):
+                    raise ValueError(
+                        f"You must set `--enable-mm-embeds` to input "
+                        f"`{modality}_embeds`")
+
         for modality, items in mm_items.items():
             supported_limit = supported_mm_limits.get(modality, 0)
             allowed_limit = allowed_mm_limits.get(modality, 0)
