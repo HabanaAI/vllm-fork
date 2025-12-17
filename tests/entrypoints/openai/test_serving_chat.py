@@ -38,6 +38,7 @@ class MockModelConfig:
     logits_processor_pattern = None
     diff_sampling_param: Optional[dict] = None
     allowed_local_media_path: str = ""
+    allowed_media_domains: Optional[list[str]] = None
     encoder_config = None
     generation_config: str = "auto"
 
