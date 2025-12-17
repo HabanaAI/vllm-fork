@@ -155,7 +155,7 @@ pass a tensor of shape `(num_items, feature_size, hidden_size of LM)` to the cor
 from vllm import LLM
 
 # Inference with image embeddings as input
-llm = LLM(model="llava-hf/llava-1.5-7b-hf")
+llm = LLM(model="llava-hf/llava-1.5-7b-hf", enable_mm_embeds=True)
 
 # Refer to the HuggingFace repo for the correct format to use
 prompt = "USER: <image>\nWhat is the content of this image?\nASSISTANT:"
@@ -184,23 +184,38 @@ prompt = ...
 # torch.Tensor of shape (num_images, image_feature_size, hidden_size of LM)
 image_embeds = torch.load(...)
 
-# Qwen2-VL
-llm = LLM("Qwen/Qwen2-VL-2B-Instruct", limit_mm_per_prompt={"image": 4})
-mm_data = {
-    "image": {
-        "image_embeds": image_embeds,
-        # image_grid_thw is needed to calculate positional encoding.
-        "image_grid_thw": torch.load(...),  # torch.Tensor of shape (1, 3),
+    # Embeddings for multiple images
+    # torch.Tensor of shape (num_images, image_feature_size, hidden_size of LM)
+    image_embeds = torch.load(...)
+
+    # Qwen2-VL
+    llm = LLM(
+        "Qwen/Qwen2-VL-2B-Instruct",
+        limit_mm_per_prompt={"image": 4},
+        enable_mm_embeds=True,
+    )
+    mm_data = {
+        "image": {
+            "image_embeds": image_embeds,
+            # image_grid_thw is needed to calculate positional encoding.
+            "image_grid_thw": torch.load(...),  # torch.Tensor of shape (1, 3),
+        }
     }
 }
 
-# MiniCPM-V
-llm = LLM("openbmb/MiniCPM-V-2_6", trust_remote_code=True, limit_mm_per_prompt={"image": 4})
-mm_data = {
-    "image": {
-        "image_embeds": image_embeds,
-        # image_sizes is needed to calculate details of the sliced image.
-        "image_sizes": [image.size for image in images],  # list of image sizes
+    # MiniCPM-V
+    llm = LLM(
+        "openbmb/MiniCPM-V-2_6",
+        trust_remote_code=True,
+        limit_mm_per_prompt={"image": 4},
+        enable_mm_embeds=True,
+    )
+    mm_data = {
+        "image": {
+            "image_embeds": image_embeds,
+            # image_sizes is needed to calculate details of the sliced image.
+            "image_sizes": [image.size for image in images],  # list of image sizes
+        }
     }
 }
 
@@ -472,7 +487,14 @@ Full example: <gh-file:examples/online_serving/openai_chat_completion_client_for
 ### Embedding Inputs
 
 To input pre-computed embeddings belonging to a data type (i.e. image, video, or audio) directly to the language model,
-pass a tensor of shape to the corresponding field of the multi-modal dictionary.
+pass a tensor of shape `(num_items, feature_size, hidden_size of LM)` to the corresponding field of the multi-modal dictionary.
+
+You must enable this feature via the `--enable-mm-embeds` flag in `vllm serve`.
+
+!!! warning
+    The vLLM engine may crash if incorrect shape of embeddings is passed.
+    Only enable this flag for trusted users!
+
 #### Image Embedding Inputs
 For image embeddings, you can pass the base64-encoded tensor to the `image_embeds` field.
 The following example demonstrates how to pass image embeddings to the OpenAI server:
