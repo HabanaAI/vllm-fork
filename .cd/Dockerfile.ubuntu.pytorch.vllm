@@ -3,7 +3,7 @@
 
 # Parameterize base image components
 ARG DOCKER_URL=vault.habana.ai/gaudi-docker
-ARG VERSION=1.22.0
+ARG VERSION=1.22.2
 ARG BASE_NAME=ubuntu22.04
 ARG PT_VERSION=2.7.1
 ARG REVISION=latest
@@ -12,7 +12,7 @@ ARG REPO_TYPE=habanalabs
 FROM ${DOCKER_URL}/${VERSION}/${BASE_NAME}/${REPO_TYPE}/pytorch-installer-${PT_VERSION}:${REVISION}
 
 # Parameterize commit/branch for vllm-fork checkout
-ARG VLLM_FORK_COMMIT=v0.9.0.1+Gaudi-1.22.0
+ARG VLLM_FORK_COMMIT=v0.9.0.1+Gaudi-1.22.2
 
 ENV OMPI_MCA_btl_vader_single_copy_mechanism=none
 
