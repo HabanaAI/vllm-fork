@@ -48,6 +48,19 @@ def phi3v_model_config():
                        })
 
 
+@pytest.fixture(scope="function")
+def phi3v_model_config_image_embeds():
+    return ModelConfig(
+        PHI3V_MODEL_ID,
+        runner="generate",
+        trust_remote_code=True,
+        limit_mm_per_prompt={
+            "image": 2,
+        },
+        enable_mm_embeds=True,
+    )
+
+
 @pytest.fixture(scope="module")
 def phi3v_tokenizer():
     return TokenizerGroup(
@@ -285,6 +298,111 @@ def test_parse_chat_messages_multiple_images(
         "<|image_1|>\n<|image_2|>\nWhat's in these images?"
     }]
     _assert_mm_data_is_image_input(mm_data, 2)
+
+
+def test_parse_chat_messages_empty_pil_image_with_uuid(
+    phi3v_model_config,
+    phi3v_tokenizer,
+):
+    uuid = "abcd"
+    conversation, mm_data, mm_uuids = parse_chat_messages(
+        [{
+            "role":
+            "user",
+            "content": [
+                {
+                    "type": "image_pil",
+                    "image_pil": None,
+                    "uuid": uuid
+                },
+                {
+                    "type": "text",
+                    "text": "What's in this image?"
+                },
+            ],
+        }],
+        phi3v_model_config,
+        phi3v_tokenizer,
+        content_format="string",
+    )
+
+    assert conversation == [{
+        "role": "user",
+        "content": "<|image_1|>\nWhat's in this image?",
+    }]
+    _assert_mm_data_is_image_input(mm_data, 1)
+
+
+def test_parse_chat_messages_empty_image_embeds_with_uuid(
+    phi3v_model_config_image_embeds,
+    phi3v_tokenizer,
+):
+    uuid = "abcd"
+    conversation, mm_data, mm_uuids = parse_chat_messages(
+        [{
+            "role":
+            "user",
+            "content": [
+                {
+                    "type": "image_embeds",
+                    "image_embeds": None,
+                    "uuid": uuid
+                },
+                {
+                    "type": "text",
+                    "text": "What's in this image?"
+                },
+            ],
+        }],
+        phi3v_model_config_image_embeds,
+        phi3v_tokenizer,
+        content_format="string",
+    )
+
+    assert conversation == [{
+        "role": "user",
+        "content": "<|image_1|>\nWhat's in this image?",
+    }]
+    assert mm_data is not None
+    assert "image" in mm_data
+    assert mm_data["image"] is None
+
+
+@pytest.mark.asyncio
+async def test_parse_chat_messages_empty_image_embeds_with_uuid_async(
+    phi3v_model_config_image_embeds,
+    phi3v_tokenizer,
+):
+    uuid = "abcd"
+    conversation, mm_future, mm_uuids = parse_chat_messages_futures(
+        [{
+            "role":
+            "user",
+            "content": [
+                {
+                    "type": "image_embeds",
+                    "image_embeds": None,
+                    "uuid": uuid
+                },
+                {
+                    "type": "text",
+                    "text": "What's in this image?"
+                },
+            ],
+        }],
+        phi3v_model_config_image_embeds,
+        phi3v_tokenizer,
+        content_format="string",
+    )
+
+    assert conversation == [{
+        "role": "user",
+        "content": "<|image_1|>\nWhat's in this image?",
+    }]
+    mm_data = await mm_future
+    assert mm_data is not None
+    assert "image" in mm_data
+    assert mm_data["image"] is None
 
 
 @pytest.mark.asyncio
