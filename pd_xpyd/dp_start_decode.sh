@@ -1,7 +1,7 @@
 #!/bin/bash
 #set -x
 
-sleep 60
+sleep 30
 
 # machine id, EP, TP, DP Index, DP Host IP
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
