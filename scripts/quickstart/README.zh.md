@@ -40,6 +40,7 @@
     - [安装 lm\_eval](#安装-lm_eval)
     - [如果需要，设置代理或 HF 镜像](#如果需要设置代理或-hf-镜像)
     - [运行 lm\_eval](#运行-lm_eval)
+  - [工具调用功能](#工具调用功能)
 
 ## 硬件要求
 
@@ -609,4 +610,45 @@ export no_proxy=127.0.0.1
 如果需要，更改以下命令中的模型路径、vLLM IP 地址或端口。
 ```bash
 lm_eval --model local-completions --tasks gsm8k --model_args model=/data/hf_models/DeepSeek-R1-G2,max_gen_toks=4096,max_length=16384,base_url=http://127.0.0.1:8688/v1/completions --batch_size 16 --log_samples --output_path ./lm_eval_output
+```
+
+## 工具调用功能
+vLLM 支持调用用户定义的函数（Tool Calling）。
+
+工具调用功能与推理输出（Reasoning Outputs）不兼容。启用工具调用功能时，请务必从启动命令中**移除**推理相关参数（--enable-reasoning --reasoning-parser deepseek_r1），并**添加**下方各模型所需的特定参数。
+
+### DeepSeek-V3 系列模型 (`deepseek_v3`)
+支持的模型：
+
+* `deepseek-ai/DeepSeek-V3-0324` (使用 [examples/tool_chat_template_deepseekv3.jinja](../../examples/tool_chat_template_deepseekv3.jinja))
+* `deepseek-ai/DeepSeek-R1-0528` (使用 [examples/tool_chat_template_deepseekr1.jinja](../../examples/tool_chat_template_deepseekr1.jinja))
+
+```bash
+vllm serve ... 
+    --enable-auto-tool-choice \
+    --tool-call-parser deepseek_v3 \
+    --chat-template <上述对应的模板路径>
+```
+
+### DeepSeek-V3.1 系列模型 (`deepseek_v31`)
+支持的模型：
+
+* `deepseek-ai/DeepSeek-V3.1` (使用 [examples/tool_chat_template_deepseekv31.jinja](../../examples/tool_chat_template_deepseekv31.jinja))
+
+```bash
+vllm serve ... 
+    --enable-auto-tool-choice \
+    --tool-call-parser deepseek_v31 \
+    --chat-template ../../examples/tool_chat_template_deepseekv31.jinja
+```
+
+### Kimi-K2 系列模型 (`kimi_k2`)
+支持的模型：
+
+* `moonshotai/Kimi-K2-Instruct`
+
+```bash
+vllm serve ... 
+    --enable-auto-tool-choice \
+    --tool-call-parser kimi_k2
 ```

@@ -41,6 +41,7 @@ Verified models:
     - [Install lm\_eval](#install-lm_eval)
     - [Set Proxy or HF Mirror if Required](#set-proxy-or-hf-mirror-if-required)
     - [Run lm\_eval](#run-lm_eval)
+  - [Tool Calling Support](#tool-calling-support)
 
 ## Hardware Requirements
 
@@ -610,4 +611,43 @@ Change the model path, vLLM IP address or port in the command below if required.
 lm_eval --model local-completions --tasks gsm8k --model_args model=/data/hf_models/DeepSeek-R1-G2,max_gen_toks=4096,max_length=16384,base_url=http://127.0.0.1:8688/v1/completions --batch_size 16 --log_samples --output_path ./lm_eval_output
 ```
 
+## Tool Calling Support
+vLLM supports calling user-defined functions. 
 
+Tool calling is incompatible with reasoning outputs. To enable this feature, you must **remove** any reasoning parameters (--enable-reasoning --reasoning-parser deepseek_r1) and **add** the model-specific arguments shown below.
+
+### DeepSeek-V3 Models (`deepseek_v3`)
+Supported models:
+
+* `deepseek-ai/DeepSeek-V3-0324` (use with [examples/tool_chat_template_deepseekv3.jinja](../../examples/tool_chat_template_deepseekv3.jinja))
+* `deepseek-ai/DeepSeek-R1-0528` (use with [examples/tool_chat_template_deepseekr1.jinja](../../examples/tool_chat_template_deepseekr1.jinja))
+
+```bash
+vllm serve ... 
+    --enable-auto-tool-choice \
+    --tool-call-parser deepseek_v3 \
+    --chat-template {see_above}
+```
+
+### DeepSeek-V3.1 Models (`deepseek_v31`)
+Supported models:
+
+* `deepseek-ai/DeepSeek-V3.1` (use with [examples/tool_chat_template_deepseekv31.jinja](../../examples/tool_chat_template_deepseekv31.jinja))
+
+```bash
+vllm serve ... 
+    --enable-auto-tool-choice \
+    --tool-call-parser deepseek_v31 \
+    --chat-template ../../examples/tool_chat_template_deepseekv31.jinja
+```
+
+### Kimi-K2 Models (`kimi_k2`)
+Supported models:
+
+* `moonshotai/Kimi-K2-Instruct`
+
+```bash
+vllm serve ... 
+    --enable-auto-tool-choice \
+    --tool-call-parser kimi_k2
+```
