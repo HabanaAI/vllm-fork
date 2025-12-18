@@ -11,7 +11,7 @@ export no_proxy=127.0.0.1
 
 mkdir -p benchmark_log
 
-    test_benchmark_serving_request_rate() {
+test_benchmark_serving_request_rate() {
     local_input=$1
     local_output=$2
     local_max_concurrency=$3
