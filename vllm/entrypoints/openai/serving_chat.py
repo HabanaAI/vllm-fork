@@ -916,8 +916,7 @@ class OpenAIServingChat(OpenAIServing):
                                 ChatCompletionNamedToolChoiceParam
                                 ) and request.tool_choice != "required"):
                 message = ChatMessage(role=role,
-                                      reasoning_content=reasoning_content,
-                                      content=content)
+                                      content=output.text)
 
             # if the request uses tools and specified a tool choice
             elif request.tool_choice and type(
