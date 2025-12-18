@@ -8,14 +8,14 @@ export VLLM_HOST_IP=
 export GLOO_SOCKET_IFNAME=
 
 # warmup cache folder
-export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k_1k_20k_16k,false,32768
+export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k,false,32768
 
 # vllm parameters
 export max_num_batched_tokens=32768
 export max_num_seqs=512
-input_min=768
-input_max=20480
-output_max=16896
+input_min=1
+input_max=$max_num_batched_tokens
+output_max=$max_num_batched_tokens
 
 # Change to fp8_inc if want to use fp8 kv cache
 export KV_CACHE_DTYPE=auto

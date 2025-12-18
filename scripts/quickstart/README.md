@@ -407,14 +407,11 @@ export GLOO_SOCKET_IFNAME=enx6c1ff7012f87
 #### Adjust environment variables if required. Make sure the head node and worker node to have the same configuration except for VLLM_HOST_IP, GLOO_SOCKER_IFNAME and HCCL_SOCKET_IFNAME. 
 ```bash
 # warmup cache folder
-export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k_1k_20k_16k,false,32768
+export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k,false,32768
 
 # vllm parameters
-max_num_batched_tokens=32768
-max_num_seqs=512
-input_min=768
-input_max=20480
-output_max=16896
+export max_num_batched_tokens=32768
+export max_num_seqs=512
 ```
 
 #### INC FP8 Quantization

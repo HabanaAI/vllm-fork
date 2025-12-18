@@ -402,14 +402,11 @@ export GLOO_SOCKET_IFNAME=enx6c1ff7012f87
 #### 如果需要，调整环境变量。确保头节点和工作节点具有相同的配置，除了 VLLM_HOST_IP、GLOO_SOCKER_IFNAME 和 HCCL_SOCKET_IFNAME。
 ```bash
 #预热缓存文件夹
-export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k_1k_20k_16k,false,32768
+export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k,false,32768
 
 # vllm 参数
-max_num_batched_tokens=32768
-max_num_seqs=512
-input_min=768
-input_max=20480
-output_max=16896
+export max_num_batched_tokens=32768
+export max_num_seqs=512
 ```
 
 
