@@ -361,6 +361,8 @@ class ModelConfig:
     """Maximum number of data items per modality per prompt. Only applicable
     for multimodal models."""
     enable_mm_embeds: Union[bool | None] = None
+    """If `True`, enables passing multi-modal embeddings as inputs via the
+    `mm_embeds` key."""
     use_async_output_proc: bool = True
     """Whether to use async output processor."""
     config_format: Union[str, ConfigFormat] = ConfigFormat.AUTO.value
