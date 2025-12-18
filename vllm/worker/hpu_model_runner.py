@@ -1644,8 +1644,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return False
         if not self.skip_warmup:
             # when APC is on, seq_len only contains the new query length.
-            seq_len = seq_len + ctx_blocks * self.block_size
-            return batch_size * seq_len <= self.max_seq_len_to_capture
+            if seq_len > 1:
+                seq_len = seq_len + ctx_blocks * self.block_size
+                return batch_size * seq_len <= self.max_seq_len_to_capture
+            else:
+                return True
         bucket = (batch_size, seq_len, ctx_blocks)
         if seq_len > 1:
             ctx_len = ctx_blocks * self.block_size
