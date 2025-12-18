@@ -1,6 +1,6 @@
 #set -x
 
-sleep 60
+sleep 30
 
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
