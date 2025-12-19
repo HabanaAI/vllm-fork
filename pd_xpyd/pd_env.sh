@@ -59,8 +59,9 @@ fi
 DEBUG_LOG=1
 DEBUG_GRAPH=0
 DEBUG_PROFILE=0
-INC_FP8=1
-BENCHMARK_MODE=0
+INC_FP8=0
+# When using benchmark mode (not benchmark_decode) in proxy server, be sure to set BENCHMARK_MODE=1
+BENCHMARK_MODE=0 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG END ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 if [ "$BENCHMARK_MODE" -eq 1 ]; then

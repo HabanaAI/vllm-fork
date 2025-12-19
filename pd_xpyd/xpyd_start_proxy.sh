@@ -63,6 +63,11 @@ else
     REPEAT_D_TIMES=$5
 fi
 
+if [ "$4" == "benchmark_decode" ]; then
+    PROXY_MODE=3
+    echo " Benchmark Decode mode enabled"
+fi
+# For backward compatibility.....
 
 if [ "$6" == "benchmark" ]; then
     PROXY_MODE=2
@@ -72,6 +77,11 @@ fi
 if [ "$5" == "basic" ]; then
     PROXY_MODE=1
     echo " Basic mode enabled"
+fi
+
+if [ "$5" == "benchmark_decode" ]; then
+    PROXY_MODE=3
+    echo " Benchmark Decode mode enabled"
 fi
 
 # Build prefill/decode IP arrays from supplied env file if available
@@ -141,7 +151,12 @@ if [ "$PROXY_MODE" == 2 ]; then
         --repeat_p_request 1 \
         --repeat_d_times $REPEAT_D_TIMES \
         --benchmark_mode"
-
+elif [ "$PROXY_MODE" == 3 ]; then
+    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark_decode_n_prompts.py \
+        --model $model_path \
+        --prefill $PREFILL_ARGS \
+        --decode $DECODE_ARGS \
+        --port 8868"
 elif [ "$PROXY_MODE" == 0 ]; then
     CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_advanced.py \
         --model $model_path \
