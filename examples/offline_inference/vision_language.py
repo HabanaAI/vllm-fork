@@ -443,6 +443,32 @@ def run_h2ovl(questions: list[str], modality: str) -> ModelRequestData:
     )
 
 
+# HunyuanOCR
+def run_hunyuan_vl(questions: list[str], modality: str) -> ModelRequestData:
+    assert modality == "image"
+
+    model_name = "tencent/HunyuanOCR"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=8192,
+        limit_mm_per_prompt={modality: 1},
+        enforce_eager=1,
+    )
+
+    placeholder = "<｜hy_place▁holder▁no▁100｜><｜hy_place▁holder▁no▁102｜><｜hy_place▁holder▁no▁101｜>"  # noqa: E501
+    prompts = [
+        f"<｜hy_begin▁of▁sentence｜>{placeholder}{question}<｜hy_User｜>"
+        for question in questions
+    ]
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+        stop_token_ids=None,
+    )
+
+
 # Idefics3-8B-Llama3
 def run_idefics3(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
@@ -1484,6 +1510,7 @@ model_example_map = {
     "glm4_1v": run_glm4_1v,
     "glm4_5v": run_glm4_5v,
     "h2ovl_chat": run_h2ovl,
+    "hunyuan_vl": run_hunyuan_vl,
     "idefics3": run_idefics3,
     "internvl_chat": run_internvl,
     "keye_vl": run_keye_vl,

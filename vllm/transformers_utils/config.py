@@ -32,7 +32,7 @@ from vllm.logger import init_logger
 from vllm.transformers_utils.configs import (ChatGLMConfig, Cohere2Config,
                                              DbrxConfig, DeepseekVLV2Config,
                                              EAGLEConfig, ExaoneConfig,
-                                             H2OVLChatConfig,
+                                             H2OVLChatConfig, HunYuanVLConfig,
                                              InternVLChatConfig, JAISConfig,
                                              KimiVLConfig, MedusaConfig,
                                              MiniMaxText01Config,
@@ -65,6 +65,7 @@ _CONFIG_REGISTRY: dict[str, type[PretrainedConfig]] = {
     "cohere2": Cohere2Config,
     "dbrx": DbrxConfig,
     "deepseek_vl_v2": DeepseekVLV2Config,
+    "hunyuan_vl": HunYuanVLConfig,
     "kimi_vl": KimiVLConfig,
     "mpt": MPTConfig,
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)

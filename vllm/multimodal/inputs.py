@@ -198,6 +198,42 @@ A dictionary containing nested tensors which have been batched via
 """
 
 
+@dataclass
+class MultiModalFeatureSpec:
+    """
+    Represents a single multimodal input with its processed data and metadata.
+
+    Used by the V1 engine to track multimodal data through processing and
+    caching. A request containing multiple multimodal items will have one
+    MultiModalFeatureSpec per item.
+    """
+
+    data: Optional["MultiModalKwargsItem"]
+    """Multimodal data for this feature"""
+
+    modality: str
+    """Based on the input, e.g., "image", "audio", "video"."""
+
+    identifier: str
+    """mm_hash or uuid for caching encoder outputs."""
+
+    mm_position: PlaceholderRange
+    """e.g., PlaceholderRange(offset=2, length=336)"""
+
+    @staticmethod
+    def gather_kwargs(features: list["MultiModalFeatureSpec"], keys: set[str]):
+        kwargs = defaultdict[str, list[NestedTensors]](list)
+
+        for f in features:
+            item = f.data
+            if item is not None:
+                for k in keys:
+                    if k in item:
+                        kwargs[k].append(item[k].data)
+
+        return dict(kwargs)
+
+
 @dataclass(frozen=True)
 class MultiModalFieldElem:
     """
