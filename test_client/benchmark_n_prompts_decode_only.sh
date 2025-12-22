@@ -16,9 +16,9 @@ run_benchmark() {
     local local_input=$1
     local local_output=$2
     local local_max_concurrency=$3
-    local local_num_prompts=$3
-    local local_backend=$4
-    local endpoint=$5
+    local local_num_prompts=$4
+    local local_backend=$5
+    local endpoint=$6
     local request_rate=inf
 
     if [[ "$local_backend" == "openai-chat" ]]; then
@@ -45,6 +45,7 @@ run_decode_only_benchmark() {
     local local_input_len=$1
     local local_output_len=$2
     local local_num_concurrency=$3
+    local local_num_prompts=$(( local_num_concurrency * 5 ))
     local local_backend=$4
 
     if [[ "$local_backend" == "openai-chat" ]]; then
@@ -56,11 +57,11 @@ run_decode_only_benchmark() {
     fi
 
     # Call the function with the provided output length
-    echo "Start Prefill Run - Input: $local_input_len, Output: $local_output_len (Actual: 1), Concurrency: $local_num_concurrency, Backend: $local_backend"
-    run_benchmark $local_input_len 1 $local_num_concurrency $local_backend $PREFILL_ENDPOINT
+    echo "Start Prefill Run - Input: $local_input_len, Output: $local_output_len (Actual: 1), Concurrency: $local_num_concurrency, Prompts: $local_num_prompts, Backend: $local_backend"
+    run_benchmark $local_input_len 1 $local_num_concurrency $local_num_prompts $local_backend $PREFILL_ENDPOINT
 
-    echo "Start Decode Run - Input: $local_input_len, Output: $local_output_len, Concurrency: $local_num_concurrency, Backend: $local_backend"
-    run_benchmark $local_input_len $local_output_len $local_num_concurrency $local_backend $DECODE_ENDPOINT
+    echo "Start Decode Run - Input: $local_input_len, Output: $local_output_len, Concurrency: $local_num_concurrency, Prompts: $local_num_prompts, Backend: $local_backend"
+    run_benchmark $local_input_len $local_output_len $local_num_concurrency $local_num_prompts $local_backend $DECODE_ENDPOINT
 }
 
 run_decode_only_benchmark 5000 1300 64 vllm 
@@ -76,3 +77,16 @@ run_decode_only_benchmark 5000 1300 96 openai-chat
 run_decode_only_benchmark 5000 1300 384 openai-chat
 run_decode_only_benchmark 5000 1300 448 openai-chat
 run_decode_only_benchmark 5000 1300 512 openai-chat
+
+run_decode_only_benchmark 2048 1024 64 vllm
+run_decode_only_benchmark 2048 1024 96 vllm
+run_decode_only_benchmark 2048 1024 624 vllm
+run_decode_only_benchmark 2048 1024 672 vllm
+run_decode_only_benchmark 2048 1024 1024 vllm
+
+run_decode_only_benchmark 2048 1024 64 openai-chat
+run_decode_only_benchmark 2048 1024 96 openai-chat
+run_decode_only_benchmark 2048 1024 624 openai-chat
+run_decode_only_benchmark 2048 1024 672 openai-chat
+run_decode_only_benchmark 2048 1024 1024 openai-chat
+
