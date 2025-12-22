@@ -36,12 +36,6 @@ block_size=128
 # clear envs
 unset VLLM_HPU_LOG_STEP_GRAPH_COMPILATION PT_HPU_METRICS_GC_DETAILS GRAPH_VISUALIZATION
 
-
-#hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on --gaudi2 --merged "hltv,csv"
-#hl-prof-config --use-template profile_api_with_nics  --fuser on --trace-analyzer on
-hl-prof-config --use-template profile_api_with_nics -b 32768 --trace-analyzer on --fuser on --gaudi3 || true
-
-
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
 unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET_MAX
@@ -133,6 +127,9 @@ if [ "$INC_FP8" -eq 1 ]; then
     model_path=/host/mnt/disk001/hf_models/DeepSeek-R1
   elif [[ "$(hostname)" =~ ^wb[0-9][0-9]$ ]]; then
     model_path=/host/data/HF_Models/DeepSeek-R1
+  elif [ "$(hostname)" == "sys41" ] || [ "$(hostname)" == "sys42" ] || [ "$(hostname)" == "sys43" ] \
+  || [ "$(hostname)" == "sys51" ] || [ "$(hostname)" == "sys62" ] || [ "$(hostname)" == "sys53" ]; then
+    model_path=/host/mnt/kefei/hf_models/DeepSeek-R1
   else
     model_path=/host/mnt/disk001/HF_Models/DeepSeek-R1
   fi
@@ -150,6 +147,9 @@ else
     model_path=/host/mnt/disk001/hf_models/DeepSeek-R1-Gaudi3/
   elif [[ "$(hostname)" =~ ^wb[0-9][0-9]$ ]]; then
     model_path=/host/data/HF_Models/DeepSeek-R1-Gaudi3/
+  elif [ "$(hostname)" == "sys41" ] || ["$(hostname)" == "sys42" ] || [ "$(hostname)" == "sys43" ] \
+  || [ "$(hostname)" == "sys51" ] || [ "$(hostname)" == "sys62" ] || [ "$(hostname)" == "sys53" ];then
+    model_path=/host/mnt/kefei/hf_models/DeepSeek-R1-Gaudi3/
   else
     model_path=/host/mnt/disk002/HF_Models/DeepSeek-R1-Gaudi3/
   fi

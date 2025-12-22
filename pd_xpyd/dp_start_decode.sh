@@ -63,7 +63,7 @@ fi
 NUMACTL_ENABLED=${VLLM_USE_NUMACTL:-1}
 # Optional blacklist of CPUs (comma-separated list of cores or ranges).
 # Example: export VLLM_CPU_BLACKLIST="0-3,120-123"
-export VLLM_CPU_BLACKLIST="110-129,350-369"
+#export VLLM_CPU_BLACKLIST="110-129,350-369"
 CPU_BLACKLIST_RAW=${VLLM_CPU_BLACKLIST:-}
 
 expand_cpu_list() {
@@ -164,6 +164,12 @@ if command -v hl-smi >/dev/null 2>&1; then
       }
       gsub(/ /, "", cpu);                         # remove spaces
       printf "CPU_BIND_%s=%s; MEM_BIND_%s=%s\n", mod, cpu, mod, mem;
+      numa_count[mem]++;                          # count modules per NUMA
+    }
+    END {
+      for (numa in numa_count) {
+        printf "MODULES_PER_NUMA_%s=%s; ", numa, numa_count[numa];
+      }
     }
   ')"
 fi
@@ -180,7 +186,47 @@ if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
   for mid in $MODULE_IDS; do
     eval "echo [DEBUG] MOD $mid CPU_BIND=\${CPU_BIND_$mid} MEM_BIND=\${MEM_BIND_$mid}"
   done
+  # Show modules per NUMA
+  for var in $(set | grep '^MODULES_PER_NUMA_' | cut -d= -f1); do
+    numa_id=${var#MODULES_PER_NUMA_}
+    eval "echo [DEBUG] NUMA $numa_id has \${$var} modules"
+  done
 fi
+
+# Manual setting for snc-3 on skyriver (6984P-C)
+#CPU_BIND_0="0-12,240-252"
+#CPU_BIND_1="13-25,253-265"
+#CPU_BIND_2="26-38,266-278"
+#CPU_BIND_3="40-52,280-292"
+#CPU_BIND_4="53-65,293-305"
+#CPU_BIND_5="66-78,306-318"
+#CPU_BIND_6="80-92,320-332"
+#CPU_BIND_7="93-105,333-345"
+#CPU_BIND_8="120-132,360-372"
+#CPU_BIND_9="133-145,373-385"
+#CPU_BIND_10="146-158,386-398"
+#CPU_BIND_11="160-172,400-412"
+#CPU_BIND_12="173-185,413-425"
+#CPU_BIND_13="186-198,426-438"
+#CPU_BIND_14="200-212,440-452"
+#CPU_BIND_15="213-225,453-465"
+#MEM_BIND_0="0"
+#MEM_BIND_1="0"
+#MEM_BIND_2="0"
+#MEM_BIND_3="1"
+#MEM_BIND_4="1"
+#MEM_BIND_5="1"
+#MEM_BIND_6="2"
+#MEM_BIND_7="2"
+#MEM_BIND_8="3"
+#MEM_BIND_9="3"
+#MEM_BIND_10="3"
+#MEM_BIND_11="4"
+#MEM_BIND_12="4"
+#MEM_BIND_13="4"
+#MEM_BIND_14="5"
+#MEM_BIND_15="5"
+
 
 for ((i=0; i<$DP_RANK; i++))
 do
@@ -215,26 +261,69 @@ do
       echo "[ERROR] Cannot split CPU_BIND (empty) for module ${MOD_ID}" >&2
       exit 1
     fi
-    # Special case: two large ranges shared among 4 modules on a NUMA. Split into 4 subranges.
+    # Special case: two large ranges shared among modules on a NUMA. Split into subranges.
     if [ $__num_chunks -eq 2 ]; then
+      # Get the number of modules per NUMA for this module
+      __numa_var="MODULES_PER_NUMA_${MEM_BIND}"
+      __modules_per_numa="${!__numa_var}"
+      if [ -z "$__modules_per_numa" ]; then
+        echo "[WARN] Cannot determine modules per NUMA for module ${MOD_ID} (NUMA ${MEM_BIND}). Using default of 4." >&2
+        __modules_per_numa=4
+      fi
       __r0="${__cpu_chunks[0]}"; __r1="${__cpu_chunks[1]}"
       __a0=${__r0%-*}; __b0=${__r0#*-}
       __a1=${__r1%-*}; __b1=${__r1#*-}
-      # ensure integers
-      __mid0=$(( (__a0 + __b0) / 2 ))
-      __mid1=$(( (__a1 + __b1) / 2 ))
-      __sub0="${__a0}-${__mid0}"
-      __sub1="$((__mid0+1))-${__b0}"
-      __sub2="${__a1}-${__mid1}"
-      __sub3="$((__mid1+1))-${__b1}"
-      __four_chunks=("$__sub0" "$__sub1" "$__sub2" "$__sub3")
-      __idx=$(( MOD_ID % 4 ))
-      __sel_chunk="${__four_chunks[$__idx]}"
+      # Split into __modules_per_numa subranges, where each subrange combines
+      # corresponding parts from both CPU ranges
+      __subranges=()
+      __range0_size=$(( __b0 - __a0 + 1 ))
+      __range1_size=$(( __b1 - __a1 + 1 ))
+      __subrange0_size=$(( __range0_size / __modules_per_numa ))
+      __subrange1_size=$(( __range1_size / __modules_per_numa ))
+      for ((__i=0; __i<__modules_per_numa; __i++)); do
+        # Calculate subrange for first CPU range
+        __start0=$(( __a0 + __i * __subrange0_size ))
+        if [ $__i -eq $((__modules_per_numa - 1)) ]; then
+          __end0=$__b0
+        else
+          __end0=$(( __start0 + __subrange0_size - 1 ))
+        fi
+        # Calculate subrange for second CPU range
+        __start1=$(( __a1 + __i * __subrange1_size ))
+        if [ $__i -eq $((__modules_per_numa - 1)) ]; then
+          __end1=$__b1
+        else
+          __end1=$(( __start1 + __subrange1_size - 1 ))
+        fi
+        # Combine both parts into one subrange
+        __subranges+=("${__start0}-${__end0},${__start1}-${__end1}")
+      done
+      # Select the appropriate subrange for this module
+      # Find module index within its NUMA (0-based)
+      # Collect all modules on the same NUMA by checking available MEM_BIND variables
+      __mods_on_numa=()
+      for __check_mod in {0..31}; do
+        __check_mem_var="MEM_BIND_${__check_mod}"
+        __check_mem="${!__check_mem_var:-}"
+        if [ -n "$__check_mem" ] && [ "$__check_mem" = "$MEM_BIND" ]; then
+          __mods_on_numa+=($__check_mod)
+        fi
+      done
+      # Find MOD_ID's position in the sorted list
+      __mod_idx_in_numa=0
+      for __idx_check in "${!__mods_on_numa[@]}"; do
+        if [ "${__mods_on_numa[$__idx_check]}" -eq "$MOD_ID" ]; then
+          __mod_idx_in_numa=$__idx_check
+          break
+        fi
+      done
+      __idx=$(( __mod_idx_in_numa % ${#__subranges[@]} ))
+      __sel_chunk="${__subranges[$__idx]}"
       if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
-        echo "[DEBUG] MOD ${MOD_ID} split 2-ranges into 4: '${__four_chunks[*]}', pick idx ${__idx} -> '$__sel_chunk'"
+        echo "[DEBUG] MOD ${MOD_ID} (NUMA ${MEM_BIND}, ${__modules_per_numa} modules/NUMA, idx ${__mod_idx_in_numa}) split 2-ranges into ${#__subranges[@]}: '${__subranges[*]}', pick idx ${__idx} -> '$__sel_chunk'"
       fi
       CPU_BIND="$__sel_chunk"
-      unset __r0 __r1 __a0 __b0 __a1 __b1 __mid0 __mid1 __sub0 __sub1 __sub2 __sub3 __four_chunks __idx
+      unset __r0 __r1 __a0 __b0 __a1 __b1 __modules_per_numa __numa_var __subranges __range0_size __range1_size __subrange0_size __subrange1_size __start0 __end0 __start1 __end1 __i __mod_idx_in_numa __idx __sel_chunk __mods_on_numa __check_mod __check_mem_var __check_mem __idx_check
     else
       __idx=$(( MOD_ID % __num_chunks ))
       if [ $__num_chunks -le $__idx ]; then
@@ -292,6 +381,7 @@ do
   fi
 
   extra_env=()
+
 
   # Execute command
   if [ "$DP_RANK" -ne 1 ]; then
