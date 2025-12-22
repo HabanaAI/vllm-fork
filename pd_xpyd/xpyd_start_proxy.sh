@@ -46,16 +46,8 @@ else
     NUM_DECODE=$((CARDS_PER_NODE / TP_SIZE))
 fi
 
-if [ -z "$4" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
-    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=$TP_SIZE, false, 127"
-    FIRST_TOKEN_FROM_P=false
-    REPEAT_D_TIMES=127
-else
-    FIRST_TOKEN_FROM_P=$4
-fi
 
-if [ -z "$5" ]; then
+if [ -z "$4" ]; then
     echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
     echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=$TP_SIZE, $FIRST_TOKEN_FROM_P, 127"
     REPEAT_D_TIMES=127
@@ -63,26 +55,20 @@ else
     REPEAT_D_TIMES=$5
 fi
 
-if [ "$4" == "benchmark_decode" ]; then
-    PROXY_MODE=3
-    echo " Benchmark Decode mode enabled"
-fi
-# For backward compatibility.....
-
-if [ "$6" == "benchmark" ]; then
-    PROXY_MODE=2
-    echo " Benchmark mode enabled"
-fi
-
-if [ "$5" == "basic" ]; then
-    PROXY_MODE=1
-    echo " Basic mode enabled"
-fi
+echo $5
 
 if [ "$5" == "benchmark_decode" ]; then
     PROXY_MODE=3
     echo " Benchmark Decode mode enabled"
+elif [ "$5" == "benchmark" ]; then
+    PROXY_MODE=2
+    echo " Benchmark mode enabled"
+elif [ "$5" == "basic" ]; then
+    PROXY_MODE=1
+    echo " Basic mode enabled"
 fi
+
+
 
 # Build prefill/decode IP arrays from supplied env file if available
 PREFILL_IPS=()
@@ -142,6 +128,9 @@ done
 echo "Decode Args: $DECODE_ARGS"
 echo "Prefill Args: $PREFILL_ARGS"
 
+
+echo "model_path: '$model_path'"
+
 if [ "$PROXY_MODE" == 2 ]; then
     CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_benchmark.py \
         --model $model_path \
@@ -152,7 +141,7 @@ if [ "$PROXY_MODE" == 2 ]; then
         --repeat_d_times $REPEAT_D_TIMES \
         --benchmark_mode"
 elif [ "$PROXY_MODE" == 3 ]; then
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark_decode_n_prompts.py \
+    CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark_decode_n_prompts.py \
         --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \

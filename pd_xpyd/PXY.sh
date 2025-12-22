@@ -3,30 +3,43 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 unset http_porxy https_proxy HTTP_PROXY HTTPS_PROXY
 
-BENCHMARK_MODE=false
+BENCHMARK_MODE=0
 FIRST_TOKEN_FROM_D=false
 KILL_MODE=false
 RESTART_MODE=false
-REPEAT_D_TIMES=127
+REPEAT_D_TIMES=0
 ENV_FILE=""
 
-while getopts "bdkrt:e:" opt; do
+while getopts "b:dkrt:e:" opt; do
     case $opt in
-        b) BENCHMARK_MODE=true ;;
+        b) 
+            if [[ "$OPTARG" =~ ^[0-9]+$ ]]; then
+                if [ "$OPTARG" -eq 1 ] || [ "$OPTARG" -eq 2 ]; then
+                    BENCHMARK_MODE=$OPTARG
+                else
+                    echo "Warning: Invalid benchmark mode value '$OPTARG'. Using default value 1 (benchmark)." >&2
+                    BENCHMARK_MODE=1
+                fi
+            else
+                echo "Warning: Benchmark mode must be an integer (1 or 2). Using default value 1 (benchmark)." >&2
+                BENCHMARK_MODE=1
+            fi
+            ;;
         d) FIRST_TOKEN_FROM_D=true ;;
         k) KILL_MODE=true ;;
         r) RESTART_MODE=true ;;
         t) REPEAT_D_TIMES=$OPTARG ;;
         e) ENV_FILE=$OPTARG ;;
-        *) echo "Usage: $0 [-b] [-d] [-k] [-r] [-t repeat_d_times] [-e env_file]" >&2
-           echo "  -b: Enable benchmark mode" >&2
+        *) echo "Usage: $0 [-b benchmark_mode] [-d] [-k] [-r] [-t repeat_d_times] [-e env_file]" >&2
+           echo "  -b: Benchmark mode (1=benchmark, 2=benchmark_decode, default: 1)" >&2
            echo "  -d: First token from decode node" >&2
            echo "  -k: Kill proxy server processes" >&2
            echo "  -r: Restart proxy server" >&2
            echo "  -t: Set repeat_d_times for benchmark (default: 127)" >&2
            echo "  -e: Path to environment file defining ROLE_IP entries" >&2
            echo "" >&2
-           echo "Example: $0 -b -t 50 -e env_G16_G15_G13.sh" >&2
+           echo "Example: $0 -b 1 -t 50 -e env_G16_G15_G13.sh" >&2
+           echo "Example: $0 -b 2 -t 50 -e env_G16_G15_G13.sh" >&2
            exit 1 ;;
     esac
 done
@@ -147,19 +160,18 @@ CMD_ARGS="1 $D_INSTANCE_NUMBER $TP_SIZE"
 
 echo CMD_ARGS:$CMD_ARGS
 
-# Set first token source argument (arg 4)
-if [ "$FIRST_TOKEN_FROM_D" = true ]; then
-    CMD_ARGS="$CMD_ARGS false"
-else
-    CMD_ARGS="$CMD_ARGS true"
-fi
-
 # Set repeat_d_times argument (arg 5)
 CMD_ARGS="$CMD_ARGS $REPEAT_D_TIMES"
 
 # Add benchmark argument if benchmark mode is enabled (arg 6)
-if [ "$BENCHMARK_MODE" = true ]; then
-    CMD_ARGS="$CMD_ARGS benchmark"
+# Default to 1 (benchmark) if -b is specified without a value
+if [ "$BENCHMARK_MODE" -gt 0 ]; then
+    if [ "$BENCHMARK_MODE" -eq 2 ]; then
+        CMD_ARGS="$CMD_ARGS benchmark_decode"
+    else
+        # Default to benchmark mode (value 1)
+        CMD_ARGS="$CMD_ARGS benchmark"
+    fi
 fi
 
 mkdir -p pd_test_log
@@ -178,13 +190,22 @@ fi
 
 export CARDS_PER_NODE=${USR_CARDS_PER_NODE:-8}
 
+# Determine benchmark mode string for display
+BENCHMARK_MODE_STR="disabled"
+if [ "$BENCHMARK_MODE" -eq 1 ]; then
+    BENCHMARK_MODE_STR="benchmark"
+elif [ "$BENCHMARK_MODE" -eq 2 ]; then
+    BENCHMARK_MODE_STR="benchmark_decode"
+fi
+
 echo "-------------------------------------------------------------------"
 echo "Being brought to background"
 echo "Log will be redirect to $log_file"
-echo "Benchmark mode: $BENCHMARK_MODE"
+echo "Benchmark mode: $BENCHMARK_MODE_STR ($BENCHMARK_MODE)"
 echo "First token from d: $FIRST_TOKEN_FROM_D"
 echo "Repeat D times: $REPEAT_D_TIMES"
 echo "Command: bash xpyd_start_proxy.sh $CMD_ARGS"
 echo "..."
 echo "-------------------------------------------------------------------"
+echo "CMD_ARGS: '$CMD_ARGS'"
 bash xpyd_start_proxy.sh $CMD_ARGS >> $log_file 2>&1 &

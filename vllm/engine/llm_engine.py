@@ -1656,9 +1656,9 @@ class LLMEngine:
                 profiler_obj = self._get_hpu_profiler()
                 if profiler_obj is not None:
                     try:
-                        os.remove(self._profile_ipc_path)
                         profiler_obj.stop()
                         print("[Profiler Debug] Profiler stopped successfully.", flush=True)
+                        os.remove(self._profile_ipc_path)
                     except Exception:
                         pass
                 self._profile_started = False
