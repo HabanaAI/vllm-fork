@@ -63,9 +63,32 @@ unset IFS
 CARDS_PER_NODE=${USR_CARDS_PER_NODE:-8}
 TP_AUTO=${USR_TP_SIZE:-1}
 
-HEAD_ROLE_KEY=${P_KEYS[0]}
-HEAD_IP=${ROLE_IP[$HEAD_ROLE_KEY]}
-HEAD_ADDR=${HEAD_ADDR:-${HEAD_IP}:6886}
+# Multi-instance configuration
+P_NUM_INSTANCE=${P_NUM_INSTANCE:-1}
+D_NUM_INSTANCE=${D_NUM_INSTANCE:-1}
+
+# Validate instance configuration
+if [[ ${#P_KEYS[@]} -lt $P_NUM_INSTANCE ]]; then
+  echo "Error: Not enough P nodes (${#P_KEYS[@]}) for $P_NUM_INSTANCE instances" >&2
+  exit 1
+fi
+if [[ ${#D_KEYS[@]} -lt $D_NUM_INSTANCE ]]; then
+  echo "Error: Not enough D nodes (${#D_KEYS[@]}) for $D_NUM_INSTANCE instances" >&2
+  exit 1
+fi
+
+# Calculate nodes per instance
+P_NODES_PER_INSTANCE=$(( ${#P_KEYS[@]} / P_NUM_INSTANCE ))
+D_NODES_PER_INSTANCE=$(( ${#D_KEYS[@]} / D_NUM_INSTANCE ))
+
+# Validate even distribution
+if [[ $(( ${#P_KEYS[@]} % P_NUM_INSTANCE )) -ne 0 ]]; then
+  echo "Warning: P nodes (${#P_KEYS[@]}) not evenly divisible by P_NUM_INSTANCE ($P_NUM_INSTANCE)" >&2
+fi
+if [[ $(( ${#D_KEYS[@]} % D_NUM_INSTANCE )) -ne 0 ]]; then
+  echo "Warning: D nodes (${#D_KEYS[@]}) not evenly divisible by D_NUM_INSTANCE ($D_NUM_INSTANCE)" >&2
+fi
+
 BENCHMARK_MODE=$P_ARGS
 
 echo "==== Host and IP Configuration ===="
@@ -79,7 +102,8 @@ echo "CARDS_PER_NODE=${CARDS_PER_NODE}"
 echo "TP_AUTO=${TP_AUTO}"
 echo "BASE_DIR=${BASE_DIR}"
 echo "BENCHMARK_MODE=${BENCHMARK_MODE}"
-echo "PREFILL HEAD_ADDR=${HEAD_ADDR}"
+echo "P_NUM_INSTANCE=${P_NUM_INSTANCE} (${P_NODES_PER_INSTANCE} nodes per instance)"
+echo "D_NUM_INSTANCE=${D_NUM_INSTANCE} (${D_NODES_PER_INSTANCE} nodes per instance)"
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "DRY-RUN MODE: Commands will not be executed."
 fi
@@ -90,48 +114,83 @@ echo "==================================="
 #sleep 30
 
 echo "Launching prefill workers"
-for role_key in "${P_KEYS[@]}"; do
-  role_idx=${role_key#P}
-  host=${ROLE_HOST[$role_key]}
-  ip=${ROLE_IP[$role_key]}
-  if [[ $role_key == "$HEAD_ROLE_KEY" ]]; then
-    role_type="head"
-    delay=2
-  else
-    role_type="node"
-    delay=5
-  fi
-  echo "Launching prefill ${role_type} on ${host} (${ip})"
-  prefill_cmd=(
-    ssh
-    root@"$ip"
-    "cd $BASE_DIR; ROLE=${role_type} ROLE_IDX=$role_idx BENCHMARK_MODE=$BENCHMARK_MODE ENV_FILE=$ENV_FILE HEAD_ADDR=${ROLE_IP[P0]} ./P.sh"
-  )
-  if [[ $DRY_RUN -eq 1 ]]; then
-    echo "[DRY-RUN] ${prefill_cmd[*]}"
-  else
-    "${prefill_cmd[@]}" &
-  fi
-  sleep "$delay"
+p_idx=0
+for p_instance_idx in $(seq 0 $((P_NUM_INSTANCE - 1))); do
+  instance_start=$((p_instance_idx * P_NODES_PER_INSTANCE))
+  instance_end=$((instance_start + P_NODES_PER_INSTANCE))
+  
+  # Get the head node for this instance (first node)
+  instance_head_key=${P_KEYS[$instance_start]}
+  instance_head_ip=${ROLE_IP[$instance_head_key]}
+  instance_head_addr=${instance_head_ip}:${RAY_HEAD_PORT:-6886}
+  
+  echo "--- Prefill Instance $p_instance_idx (nodes ${instance_start}-$((instance_end - 1))) ---"
+  
+  for intra_idx in $(seq 0 $((P_NODES_PER_INSTANCE - 1))); do
+    global_idx=$((instance_start + intra_idx))
+    if [[ $global_idx -ge ${#P_KEYS[@]} ]]; then
+      break
+    fi
+    
+    role_key=${P_KEYS[$global_idx]}
+    host=${ROLE_HOST[$role_key]}
+    ip=${ROLE_IP[$role_key]}
+    
+    if [[ $intra_idx -eq 0 ]]; then
+      role_type="head"
+      delay=2
+    else
+      role_type="node"
+      delay=5
+    fi
+    
+    echo "Launching prefill instance $p_instance_idx, node $intra_idx (${role_type}) on ${host} (${ip})"
+    prefill_cmd=(
+      ssh
+      root@"$ip"
+      "ROLE=${role_type} P_INSTANCE_IDX=$p_instance_idx P_INTRA_INSTANCE_IDX=$intra_idx BENCHMARK_MODE=$BENCHMARK_MODE ENV_FILE=$ENV_FILE HEAD_ADDR=$instance_head_ip $BASE_DIR/P.sh"
+    )
+    if [[ $DRY_RUN -eq 1 ]]; then
+      echo "[DRY-RUN] ${prefill_cmd[*]}"
+    else
+      "${prefill_cmd[@]}" &
+    fi
+    sleep "$delay"
+  done
 done
 
 echo "Launching decode workers"
-for role_key in "${D_KEYS[@]}"; do
-  instance_idx=${role_key#D}
-  host=${ROLE_HOST[$role_key]}
-  ip=${ROLE_IP[$role_key]}
-  echo "Launching decode worker ${role_key} on ${host} (${ip})"
-  decode_cmd=(
-    ssh
-    root@"$ip"
-    #"cd $BASE_DIR; DP_MASTER_IP=${ROLE_IP[D0]} DECODE_NEED_SCALEOUT=${USR_DECODE_NEED_SCALEOUT:-1} ./D.sh ${TP_AUTO} $host $instance_idx $ENV_FILE"
-    "cd $BASE_DIR; ENV_FILE=$ENV_FILE ./D.sh $instance_idx"
-
-  )
-  if [[ $DRY_RUN -eq 1 ]]; then
-    echo "[DRY-RUN] ${decode_cmd[*]}"
-  else
-    "${decode_cmd[@]}" &
-  fi
-  sleep 1
+for d_instance_idx in $(seq 0 $((D_NUM_INSTANCE - 1))); do
+  instance_start=$((d_instance_idx * D_NODES_PER_INSTANCE))
+  instance_end=$((instance_start + D_NODES_PER_INSTANCE))
+  
+  # Get the master node for this instance (first node)
+  instance_master_key=${D_KEYS[$instance_start]}
+  instance_master_ip=${ROLE_IP[$instance_master_key]}
+  
+  echo "--- Decode Instance $d_instance_idx (nodes ${instance_start}-$((instance_end - 1))) ---"
+  
+  for intra_idx in $(seq 0 $((D_NODES_PER_INSTANCE - 1))); do
+    global_idx=$((instance_start + intra_idx))
+    if [[ $global_idx -ge ${#D_KEYS[@]} ]]; then
+      break
+    fi
+    
+    role_key=${D_KEYS[$global_idx]}
+    host=${ROLE_HOST[$role_key]}
+    ip=${ROLE_IP[$role_key]}
+    
+    echo "Launching decode instance $d_instance_idx, node $intra_idx on ${host} (${ip})"
+    decode_cmd=(
+      ssh
+      root@"$ip"
+      "ENV_FILE=$ENV_FILE D_INSTANCE_IDX=$d_instance_idx D_INTRA_INSTANCE_IDX=$intra_idx D_INSTANCE_MASTER_IP=$instance_master_ip $BASE_DIR/D.sh"
+    )
+    if [[ $DRY_RUN -eq 1 ]]; then
+      echo "[DRY-RUN] ${decode_cmd[*]}"
+    else
+      "${decode_cmd[@]}" &
+    fi
+    sleep 1
+  done
 done

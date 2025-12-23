@@ -30,9 +30,27 @@ echo "=============================================="
 export DECODE_TP_SIZE=${USR_DECODE_TP_SIZE:-1}
 export DECODE_EP_SIZE=${USR_DECODE_EP_SIZE:-16}
 #export HOSTNAME=`hostname`
-export DECODE_INSTANCE_IDX=$1
+
+# Multi-instance support
+if [[ -n "${D_INSTANCE_IDX:-}" && -n "${D_INTRA_INSTANCE_IDX:-}" && -n "${D_INSTANCE_MASTER_IP:-}" ]]; then
+  # New multi-instance mode
+  export D_INSTANCE_IDX=${D_INSTANCE_IDX}
+  export D_INTRA_INSTANCE_IDX=${D_INTRA_INSTANCE_IDX}
+  export DECODE_INSTANCE_IDX=${D_INTRA_INSTANCE_IDX}  # For backward compatibility with dp_start_decode.sh
+  export DP_MASTER_IP=${D_INSTANCE_MASTER_IP}
+else
+  # Legacy mode: use first argument as instance index
+  if [[ -z "${1:-}" ]]; then
+    echo "Error: DECODE_INSTANCE_IDX must be provided as argument, or D_INSTANCE_IDX, D_INTRA_INSTANCE_IDX, and D_INSTANCE_MASTER_IP must be set" >&2
+    exit 1
+  fi
+  export DECODE_INSTANCE_IDX=$1
+  export D_INSTANCE_IDX=${D_INSTANCE_IDX:-0}
+  export D_INTRA_INSTANCE_IDX=${DECODE_INSTANCE_IDX}
+  export DP_MASTER_IP=${ROLE_IP[D0]}
+fi
+
 export CARDS_PER_NODE=${USR_CARDS_PER_NODE:-8}
-export DP_MASTER_IP=${ROLE_IP[D0]}
 export PLATFORM_TYPE=${USR_PLATFORM_TYPE:-OAM}
 export PREFILL_NEED_SCALEOUT=${USR_PREFILL_NEED_SCALEOUT:-0}
 export DECODE_NEED_SCALEOUT=${USR_DECODE_NEED_SCALEOUT:-1}
@@ -51,16 +69,27 @@ LOCAL_LOG_DIR=${LOCAL_LOG_DIR:-/workspace/pd_test_log}
 mkdir -p "$LOCAL_LOG_DIR"
 
 timestamp=$(TZ="Asia/Shanghai" date +"%Y%m%d_%H%M%S")
-log_file="$LOCAL_LOG_DIR/decode_${PLATFORM_TYPE}_${DECODE_INSTANCE_IDX}.log"
+# Log file naming: include instance index if multi-instance mode
+if [[ -n "${D_INSTANCE_IDX:-}" && "${D_INSTANCE_IDX}" != "0" || -n "${D_INTRA_INSTANCE_IDX:-}" ]]; then
+    log_file="$LOCAL_LOG_DIR/decode_${PLATFORM_TYPE}_${D_INSTANCE_IDX}_${D_INTRA_INSTANCE_IDX}.log"
+    log_file_nfs="${NFS_LOG_DIR:-./pd_test_log}/decode_${PLATFORM_TYPE}_${D_INSTANCE_IDX}_${D_INTRA_INSTANCE_IDX}.log"
+else
+    log_file="$LOCAL_LOG_DIR/decode_${PLATFORM_TYPE}_${DECODE_INSTANCE_IDX}.log"
+    log_file_nfs="${NFS_LOG_DIR:-./pd_test_log}/decode_${PLATFORM_TYPE}_${DECODE_INSTANCE_IDX}.log"
+fi
 NFS_LOG_DIR=${NFS_LOG_DIR:-./pd_test_log}
 echo "-------------------------------------------------------------------"
 echo "Being brought to background"
+if [[ -n "${D_INSTANCE_IDX:-}" && -n "${D_INTRA_INSTANCE_IDX:-}" ]]; then
+    echo "Instance: $D_INSTANCE_IDX, Node: $D_INTRA_INSTANCE_IDX"
+fi
 echo "Stage 1 (local): $log_file"
 if [ -n "${NFS_LOG_DIR}" ]; then
-    echo "Stage 2 (NFS): ${NFS_LOG_DIR}/decode_${PLATFORM_TYPE}_${DECODE_INSTANCE_IDX}.log"
+    echo "Stage 2 (NFS): $log_file_nfs"
 fi
 echo "-------------------------------------------------------------------"
 echo "[D.sh]CARDS_PER_NODE=$CARDS_PER_NODE"
+echo "[D.sh]DP_MASTER_IP=$DP_MASTER_IP"
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 LOG_SYNC="$SCRIPT_DIR/log_sync.py"
@@ -75,6 +104,7 @@ if [ -n "${NFS_LOG_DIR}" ] && [ -f "$LOG_SYNC" ] && command -v python3 >/dev/nul
 fi
 
 # Stage 1: Direct redirection to local file (fast, simple)
-bash "$SCRIPT_DIR/unified_pd_start_decode.sh" "$DECODE_INSTANCE_IDX" > "$log_file" 2>&1 &
+# Pass both instance index and intra-instance index to unified script
+bash "$SCRIPT_DIR/unified_pd_start_decode.sh" "$DECODE_INSTANCE_IDX" "$D_INSTANCE_IDX" "$D_INTRA_INSTANCE_IDX" > "$log_file" 2>&1 &
 
 

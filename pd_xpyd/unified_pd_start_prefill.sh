@@ -63,7 +63,12 @@ if [ "$ROLE" = "head" ]; then
     timestamp=$(date +"%Y%m%d_%H%M%S")
     log_dir="xpyd_logs"
     mkdir -p "$log_dir"
-    log_file="$log_dir/prefill_2p_$(hostname)_${timestamp}.log"
+    # Include instance index in log file name if available
+    if [[ -n "${P_INSTANCE_IDX:-}" ]]; then
+        log_file="$log_dir/prefill_${P_INSTANCE_IDX}_${ROLE_IDX}_$(hostname)_${timestamp}.log"
+    else
+        log_file="$log_dir/prefill_2p_$(hostname)_${timestamp}.log"
+    fi
 
     if [ "${INC_FP8:-0}" -eq 1 ]; then
       kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"

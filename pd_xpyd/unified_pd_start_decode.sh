@@ -14,6 +14,9 @@ export no_proxy=10.112.242.154,localhost,127.0.0.1
 #TP_SIZE="$1"
 #HOSTNAME="$2"
 INSTANCE_IDX="$1"
+# Multi-instance support: optional instance indices
+D_INSTANCE_IDX="${2:-}"
+D_INTRA_INSTANCE_IDX="${3:-}"
 
 if [ "${DECODE_NEED_SCALEOUT:-1}" == "1" ]; then
     export HCCL_OVER_OFI=1
@@ -29,7 +32,12 @@ fi
 timestamp=$(date +"%Y%m%d_%H%M%S")
 log_dir="xpyd_logs"
 mkdir -p "$log_dir"
-log_file="$log_dir/decode${INSTANCE_IDX}_${timestamp}.log"
+# Include instance indices in log file name if available
+if [[ -n "$D_INSTANCE_IDX" && -n "$D_INTRA_INSTANCE_IDX" ]]; then
+    log_file="$log_dir/decode_${D_INSTANCE_IDX}_${D_INTRA_INSTANCE_IDX}_${timestamp}.log"
+else
+    log_file="$log_dir/decode${INSTANCE_IDX}_${timestamp}.log"
+fi
 
 
 #DP_MASTER_IP=${USR_DP_MASTER_IP:-10.239.129.21}

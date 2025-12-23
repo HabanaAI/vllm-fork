@@ -2,10 +2,29 @@
 
 set -euo pipefail
 
-if [[ -z "$ROLE" || ( "$ROLE" != "head" && "$ROLE" != "node" ) ]]; then
-  echo "Error: ROLE must be set to either 'head' or 'node'" >&2
-  exit 1
+# Multi-instance support: determine ROLE and ROLE_IDX from instance indices
+if [[ -n "${P_INSTANCE_IDX:-}" && -n "${P_INTRA_INSTANCE_IDX:-}" ]]; then
+  # New multi-instance mode
+  if [[ "${P_INTRA_INSTANCE_IDX}" -eq 0 ]]; then
+    ROLE="head"
+  else
+    ROLE="node"
+  fi
+  ROLE_IDX=${P_INTRA_INSTANCE_IDX}
+  P_INSTANCE_IDX=${P_INSTANCE_IDX}
+else
+  # Legacy mode: ROLE and ROLE_IDX must be set explicitly
+  if [[ -z "$ROLE" || ( "$ROLE" != "head" && "$ROLE" != "node" ) ]]; then
+    echo "Error: ROLE must be set to either 'head' or 'node', or P_INSTANCE_IDX and P_INTRA_INSTANCE_IDX must be set" >&2
+    exit 1
+  fi
+  if [[ -z "${ROLE_IDX:-}" ]]; then
+    echo "Error: ROLE_IDX must be set, or P_INSTANCE_IDX and P_INTRA_INSTANCE_IDX must be set" >&2
+    exit 1
+  fi
+  P_INSTANCE_IDX=${P_INSTANCE_IDX:-0}
 fi
+
 # Check if HEAD_ADDR is set and a valid IP:PORT form
 if [[ -z "${HEAD_ADDR:-}" ]]; then
   echo "Error: HEAD_ADDR is not set" >&2
@@ -48,6 +67,9 @@ export QUANT_CONFIG_PREFILL=${USR_QUANT_CONFIG_PREFILL}
 export PREFILL_TP_SIZE=${USR_PREFILL_TP_SIZE}
 export PREFILL_EP_SIZE=${USR_PREFILL_EP_SIZE}
 export PREFILL_USE_RAY=${USR_PREFILL_USE_RAY}
+# Export instance indices for use in unified_pd_start_prefill.sh
+export P_INSTANCE_IDX=${P_INSTANCE_IDX:-0}
+export ROLE_IDX=${ROLE_IDX:-0}
 
 #echo "P Env Vars"
 #echo "  CARDS_PER_NODE=$CARDS_PER_NODE"
@@ -59,13 +81,23 @@ LOCAL_LOG_DIR=${LOCAL_LOG_DIR:-/workspace/pd_test_log}
 mkdir -p "$LOCAL_LOG_DIR"
 
 timestamp=$(TZ="Asia/Shanghai" date +"%Y%m%d_%H%M%S")
-log_file="$LOCAL_LOG_DIR/prefill_${PLATFORM_TYPE}_${ROLE_IDX}.log"
+# Log file naming: include instance index if multi-instance mode
+if [[ -n "${P_INSTANCE_IDX:-}" ]]; then
+    log_file="$LOCAL_LOG_DIR/prefill_${PLATFORM_TYPE}_${P_INSTANCE_IDX}_${ROLE_IDX}.log"
+    log_file_nfs="${NFS_LOG_DIR:-./pd_test_log}/prefill_${PLATFORM_TYPE}_${P_INSTANCE_IDX}_${ROLE_IDX}.log"
+else
+    log_file="$LOCAL_LOG_DIR/prefill_${PLATFORM_TYPE}_${ROLE_IDX}.log"
+    log_file_nfs="${NFS_LOG_DIR:-./pd_test_log}/prefill_${PLATFORM_TYPE}_${ROLE_IDX}.log"
+fi
 NFS_LOG_DIR=${NFS_LOG_DIR:-./pd_test_log}
 echo "-------------------------------------------------------------------"
 echo "Launching prefill $ROLE role"
+if [[ -n "${P_INSTANCE_IDX:-}" ]]; then
+    echo "Instance: $P_INSTANCE_IDX, Node: $ROLE_IDX"
+fi
 echo "Stage 1 (local): $log_file"
 if [ -n "${NFS_LOG_DIR}" ]; then
-    echo "Stage 2 (NFS): ${NFS_LOG_DIR}/prefill_${PLATFORM_TYPE}_${ROLE_IDX}.log"
+    echo "Stage 2 (NFS): $log_file_nfs"
 fi
 echo "-------------------------------------------------------------------"
 
