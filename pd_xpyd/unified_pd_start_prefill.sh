@@ -39,6 +39,63 @@ fi
 export MOONCAKE_CONFIG_PATH="$BASH_DIR/mooncake_`hostname`.json"
 echo "MOONCAKE_CONFIG_PATH:"$MOONCAKE_CONFIG_PATH
 
+# Function to get local IP address filtered by MOONCAKE_LOCAL_ADDR_PREFIX
+get_local_ip() {
+    local addr_prefix="${MOONCAKE_LOCAL_ADDR_PREFIX:-}"
+    local local_ip=""
+    if [ -z "$addr_prefix" ]; then
+        echo "Error: MOONCAKE_LOCAL_ADDR_PREFIX is not set" >&2
+        return 1
+    fi
+    # Get all IPs from hostname -I and filter by prefix, print first match
+    local_ip=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -m1 "^$addr_prefix")
+    if [ -z "$local_ip" ]; then
+        # If no match, fallback to empty string
+        local_ip=""
+    fi
+    echo "$local_ip"
+}
+
+# Get local IP and server addresses
+LOCAL_HOSTNAME_IP=$(get_local_ip)
+ETCD_META_SERVER_VALUE=${ETCD_META_SERVER}
+MOONCAKE_SERVER_VALUE=${MOONCAKE_SERVER}
+
+# Ensure metadata_server has etcd:// prefix if not present
+if [[ ! "$ETCD_META_SERVER_VALUE" =~ ^etcd:// ]]; then
+    ETCD_META_SERVER_VALUE="etcd://${ETCD_META_SERVER_VALUE}"
+fi
+
+# Determine device_name array size (default to 16, or use CARDS_PER_NODE if available)
+DEVICE_COUNT=${CARDS_PER_NODE}
+
+# Explicitly define the device name array
+DEVICE_NAME_ARRAY_ARR=("mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0")
+
+# Check that array size matches DEVICE_COUNT
+if [ "${#DEVICE_NAME_ARRAY_ARR[@]}" -ne "$DEVICE_COUNT" ]; then
+    echo "Error: DEVICE_NAME_ARRAY_ARR size (${#DEVICE_NAME_ARRAY_ARR[@]}) does not match DEVICE_COUNT ($DEVICE_COUNT)" >&2
+    exit 1
+fi
+
+# Join the array into a JSON array with double quotes
+DEVICE_NAME_ARRAY_JSON=$(printf '"%s",' "${DEVICE_NAME_ARRAY_ARR[@]}")
+DEVICE_NAME_ARRAY_JSON="[${DEVICE_NAME_ARRAY_JSON%,}]"
+
+# Create/overwrite mooncake JSON file
+cat > "$MOONCAKE_CONFIG_PATH" <<EOF
+{
+    "local_hostname": "$LOCAL_HOSTNAME_IP",
+    "metadata_server": "$ETCD_META_SERVER_VALUE",
+    "protocol": "rdma",
+    "device_name": $DEVICE_NAME_ARRAY_JSON,
+    "master_server_address": "$MOONCAKE_SERVER_VALUE"
+}
+EOF
+
+echo "Generated mooncake config at $MOONCAKE_CONFIG_PATH:"
+cat "$MOONCAKE_CONFIG_PATH"
+
 
 export PREFILL_NUM_CARDS=${PREFILL_NUM_CARDS:-8}
 source "$BASH_DIR/dp_p_env.sh"
