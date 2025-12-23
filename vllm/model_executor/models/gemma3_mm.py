@@ -555,6 +555,53 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 torch.ones(num_crops.shape, dtype=num_crops.dtype).to(
                     pixel_values.device))
 
+    def _image_pixels_to_features_remote(
+        self,
+        vision_tower: SiglipVisionModel,
+        pixel_values: torch.Tensor,
+    ) -> torch.Tensor:
+        import requests
+        import base64
+        import io
+        import numpy as np
+        import time
+
+        l_start_time = time.time()
+        print(f"+-+, {os.getpid()}, {time.time()-l_start_time:{11}.{6}f}, Gemma3ForConditionalGeneration::_image_pixels_to_features_remote() enter")
+        print(f"+-+, pixel_values,     shape: {pixel_values.shape},     dtype: {pixel_values.dtype},     device={pixel_values.device}")
+
+        # pack pixel_values
+        pixel_values_np = pixel_values.to(torch.float16).to("cpu").numpy()
+        buffer = io.BytesIO()
+        np.save(buffer, pixel_values_np)
+        buffer.seek(0)
+        tensor_bytes = buffer.read()
+        tensor_b64 = base64.b64encode(tensor_bytes).decode('utf-8')
+
+        # send request to VT server
+        payload = {
+            "tensor": tensor_b64,
+            "shape": list(pixel_values_np.shape),
+            #"dtype": str(pixel_values_np.dtype)
+        }
+        server_url = "http://localhost:8000"
+        response = requests.post(f"{server_url}/encode", json=payload)
+
+        if response.status_code != 200:
+            raise RuntimeError(f"Server error: {response.status_code}")
+
+        # unpack response to embeddings tensor
+        result = response.json()
+        embeddings_bytes = base64.b64decode(result['embeddings'])
+        embeddings_buffer = io.BytesIO(embeddings_bytes)
+        embeddings_np = np.load(embeddings_buffer)
+        embeddings = torch.from_numpy(embeddings_np).to(device='hpu', dtype=torch.bfloat16)
+
+        print(f"+-+, embeddings,     shape: {embeddings.shape},     dtype: {embeddings.dtype},     device={embeddings.device}")
+        print(f"+-+, {os.getpid()}, {time.time()-l_start_time:{11}.{6}f}, Gemma3ForConditionalGeneration::_image_pixels_to_features_remote() exit")
+        return embeddings
+
+
     def _image_pixels_to_features(
         self,
         vision_tower: SiglipVisionModel,
@@ -582,7 +629,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                                                dim=0,
                                                                index=indices)
 
-                image_features = self._image_pixels_to_features(
+                image_features = self._image_pixels_to_features_remote(
                     self.vision_tower,
                     batch_sliced_pixel_values,
                 )
