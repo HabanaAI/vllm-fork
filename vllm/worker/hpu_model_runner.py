@@ -215,9 +215,10 @@ def is_mm_optimized(model):
 def fixed_sub_image_list(model):
     # So far, in deepseek OCR model, the sub image mode only
     # supports 0~6 excluding 1. 1 means the sub image is equal
-    # to global image, which is not allowed.
-    return [i for i in range(6+1) if i!=1] \
-        if model.config.model_type == 'deepseek_ocr' else None
+    # to global image, which is not allowed.    
+    if hasattr(model, 'config') and model.config.model_type == 'deepseek_ocr':
+        return [i for i in range(6+1) if i!=1]
+    return None
 
 
 def pad_flat_tensor(tensor, desired_size):
