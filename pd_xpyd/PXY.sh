@@ -81,8 +81,39 @@ if [ -n "$ENV_FILE" ]; then
         echo "Warning: ROLE_IP array not defined in $ENV_FILE; defaults will be used by xpyd_start_proxy.sh"
     fi
 
+    # Set XPYD_PREFILL_IPS with interleaved selection based on USR_P_NUM_INSTANCE
     if [ ${#PREFILL_LIST[@]} -gt 0 ]; then
-        export XPYD_PREFILL_IPS="${PREFILL_LIST[*]}"
+        P_NUM_INSTANCE=${USR_P_NUM_INSTANCE:-0}
+        TOTAL_PREFILL_NODES=${#PREFILL_LIST[@]}
+        
+        if [ "$P_NUM_INSTANCE" -gt 0 ] && [ "$P_NUM_INSTANCE" -lt "$TOTAL_PREFILL_NODES" ]; then
+            # Check if TOTAL_PREFILL_NODES is evenly divisible by P_NUM_INSTANCE
+            REMAINDER=$(( TOTAL_PREFILL_NODES % P_NUM_INSTANCE ))
+            if [ "$REMAINDER" -ne 0 ]; then
+                echo "Error: TOTAL_PREFILL_NODES ($TOTAL_PREFILL_NODES) is not evenly divisible by P_NUM_INSTANCE ($P_NUM_INSTANCE). Remainder: $REMAINDER"
+                exit 1
+            fi
+            # Interleave: select nodes evenly distributed across all prefill nodes
+            # Calculate step size to evenly distribute instances
+            if [ "$P_NUM_INSTANCE" -eq 1 ]; then
+                # If only 1 instance, take the first node
+                INTERLEAVED_PREFILL_LIST=("${PREFILL_LIST[0]}")
+            else
+                # Calculate step: divide total nodes into equal segments
+                STEP=$(( TOTAL_PREFILL_NODES / P_NUM_INSTANCE ))
+                INTERLEAVED_PREFILL_LIST=()
+                for ((i=0; i<P_NUM_INSTANCE; i++)); do
+                    idx=$((i * STEP))
+                    if [ "$idx" -lt "$TOTAL_PREFILL_NODES" ]; then
+                        INTERLEAVED_PREFILL_LIST+=("${PREFILL_LIST[$idx]}")
+                    fi
+                done
+            fi
+            export XPYD_PREFILL_IPS="${INTERLEAVED_PREFILL_LIST[*]}"
+        else
+            echo "USR_P_NUM_INSTANCE not set or >= total nodes; bailing out."
+            exit 1
+        fi
     fi
     if [ ${#DECODE_LIST[@]} -gt 0 ]; then
         export XPYD_DECODE_IPS="${DECODE_LIST[*]}"
@@ -114,7 +145,7 @@ fi
 
 # Build the command arguments
 
-P_INSTANCE_NUMBER=${USR_PREFILL_INSTANCE_NUM:-0}
+P_INSTANCE_NUMBER=${USR_P_NUM_INSTANCE:-0}
 if [ "$P_INSTANCE_NUMBER" -le 0 ]; then
     if [ -n "$XPYD_PREFILL_IPS" ]; then
         read -r -a __prefill_arr <<< "$XPYD_PREFILL_IPS"
@@ -133,7 +164,7 @@ if [ "$P_INSTANCE_NUMBER" -le 0 ]; then
     fi
 fi
 
-D_INSTANCE_NUMBER=${USR_DECODE_INSTANCE_NUM:-0}
+D_INSTANCE_NUMBER=0
 if [ "$D_INSTANCE_NUMBER" -le 0 ]; then
     if [ -n "$XPYD_DECODE_IPS" ]; then
         read -r -a __decode_arr <<< "$XPYD_DECODE_IPS"
@@ -155,10 +186,7 @@ fi
 TP_SIZE=${USR_PROXY_TP_SIZE:-1}
 
 
-#CMD_ARGS="$P_INSTANCE_NUMBER $D_INSTANCE_NUMBER $TP_SIZE"
-CMD_ARGS="1 $D_INSTANCE_NUMBER $TP_SIZE"
-
-echo CMD_ARGS:$CMD_ARGS
+CMD_ARGS="$P_INSTANCE_NUMBER $D_INSTANCE_NUMBER $TP_SIZE"
 
 # Set repeat_d_times argument (arg 5)
 CMD_ARGS="$CMD_ARGS $REPEAT_D_TIMES"

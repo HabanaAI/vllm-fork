@@ -42,7 +42,7 @@ export VLLM_GRAPH_RESERVED_MEM=0.3
 export ENABLE_PACKED_ALLGATHER=1
 export SHARED_EXPERT_DISPOSITION=0
 export VLLM_USE_NUMACTL=1
-export VLLM_SPLIT_CPU_BIND=0
+export VLLM_SPLIT_CPU_BIND=1
 export VLLM_DEBUG_TOPO=1
 export VLLM_USE_ASYNC_RECV_KV_CACHES_OPT=0
 
@@ -59,10 +59,10 @@ export VLLM_DELAYED_SAMPLING="true"
 
 model_len=40960
 max_num_batched_tokens=40960
-max_num_seqs=16
-input_min=3500
-input_max=3500
-output_max=1000
+max_num_seqs=12
+input_min=3000
+input_max=4000
+output_max=1500
 
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
@@ -74,7 +74,7 @@ set_bucketing
 
 
 export VLLM_DECODE_BS_BUCKET_STEP=1
-export VLLM_DECODE_BLOCK_BUCKET_STEP=2
+export VLLM_DECODE_BLOCK_BUCKET_STEP=16
 
 export VLLM_PROMPT_BS_BUCKET_MIN=1
 export VLLM_PROMPT_BS_BUCKET_STEP=1
@@ -98,7 +98,7 @@ env | grep VLLM_DECODE_BLOCK
 # ***************************************  bucketing ends ************************************* #
 
 SWAP_SPACE=64 # GB, memory per rank for preemption.swap.
-export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_d,false,16384,false
+export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_d,false,1638400,false
 
 # decode specific settings
 export VLLM_DP_SIZE=2
@@ -109,7 +109,7 @@ export VLLM_DP_MASTER_PORT=25940
 #export VLLM_EP_SIZE=16
 
 ## warmup settings
-export VLLM_SKIP_WARMUP=True
+#export VLLM_SKIP_WARMUP=True
 
 export VLLM_SUPPORT_MOE_CHUNK="true"
 export PT_HPU_MOE_CHUNK="64, 128"

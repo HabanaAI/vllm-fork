@@ -7,8 +7,11 @@ BASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 source "$BASE_DIR/$ENV_FILE"
 
-nodes=(P0 P1 D0 D1 D2 D3)
 
+# Enumerate all nodes dynamically from ROLE_IP array
+nodes=(${!ROLE_IP[@]})
+
+echo ${nodes[@]}
 for node in "${nodes[@]}"; do
   host_var="ROLE_HOST[$node]"
   ip_var="ROLE_IP[$node]"

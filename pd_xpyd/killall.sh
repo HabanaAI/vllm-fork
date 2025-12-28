@@ -5,4 +5,6 @@ pkill -kill -f hccl
 pkill -kill -f unified_pd_start_prefill.sh
 pkill -kill -f unified_pd_start_decode.sh
 pkill -kill -f ray
+pkill -kill ./D.sh
+pkill -kill ./P.sh
 exit 0

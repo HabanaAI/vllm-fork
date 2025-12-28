@@ -54,11 +54,11 @@ export VLLM_FETCH_KV_USE_ASYNC_D2H=1
 export SHARED_EXPERT_DISPOSITION=0
 # params
 model_len=32768
-max_num_batched_tokens=32768 #4*4096
-max_num_seqs=8
-input_min=3500
-input_max=3500
-output_max=1000
+max_num_batched_tokens=65535 #4*4096
+max_num_seqs=4
+input_min=3000
+input_max=4000
+output_max=1500
 
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
@@ -87,7 +87,7 @@ env | grep VLLM_DECODE_BLOCK
 # ***************************************  bucketing ends ************************************* #
 
 ## warmup settings
-export VLLM_SKIP_WARMUP=True
+#export VLLM_SKIP_WARMUP=True
 
 export VLLM_DP_SIZE=1
 export VLLM_USE_V1=0
@@ -95,7 +95,7 @@ export VLLM_EP_SIZE=${PREFILL_EP_SIZE:-8}
 export VLLM_TTFT_TRACE=false
 export VLLM_TTFT_TRACE_STACK=false
 
-export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_p,false,16384,false
+export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_p,false,1638400,false
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="false"  # Can be true after following para are tuned.

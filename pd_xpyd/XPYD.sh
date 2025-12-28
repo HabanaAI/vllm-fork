@@ -64,8 +64,8 @@ CARDS_PER_NODE=${USR_CARDS_PER_NODE:-8}
 TP_AUTO=${USR_TP_SIZE:-1}
 
 # Multi-instance configuration
-P_NUM_INSTANCE=${P_NUM_INSTANCE:-1}
-D_NUM_INSTANCE=${D_NUM_INSTANCE:-1}
+P_NUM_INSTANCE=${USR_P_NUM_INSTANCE:-1}
+D_NUM_INSTANCE=${USR_D_NUM_INSTANCE:-1}
 
 # Validate instance configuration
 if [[ ${#P_KEYS[@]} -lt $P_NUM_INSTANCE ]]; then
@@ -148,7 +148,7 @@ for p_instance_idx in $(seq 0 $((P_NUM_INSTANCE - 1))); do
     prefill_cmd=(
       ssh
       root@"$ip"
-      "ROLE=${role_type} P_INSTANCE_IDX=$p_instance_idx P_INTRA_INSTANCE_IDX=$intra_idx BENCHMARK_MODE=$BENCHMARK_MODE ENV_FILE=$ENV_FILE HEAD_ADDR=$instance_head_ip $BASE_DIR/P.sh"
+      "cd $BASE_DIR; ROLE=${role_type} P_INSTANCE_IDX=$p_instance_idx P_INTRA_INSTANCE_IDX=$intra_idx BENCHMARK_MODE=$BENCHMARK_MODE ENV_FILE=$ENV_FILE HEAD_ADDR=$instance_head_ip $BASE_DIR/P.sh"
     )
     if [[ $DRY_RUN -eq 1 ]]; then
       echo "[DRY-RUN] ${prefill_cmd[*]}"
@@ -184,7 +184,7 @@ for d_instance_idx in $(seq 0 $((D_NUM_INSTANCE - 1))); do
     decode_cmd=(
       ssh
       root@"$ip"
-      "ENV_FILE=$ENV_FILE D_INSTANCE_IDX=$d_instance_idx D_INTRA_INSTANCE_IDX=$intra_idx D_INSTANCE_MASTER_IP=$instance_master_ip $BASE_DIR/D.sh"
+      "cd $BASE_DIR; ENV_FILE=$ENV_FILE D_INSTANCE_IDX=$d_instance_idx D_INTRA_INSTANCE_IDX=$intra_idx D_INSTANCE_MASTER_IP=$instance_master_ip $BASE_DIR/D.sh"
     )
     if [[ $DRY_RUN -eq 1 ]]; then
       echo "[DRY-RUN] ${decode_cmd[*]}"

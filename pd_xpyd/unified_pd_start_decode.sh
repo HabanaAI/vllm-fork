@@ -76,8 +76,26 @@ fi
 # Determine device_name array size (default to 16, or use CARDS_PER_NODE if available)
 DEVICE_COUNT=${CARDS_PER_NODE}
 
-# Explicitly define the device name array
-DEVICE_NAME_ARRAY=("mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0" "mlx5_0")
+# Load hostname to device mapping from external file
+hostname=$(hostname)
+HOST_DEVICE_MAP_FILE="${HOST_DEVICE_MAP_FILE:-$BASH_DIR/host_cx7_map.sh}"
+
+if [ ! -f "$HOST_DEVICE_MAP_FILE" ]; then
+    echo "ERROR: Host device map file not found: $HOST_DEVICE_MAP_FILE" >&2
+    exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$HOST_DEVICE_MAP_FILE"
+
+# Look up device array for current hostname
+if [[ -z "${HOST_DEVICE_MAP[$hostname]:-}" ]]; then
+    echo "ERROR: Unknown hostname $hostname (not found in $HOST_DEVICE_MAP_FILE)" >&2
+    exit 1
+fi
+
+# Convert space-separated string to array
+read -r -a DEVICE_NAME_ARRAY <<< "${HOST_DEVICE_MAP[$hostname]}"
 
 # Check that array size matches DEVICE_COUNT
 if [ "${#DEVICE_NAME_ARRAY[@]}" -ne "$DEVICE_COUNT" ]; then

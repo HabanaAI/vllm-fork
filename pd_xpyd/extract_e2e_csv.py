@@ -35,7 +35,7 @@ HEADER = [
 
 
 def parse_namespace(ns_line: str) -> Dict[str, str]:
-    m = re.search(r"Namespace\((.*)\)\s*$", ns_line.strip())
+    m = re.search(r"Namespace\((.*)\)\s*$", ns_line.strip(), flags=re.DOTALL)
     if not m:
         return {}
     payload = m.group(1)
@@ -76,13 +76,14 @@ def iter_iteration_segments(text: str):
 
     The header line looks like:
     ========  INPUT LEN: 3500 | CONCURRENCY: 64 | NUM_PROMPT: 640  ========
+    Or with optional fields:
+    ========  INPUT LEN: 3500 | CONCURRENCY: 64 | REQ_RATE: inf | BURSTINESS: 3.0 | NUM_PROMPT: 640  ========
     """
-    # Match the iteration banner line, optionally including REQ_RATE field
-    # Examples matched:
-    # ========  INPUT LEN: 3500 | CONCURRENCY: 64 | NUM_PROMPT: 640  ========
-    # ========  INPUT LEN: 3500 | CONCURRENCY: 64 | REQ_RATE: inf | NUM_PROMPT: 640  ========
+    # Match the iteration banner line, allowing optional fields between CONCURRENCY and NUM_PROMPT
+    # The pattern matches: INPUT LEN | CONCURRENCY | [optional fields] | NUM_PROMPT
+    # Optional fields can include REQ_RATE, BURSTINESS, etc.
     banner_pattern = re.compile(
-        r"^\s*=*.*INPUT LEN:\s*\d+\s*\|\s*CONCURRENCY:\s*\d+(?:\s*\|\s*REQ_RATE:\s*[^|=\s]+)?\s*\|\s*NUM_PROMPT:\s*\d+.*=*\s*$",
+        r"^\s*=+\s+INPUT LEN:\s*\d+\s*\|\s*CONCURRENCY:\s*\d+.*?\|\s*NUM_PROMPT:\s*\d+.*?=+\s*$",
         re.M,
     )
     indices = [m.start() for m in banner_pattern.finditer(text)]
@@ -104,13 +105,8 @@ def parse_iteration_header(seg: str) -> Tuple[Optional[int], Optional[int], Opti
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
-def extract_metrics_block(text: str) -> Optional[Dict[str, float]]:
-    # Find the last occurrence of the Serving Benchmark Result header
-    matches = list(re.finditer(r"Serving\s+Benchmark\s+Result", text, flags=re.I))
-    if not matches:
-        return None
-    blk_start = matches[-1].start()
-    blk = text[blk_start:]
+def extract_metrics_from_block(blk: str) -> Optional[Dict[str, float]]:
+    """Extract metrics from a single Serving Benchmark Result block."""
     def f(regex: str) -> Optional[float]:
         mm = re.search(regex, blk)
         return float(mm.group(1)) if mm else None
@@ -132,10 +128,41 @@ def extract_metrics_block(text: str) -> Optional[Dict[str, float]]:
         'median_itl': f(r"Median ITL \(ms\):\s+([0-9.]+)"),
         'p99_itl': f(r"P99 ITL \(ms\):\s+([0-9.]+)"),
     }
-    if any(v is None for v in metrics.values() if v is not metrics['mean_itl']):
-        # ITL may not be present in some logs; allow it to be None
-        pass
+    # Check if we have essential metrics (ITL may be missing)
+    essential_keys = [k for k in metrics.keys() if k != 'mean_itl' and k != 'median_itl' and k != 'p99_itl']
+    if any(metrics[k] is None for k in essential_keys):
+        return None
     return metrics
+
+
+def extract_metrics_block(text: str) -> Optional[Dict[str, float]]:
+    """Extract the last occurrence of the Serving Benchmark Result block (for backward compatibility)."""
+    matches = list(re.finditer(r"Serving\s+Benchmark\s+Result", text, flags=re.I))
+    if not matches:
+        return None
+    blk_start = matches[-1].start()
+    blk = text[blk_start:]
+    return extract_metrics_from_block(blk)
+
+
+def extract_all_metrics_blocks(text: str) -> List[Dict[str, float]]:
+    """Extract all Serving Benchmark Result blocks from text."""
+    matches = list(re.finditer(r"Serving\s+Benchmark\s+Result", text, flags=re.I))
+    if not matches:
+        return []
+    results = []
+    for i, match in enumerate(matches):
+        blk_start = match.start()
+        # Find the end of this block (start of next block or end of text)
+        if i + 1 < len(matches):
+            blk_end = matches[i + 1].start()
+            blk = text[blk_start:blk_end]
+        else:
+            blk = text[blk_start:]
+        metrics = extract_metrics_from_block(blk)
+        if metrics:
+            results.append(metrics)
+    return results
 
 
 def choose_lengths(ns: Dict[str, str]) -> Tuple[Optional[int], Optional[int], str]:
@@ -161,14 +188,14 @@ def extract_rows(text: str) -> List[List[str]]:
     for seg in iter_iteration_segments(text):
         any_iter = True
         in_len_hdr, conc_hdr, num_prompts_hdr = parse_iteration_header(seg)
-        # Find Namespace in this iteration
-        ns_match = re.search(r"^Namespace\(.*\)$", seg, flags=re.M)
+        # Find Namespace in this iteration (may span multiple lines)
+        ns_match = re.search(r"^Namespace\(.*?\)$", seg, flags=re.M | re.DOTALL)
         if not ns_match:
             continue
         ns = parse_namespace(ns_match.group(0))
-        # Last metrics block within this iteration
-        metrics = extract_metrics_block(seg)
-        if not metrics:
+        # Extract ALL metrics blocks within this iteration (one per round)
+        all_metrics = extract_all_metrics_blocks(seg)
+        if not all_metrics:
             continue
         req_rate = ns.get('request_rate', '')
         max_conc = ns.get('max_concurrency', '')
@@ -178,34 +205,36 @@ def extract_rows(text: str) -> List[List[str]]:
         out_len = out_len_ns
         num_prompts = num_prompts_hdr if num_prompts_hdr is not None else ns.get('num_prompts', '')
 
-        rows.append([
-            str(in_len) if in_len is not None else '',
-            str(out_len) if out_len is not None else '',
-            str(req_rate),
-            str(max_conc),
-            str(rand_ratio),
-            dataset,
-            str(int(metrics['successful'])) if metrics['successful'] is not None else '',
-            f"{metrics['duration']:.2f}" if metrics['duration'] is not None else '',
-            str(int(metrics['total_input_tokens'])) if metrics['total_input_tokens'] is not None else '',
-            str(int(metrics['total_generated_tokens'])) if metrics['total_generated_tokens'] is not None else '',
-            f"{metrics['req_qps']:.2f}" if metrics['req_qps'] is not None else '',
-            f"{metrics['out_tps']:.2f}" if metrics['out_tps'] is not None else '',
-            f"{metrics['total_tps']:.2f}" if metrics['total_tps'] is not None else '',
-            f"{metrics['mean_ttft']:.2f}" if metrics['mean_ttft'] is not None else '',
-            f"{metrics['median_ttft']:.2f}" if metrics['median_ttft'] is not None else '',
-            f"{metrics['p99_ttft']:.2f}" if metrics['p99_ttft'] is not None else '',
-            f"{metrics['mean_tpot']:.2f}" if metrics['mean_tpot'] is not None else '',
-            f"{metrics['median_tpot']:.2f}" if metrics['median_tpot'] is not None else '',
-            f"{metrics['p99_tpot']:.2f}" if metrics['p99_tpot'] is not None else '',
-            f"{metrics['mean_itl']:.2f}" if metrics['mean_itl'] is not None else '',
-            f"{metrics['median_itl']:.2f}" if metrics['median_itl'] is not None else '',
-            f"{metrics['p99_itl']:.2f}" if metrics['p99_itl'] is not None else '',
-            str(num_prompts),
-        ])
+        # Create a row for each metrics block
+        for metrics in all_metrics:
+            rows.append([
+                str(in_len) if in_len is not None else '',
+                str(out_len) if out_len is not None else '',
+                str(req_rate),
+                str(max_conc),
+                str(rand_ratio),
+                dataset,
+                str(int(metrics['successful'])) if metrics['successful'] is not None else '',
+                f"{metrics['duration']:.2f}" if metrics['duration'] is not None else '',
+                str(int(metrics['total_input_tokens'])) if metrics['total_input_tokens'] is not None else '',
+                str(int(metrics['total_generated_tokens'])) if metrics['total_generated_tokens'] is not None else '',
+                f"{metrics['req_qps']:.2f}" if metrics['req_qps'] is not None else '',
+                f"{metrics['out_tps']:.2f}" if metrics['out_tps'] is not None else '',
+                f"{metrics['total_tps']:.2f}" if metrics['total_tps'] is not None else '',
+                f"{metrics['mean_ttft']:.2f}" if metrics['mean_ttft'] is not None else '',
+                f"{metrics['median_ttft']:.2f}" if metrics['median_ttft'] is not None else '',
+                f"{metrics['p99_ttft']:.2f}" if metrics['p99_ttft'] is not None else '',
+                f"{metrics['mean_tpot']:.2f}" if metrics['mean_tpot'] is not None else '',
+                f"{metrics['median_tpot']:.2f}" if metrics['median_tpot'] is not None else '',
+                f"{metrics['p99_tpot']:.2f}" if metrics['p99_tpot'] is not None else '',
+                f"{metrics['mean_itl']:.2f}" if metrics['mean_itl'] is not None else '',
+                f"{metrics['median_itl']:.2f}" if metrics['median_itl'] is not None else '',
+                f"{metrics['p99_itl']:.2f}" if metrics['p99_itl'] is not None else '',
+                str(num_prompts),
+            ])
     if not any_iter:
         # Fallback: treat whole file as one iteration
-        ns_match = re.search(r"^Namespace\(.*\)$", text, flags=re.M)
+        ns_match = re.search(r"^Namespace\(.*?\)$", text, flags=re.M | re.DOTALL)
         metrics = extract_metrics_block(text)
         if ns_match and metrics:
             ns = parse_namespace(ns_match.group(0))
@@ -270,5 +299,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
