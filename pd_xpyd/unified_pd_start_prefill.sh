@@ -56,52 +56,57 @@ get_local_ip() {
     echo "$local_ip"
 }
 
-# Get local IP and server addresses
-LOCAL_HOSTNAME_IP=$(get_local_ip)
-ETCD_META_SERVER_VALUE=${ETCD_META_SERVER}
-MOONCAKE_SERVER_VALUE=${MOONCAKE_SERVER}
+# Only run mooncake config generation if both ETCD_META_SERVER and MOONCAKE_SERVER are defined
+if [[ -z "${ETCD_META_SERVER:-}" || -z "${MOONCAKE_SERVER:-}" ]]; then
+    echo "################################################################################"
+    echo "Warning: ETCD_META_SERVER or MOONCAKE_SERVER is not defined. Use mooncake config file as is."
+    echo "################################################################################"
+else
+    ETCD_META_SERVER_VALUE=${ETCD_META_SERVER}
+    MOONCAKE_SERVER_VALUE=${MOONCAKE_SERVER}
+    # Get local IP and server addresses
+    LOCAL_HOSTNAME_IP=$(get_local_ip)
+    # Ensure metadata_server has etcd:// prefix if not present
+    if [[ ! "$ETCD_META_SERVER_VALUE" =~ ^etcd:// ]]; then
+        ETCD_META_SERVER_VALUE="etcd://${ETCD_META_SERVER_VALUE}"
+    fi
 
-# Ensure metadata_server has etcd:// prefix if not present
-if [[ ! "$ETCD_META_SERVER_VALUE" =~ ^etcd:// ]]; then
-    ETCD_META_SERVER_VALUE="etcd://${ETCD_META_SERVER_VALUE}"
-fi
+    # Determine device_name array size (default to 16, or use CARDS_PER_NODE if available)
+    DEVICE_COUNT=${CARDS_PER_NODE}
 
-# Determine device_name array size (default to 16, or use CARDS_PER_NODE if available)
-DEVICE_COUNT=${CARDS_PER_NODE}
+    # Load hostname to device mapping from external file
+    hostname=$(hostname)
+    HOST_DEVICE_MAP_FILE="${HOST_DEVICE_MAP_FILE:-$BASH_DIR/host_cx7_map.sh}"
 
-# Load hostname to device mapping from external file
-hostname=$(hostname)
-HOST_DEVICE_MAP_FILE="${HOST_DEVICE_MAP_FILE:-$BASH_DIR/host_cx7_map.sh}"
+    if [ ! -f "$HOST_DEVICE_MAP_FILE" ]; then
+        echo "ERROR: Host device map file not found: $HOST_DEVICE_MAP_FILE" >&2
+        exit 1
+    fi
 
-if [ ! -f "$HOST_DEVICE_MAP_FILE" ]; then
-    echo "ERROR: Host device map file not found: $HOST_DEVICE_MAP_FILE" >&2
-    exit 1
-fi
+    # shellcheck disable=SC1090
+    source "$HOST_DEVICE_MAP_FILE"
 
-# shellcheck disable=SC1090
-source "$HOST_DEVICE_MAP_FILE"
+    # Look up device array for current hostname
+    if [[ -z "${HOST_DEVICE_MAP[$hostname]:-}" ]]; then
+        echo "ERROR: Unknown hostname $hostname (not found in $HOST_DEVICE_MAP_FILE)" >&2
+        exit 1
+    fi
 
-# Look up device array for current hostname
-if [[ -z "${HOST_DEVICE_MAP[$hostname]:-}" ]]; then
-    echo "ERROR: Unknown hostname $hostname (not found in $HOST_DEVICE_MAP_FILE)" >&2
-    exit 1
-fi
+    # Convert space-separated string to array
+    read -r -a DEVICE_NAME_ARRAY <<< "${HOST_DEVICE_MAP[$hostname]}"
 
-# Convert space-separated string to array
-read -r -a DEVICE_NAME_ARRAY <<< "${HOST_DEVICE_MAP[$hostname]}"
+    # Check that array size matches DEVICE_COUNT
+    if [ "${#DEVICE_NAME_ARRAY[@]}" -ne "$DEVICE_COUNT" ]; then
+        echo "Error: DEVICE_NAME_ARRAY size (${#DEVICE_NAME_ARRAY[@]}) does not match DEVICE_COUNT ($DEVICE_COUNT)" >&2
+        exit 1
+    fi
 
-# Check that array size matches DEVICE_COUNT
-if [ "${#DEVICE_NAME_ARRAY[@]}" -ne "$DEVICE_COUNT" ]; then
-    echo "Error: DEVICE_NAME_ARRAY size (${#DEVICE_NAME_ARRAY_ARR[@]}) does not match DEVICE_COUNT ($DEVICE_COUNT)" >&2
-    exit 1
-fi
+    # Join the array into a JSON array with double quotes
+    DEVICE_NAME_ARRAY_JSON=$(printf '"%s",' "${DEVICE_NAME_ARRAY[@]}")
+    DEVICE_NAME_ARRAY_JSON="[${DEVICE_NAME_ARRAY_JSON%,}]"
 
-# Join the array into a JSON array with double quotes
-DEVICE_NAME_ARRAY_JSON=$(printf '"%s",' "${DEVICE_NAME_ARRAY[@]}")
-DEVICE_NAME_ARRAY_JSON="[${DEVICE_NAME_ARRAY_JSON%,}]"
-
-# Create/overwrite mooncake JSON file
-cat > "$MOONCAKE_CONFIG_PATH" <<EOF
+    # Create/overwrite mooncake JSON file
+    cat > "$MOONCAKE_CONFIG_PATH" <<EOF
 {
     "local_hostname": "$LOCAL_HOSTNAME_IP",
     "metadata_server": "$ETCD_META_SERVER_VALUE",
@@ -111,8 +116,9 @@ cat > "$MOONCAKE_CONFIG_PATH" <<EOF
 }
 EOF
 
-echo "Generated mooncake config at $MOONCAKE_CONFIG_PATH:"
-cat "$MOONCAKE_CONFIG_PATH"
+    echo "Generated mooncake config at $MOONCAKE_CONFIG_PATH:"
+    cat "$MOONCAKE_CONFIG_PATH"
+fi
 
 
 export PREFILL_NUM_CARDS=${PREFILL_NUM_CARDS:-8}
