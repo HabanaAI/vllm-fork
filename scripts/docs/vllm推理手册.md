@@ -925,11 +925,12 @@ PT_HPU_LAZY_MODE=1 ./calibrate_model.sh \
 ```bash
 QUANT_CONFIG=/data/output/qwen3-vl-235b-a22b-instruct-fp8/maxabs_quant_g2.json \
 PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
-    /data/Qwen3-VL-30B-A3B-Instruct-FP8 \
+    /data/Qwen3-VL-235B-A22B-Instruct-FP8 \
     --port 8000 \
     --host 127.0.0.1 \
     --limit-mm-per-prompt video=5,image=5 \
     --mm_processor_kwargs max_pixels=1003520,min_pixels=3136 \
+    --max-model-len 131072 \
     --tensor-parallel-size 8 \
     --enable-expert-parallel
 ```
