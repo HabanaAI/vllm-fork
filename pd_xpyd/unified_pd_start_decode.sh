@@ -72,7 +72,7 @@ else
     ETCD_META_SERVER_VALUE=${ETCD_META_SERVER}
     MOONCAKE_SERVER_VALUE=${MOONCAKE_SERVER}
     # Get local IP and server addresses
-    local_hostname_ip=$(get_local_ip)
+    LOCAL_HOSTNAME_IP=$(get_local_ip)
     # Ensure metadata_server has etcd:// prefix if not present
     if [[ ! "$ETCD_META_SERVER_VALUE" =~ ^etcd:// ]]; then
         ETCD_META_SERVER_VALUE="etcd://${ETCD_META_SERVER_VALUE}"
