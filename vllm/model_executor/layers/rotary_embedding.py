@@ -2967,6 +2967,75 @@ class XDRotaryEmbedding(DynamicNTKAlphaRotaryEmbedding):
         )
         out[:, out_offset : out_offset + num_new_tokens] = values
 
+    @classmethod
+    def get_input_positions(
+        cls,
+        input_tokens: list[int],
+        hf_config: PretrainedConfig,
+        image_grid_thw: Optional[Union[list[list[int]], torch.Tensor]],
+        video_grid_thw: Optional[Union[list[list[int]], torch.Tensor]],
+    ) -> tuple[list[list[int]], int]:
+        if hf_config.model_type in ["hunyuan_vl"]:
+            return cls._hunyan_vl_get_input_positions_tensor(
+                input_tokens=input_tokens,
+                hf_config=hf_config,
+                image_grid_thw=image_grid_thw,
+            ).tolist()
+
+        return None
+
+    @classmethod
+    def _hunyan_vl_get_input_positions_tensor(
+        cls,
+        input_tokens: list[int],
+        hf_config: PretrainedConfig,
+        image_grid_thw: Union[list[list[int]], torch.Tensor],
+    ) -> torch.Tensor:
+        image_start_token_id = hf_config.image_start_token_id
+        spatial_merge_size = hf_config.vision_config.spatial_merge_size
+        xd_num = len(hf_config.rope_scaling["xdrope_section"])
+
+        input_tokens_tensor = torch.tensor(input_tokens)
+        image_start_indices = torch.argwhere(
+            input_tokens_tensor == image_start_token_id
+        ).squeeze(1)
+
+        p_index = torch.arange(len(input_tokens_tensor))
+        w_index = torch.arange(len(input_tokens_tensor))
+        h_index = torch.arange(len(input_tokens_tensor))
+        t_index = torch.arange(len(input_tokens_tensor))
+        for image_index in range(len(image_start_indices)):
+            # +1 : first image_token, +2: for xdrope positions
+            pos = image_start_indices[image_index] + 2
+            t, h, w = image_grid_thw[image_index]
+            _, llm_grid_h, llm_grid_w = (
+                t,
+                h // spatial_merge_size,
+                w // spatial_merge_size,
+            )
+
+            token_num = (llm_grid_w + 1) * llm_grid_h
+            w_index[pos : pos + token_num].copy_(
+                torch.arange(0, llm_grid_w + 1)
+                .reshape(1, -1)
+                .expand(llm_grid_h, -1)
+                .reshape(-1)
+            )
+            h_index[pos : pos + token_num].copy_(
+                torch.arange(0, llm_grid_h)
+                .reshape(-1, 1)
+                .expand(-1, llm_grid_w + 1)
+                .reshape(-1)
+            )
+            h_index[pos : pos + token_num] = 0
+
+        if xd_num == 4:
+            llm_positions = torch.stack([p_index, w_index, h_index, t_index])
+        elif xd_num == 3:
+            llm_positions = torch.stack([w_index, h_index, t_index])
+
+        return llm_positions
+
 
 _ROPE_DICT: dict[tuple, RotaryEmbedding] = {}
 
@@ -3094,7 +3163,7 @@ def get_rope(
                 raise ValueError("Dynamic rope scaling must contain either "
                                  "'alpha' or 'factor' field")
         elif scaling_type == "xdrope":
-            scaling_alpha = rope_parameters["alpha"]
+            scaling_alpha = rope_scaling["alpha"]
             rotary_emb = XDRotaryEmbedding(
                 head_size,
                 rotary_dim,
@@ -3103,7 +3172,7 @@ def get_rope(
                 is_neox_style,
                 scaling_alpha,
                 dtype,
-                xdrope_section=rope_parameters["xdrope_section"],
+                xdrope_section=rope_scaling["xdrope_section"],
             )
         elif scaling_type == "yarn":
             scaling_factor = rope_scaling["factor"]
