@@ -45,7 +45,8 @@ from vllm.transformers_utils.config import (
     ConfigFormat, get_config, get_hf_image_processor_config,
     get_hf_text_config, get_pooling_config,
     get_sentence_transformer_tokenizer_config, is_encoder_decoder,
-    try_get_generation_config, try_get_safetensors_metadata, uses_mrope)
+    try_get_generation_config, try_get_safetensors_metadata, uses_mrope,
+    uses_xdrope_dim)
 from vllm.transformers_utils.s3_utils import S3Model
 from vllm.transformers_utils.utils import is_s3, maybe_model_redirect
 from vllm.utils import (DEFAULT_MAX_NUM_BATCHED_TOKENS,
@@ -1790,6 +1791,35 @@ DistributedExecutorBackend = Literal["ray", "mp", "uni", "external_launcher"]
 
 @config
 @dataclass
+class EPLBConfig:
+    """Configuration for Expert Parallel Load Balancing (EP)."""
+
+    window_size: int = 1000
+    """Window size for expert load recording."""
+    step_interval: int = 3000
+    """
+    Interval for rearranging experts in expert parallelism.
+
+    Note that if this is greater than the EPLB window size, only the metrics
+    of the last `lb_window_size` steps will be used for rearranging experts.
+    """
+
+    num_redundant_experts: int = field(default=0)
+    """Number of redundant experts to use for expert parallelism."""
+
+    log_balancedness: bool = False
+    """
+    Log the balancedness each step of expert parallelism.
+    This is turned off by default since it will cause communication overhead.
+    """
+    use_async: bool = False
+    """
+    Whether to use non-blocking EPLB.
+    """
+
+
+@config
+@dataclass
 class ParallelConfig:
     """Configuration for the distributed execution."""
 
@@ -1817,6 +1847,10 @@ class ParallelConfig:
     """Backend to use for data parallel, either "mp" or "ray"."""
     enable_expert_parallel: bool = False
     """Use expert parallelism instead of tensor parallelism for MoE layers."""
+    enable_eplb: bool = False
+    """Enable expert parallelism load balancing for MoE layers."""
+    eplb_config: EPLBConfig = field(default=EPLBConfig)
+    """Expert parallelism configuration."""
     max_parallel_loading_workers: Optional[int] = None
     """Maximum number of parallel loading workers when loading model
     sequentially in multiple batches. To avoid RAM OOM when using tensor
@@ -3113,6 +3147,11 @@ class MultiModalConfig:
     """
     If `True`, disable caching of the processed multi-modal inputs.
     """
+
+    mm_encoder_attn_backend = None
+    """Optional override for the multi-modal encoder attention backend when
+    using vision transformers. Accepts any value from
+    `vllm.attention.backends.registry.AttentionBackendEnum` (e.g. `FLASH_ATTN`)."""
 
     def compute_hash(self) -> str:
         """
