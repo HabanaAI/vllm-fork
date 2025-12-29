@@ -93,8 +93,12 @@ HPU_VLLM_SPECDECODE_DUMMY_TOKEN = -2
 _SAMPLING_EPS = 1e-5
 
 execute_model_count = 0
+g_profile_run_mode = False
+g_is_dummy_run = False
+g_warmup_mode = False
 
 class PhaseType(Enum):
+    
     PREFILL = 'prefill'
     PREFIX_PREFILL = 'prefix_prefill'
     DECODE = 'decode'
@@ -1018,8 +1022,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ):
             if self.is_driver_worker:
                 #_dp_work, _dp_val = align_dp_groups(
+                start=time.perf_counter()
                 batch_size_padded = align_dp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
+                end=time.perf_counter()
+                global g_profile_run_mode
+                global g_is_dummy_run
+                global g_warmup_mode
+                if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                    logger.info(f"<rank {torch.distributed.get_rank()}> align_dp_groups in _add_dummy_seq took {(end-start)*1000:.3f} milliseconds")
             if align_worker:
                 batch_size_padded = align_tp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
@@ -1523,8 +1534,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self.dp_awared_padding:
                 if self.is_driver_worker:
                     #_dp_work, _dp_val = align_dp_groups(
+                    start = time.perf_counter()
                     block_bucket_size = align_dp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
+                    end = time.perf_counter()
+                    global g_profile_run_mode
+                    global g_is_dummy_run
+                    global g_warmup_mode
+                    if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                        logger.info(f"<rank {torch.distributed.get_rank()}> align_dp_groups in _prepare_decode took {(end-start)*1000:.3f} milliseconds")
                 if align_worker:
                     block_bucket_size = align_tp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
@@ -2660,10 +2678,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
-
+            start = time.perf_counter()
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list, finished_requests_ids, align_worker,
                 accepted_token_id, execute_model_req)
+            end = time.perf_counter()
+            global g_profile_run_mode
+            global g_is_dummy_run
+            global g_warmup_mode
+            if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                logger.info(f"<rank {torch.distributed.get_rank()}> prepare_input_tensors took {(end-start)*1000:.3f} milliseconds")
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
@@ -2761,6 +2785,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         return any(seq_group.sampling_params.logits_processors
                    for seq_group in sampling_metadata.seq_groups)
 
+    
     @torch.inference_mode()
     def execute_model(
         self,
@@ -2785,6 +2810,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             previous_hidden_states = kwargs.get('previous_hidden_states')
             kv_cache_shared_dict: Optional[SharedDict] = kwargs.get(
                 'kv_cache_shared_dict')
+            
+            global g_profile_run_mode
+            global g_is_dummy_run
+            global g_warmup_mode
+            g_profile_run_mode = profile_run_mode
+            g_is_dummy_run = is_dummy_run
+            g_warmup_mode = warmup_mode
 
             self.has_patched_prev_output = False
             use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
@@ -2962,7 +2994,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # received KV caches
                     # NOTE: The receive operation is blocking
                     bypass_model_exec = False
-                    if self.need_recv_kv(model_input, kv_caches, warmup_mode):
+                    need_recv_kv = self.need_recv_kv(model_input, kv_caches, warmup_mode)
+                    if need_recv_kv:
                         # we assume kv cache is recved and put into the dict!
                         def tensor_hash(tensor: torch.Tensor) -> int:
                             """Calculate the hash value of the tensor."""
@@ -3259,16 +3292,24 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     
                     profiler_args = {
                         'real_seq_len': model_input.seq_lens,
-                        'real_batch_size': real_batch_size
+                        'real_batch_size': real_batch_size,
+                        'bypass_model_exec  ': bypass_model_exec,
+                        'need_recv_kv': need_recv_kv
                     }
+                    if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                        logger.info(f"<rank {torch.distributed.get_rank()}> bypass_model_exec: {bypass_model_exec}")
                     if not bypass_model_exec:
                         with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
+                            start = time.perf_counter()
                             hidden_states = self.model.forward(
                                 **execute_model_kwargs,
                                 selected_token_indices=sampling_metadata.
                                 selected_token_indices)
+                            end = time.perf_counter()
+                            if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                                logger.info(f"<rank {torch.distributed.get_rank()}> model forward took {(end-start)*1000:.3f} milliseconds @ {execute_model_count=}")
                             if profile_run_mode and not is_dummy_run:
                                 torch.hpu.synchronize()
                                 import torch.distributed as dist
@@ -3439,7 +3480,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         # when use_delayed_sampling if the computation
                         # of logits depends on the sampled results
                         # we obtain the actual sampled results in advance
+                        #start = time.perf_counter()
                         self._patch_prev_output()
+                        #end = time.perf_counter()
+                        #logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 111 took {(end-start)*1000:.3f} milliseconds")
 
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
@@ -3482,7 +3526,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             # but not yet updated for some requests.
                             if penalty_are_requested:
                                 is_prev_output_patched = True
+                                #start = time.perf_counter()
                                 self._patch_prev_output()
+                                #end = time.perf_counter()
+                               # logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 222 took {(end-start)*1000:.3f} milliseconds")
 
                     if need_send_kv and self.skip_prefill_sampling:
                         # prefill and skip prefill sampling return dummy output
@@ -3505,7 +3552,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_outputs.append(output)
                     if use_delayed_sampling and self.is_driver_worker:
                         if not is_prev_output_patched:
+                            #start = time.perf_counter()
                             self._patch_prev_output()
+                            #end = time.perf_counter()
+                            #logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 333 took {(end-start)*1000:.3f} milliseconds")
                         output = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
                         self.cached_step_outputs.append(output)
