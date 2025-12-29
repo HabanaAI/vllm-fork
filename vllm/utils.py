@@ -1037,6 +1037,27 @@ def make_mrope_positions_tensor_with_pad( \
             mrope_input_positions[idx].extend(padded_positions)
     return torch.tensor(mrope_input_positions, dtype=torch.long, device='cpu')
 
+# Generate the padded xdrope positions. If the input positions are multi
+# batches, all positions will be flattened rather than return in batches.
+def make_xdrope_positions_tensor_with_pad( \
+        input_positions: list[list[int]],
+        input_xdrope_positions: list[list[list[int]]],
+        max_prompt_len: int,
+        pad: int) -> torch.Tensor:
+    xdrope_input_positions: list[list[int]] = [[] for _ in range(4)]
+    for idx in range(4):
+        for b_idx, input_xdrope_position in enumerate(input_xdrope_positions):
+            if input_xdrope_position is not None:
+                positions = input_xdrope_position[idx]
+            else:
+                positions = input_positions[b_idx]
+            padding_size = max_prompt_len - len(positions)
+            assert padding_size >= 0
+            padded_positions = positions \
+                + (max_prompt_len - len(positions)) * [pad]
+            xdrope_input_positions[idx].extend(padded_positions)
+    return torch.tensor(xdrope_input_positions, dtype=torch.long, device='cpu')
+
 
 def make_tensor_with_pad_align(
     x: list[list[T]],
