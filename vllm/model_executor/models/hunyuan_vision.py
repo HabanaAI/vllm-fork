@@ -26,7 +26,7 @@
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from functools import partial
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias, Optional
 
 import torch
 import torch.nn as nn
@@ -36,7 +36,6 @@ from transformers import BatchFeature
 #from vllm.attention.backends.registry import AttentionBackendEnum
 from vllm.attention.layer import MultiHeadAttention
 from vllm.config import MultiModalConfig, VllmConfig
-from vllm.config.multimodal import BaseDummyOptions
 from vllm.distributed import parallel_state
 from vllm.distributed import utils as dist_utils
 from vllm.logger import init_logger
@@ -47,6 +46,7 @@ from vllm.model_executor.layers.linear import (
     QKVParallelLinear,
     RowParallelLinear,
 )
+from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.models.module_mapping import MultiModelKeys
@@ -79,7 +79,7 @@ from vllm.transformers_utils.configs.hunyuan_vl import (
 )
 from vllm.transformers_utils.processors.hunyuan_vl import HunYuanVLProcessor
 from vllm.transformers_utils.processors.hunyuan_vl_image import smart_resize
-from vllm.utils.tensor_schema import TensorSchema, TensorShape
+from vllm.tensor_schema import TensorSchema, TensorShape
 
 from .interfaces import (
     MultiModalEmbeddings,
@@ -162,13 +162,15 @@ class HunYuanVisionMLP(nn.Module):
         use_data_parallel: bool = False,
     ):
         super().__init__()
+
+        assert use_data_parallel is False, "Only support use_data_parallel is False"
+
         self.dense_h_to_4h = ColumnParallelLinear(
             in_features,
             hidden_features,
             bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.dense_h_to_4h",
-            disable_tp=use_data_parallel,
         )
         self.dense_4h_to_h = RowParallelLinear(
             hidden_features,
@@ -176,7 +178,6 @@ class HunYuanVisionMLP(nn.Module):
             bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.dense_4h_to_h",
-            disable_tp=use_data_parallel,
         )
         self.act_fn = act_fn
 
@@ -211,6 +212,8 @@ class HunYuanVisionAttention(nn.Module):
             num_heads, self.tp_size
         )
 
+        assert use_data_parallel is False, "Only support use_data_parallel is False"
+
         self.qkv = QKVParallelLinear(
             hidden_size=embed_dim,
             head_size=self.hidden_size_per_attention_head,
@@ -219,7 +222,6 @@ class HunYuanVisionAttention(nn.Module):
             bias=True,
             quant_config=quant_config,
             prefix=f"{prefix}.qkv",
-            disable_tp=use_data_parallel,
         )
 
         self.o_proj = RowParallelLinear(
@@ -227,7 +229,6 @@ class HunYuanVisionAttention(nn.Module):
             output_size=embed_dim,
             quant_config=quant_config,
             prefix=f"{prefix}.o_proj",
-            disable_tp=use_data_parallel,
         )
 
         self.scale = self.hidden_size_per_attention_head**-0.5
@@ -238,8 +239,8 @@ class HunYuanVisionAttention(nn.Module):
             self.num_attention_heads_per_partition,
             self.hidden_size_per_attention_head,
             self.scale,
-            prefix=f"{prefix}.attn",
-#            multimodal_config=multimodal_config,
+            #prefix=f"{prefix}.attn",
+            #multimodal_config=multimodal_config,
         )
 
     def forward(
@@ -452,39 +453,34 @@ class HunYuanVisionTransformer(nn.Module):
         self.num_heads = vision_config.num_attention_heads
         self.spatial_merge_size = vision_config.spatial_merge_size
 
-        from vllm.compilation.backends import set_model_tag
-
-        with set_model_tag("HunYuanVisionPatchEmbed"):
-            self.embeddings = HunYuanVisionPatchEmbed(vision_config)
+        self.embeddings = HunYuanVisionPatchEmbed(vision_config)
 
         norm_layer = partial(nn.LayerNorm, eps=vision_config.rms_norm_eps)
 
-        with set_model_tag("HunYuanVisionBlock"):
-            self.layers = nn.ModuleList(
-                [
-                    HunYuanVisionBlock(
-                        dim=vision_config.hidden_size,
-                        num_heads=vision_config.num_attention_heads,
-                        mlp_hidden_dim=vision_config.intermediate_size,
-                        act_fn=get_act_fn(vision_config.hidden_act),
-                        norm_layer=norm_layer,
-                        quant_config=quant_config,
-                        multimodal_config=multimodal_config,
-                        prefix=f"{prefix}.layers.{layer_idx}",
-                        use_data_parallel=use_data_parallel,
-                    )
-                    for layer_idx in range(num_hidden_layers)
-                ]
-            )
+        self.layers = nn.ModuleList(
+            [
+                HunYuanVisionBlock(
+                    dim=vision_config.hidden_size,
+                    num_heads=vision_config.num_attention_heads,
+                    mlp_hidden_dim=vision_config.intermediate_size,
+                    act_fn=get_act_fn(vision_config.hidden_act),
+                    norm_layer=norm_layer,
+                    quant_config=quant_config,
+                    multimodal_config=multimodal_config,
+                    prefix=f"{prefix}.layers.{layer_idx}",
+                    use_data_parallel=use_data_parallel,
+                )
+                for layer_idx in range(num_hidden_layers)
+            ]
+        )
 
-        with set_model_tag("HunYuanVisionPatchMerger"):
-            self.perceive = HunYuanVisionPatchMerger(
-                vision_config.hidden_size,
-                vision_config.out_hidden_size,
-                spatial_merge_size=vision_config.spatial_merge_size,
-                rms_norm_eps=vision_config.rms_norm_eps,
-                prefix=f"{prefix}.perceive",
-            )
+        self.perceive = HunYuanVisionPatchMerger(
+            vision_config.hidden_size,
+            vision_config.out_hidden_size,
+            spatial_merge_size=vision_config.spatial_merge_size,
+            rms_norm_eps=vision_config.rms_norm_eps,
+            prefix=f"{prefix}.perceive",
+        )
 
     @property
     def dtype(self) -> torch.dtype:
@@ -702,7 +698,7 @@ class HunYuanVLDummyInputsBuilder(BaseDummyInputsBuilder[HunYuanVLProcessingInfo
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions] | None = None,
+        mm_options = None,
     ) -> MultiModalDataDict:
         num_images = mm_counts.get("image", 1)
 
@@ -724,12 +720,12 @@ class HunYuanVLMultiModalProcessor(BaseMultiModalProcessor[HunYuanVLProcessingIn
         prompt: str,
         mm_data: Mapping[str, object],
         mm_kwargs: Mapping[str, object],
-        tok_kwargs: Mapping[str, object],
+        #tok_kwargs: Mapping[str, object] = None,
     ) -> BatchFeature:
         return self.info.ctx.call_hf_processor(
             self.info.get_hf_processor(**mm_kwargs),
             dict(text=prompt, **mm_data),
-            dict(**mm_kwargs, **tok_kwargs),
+            dict(**mm_kwargs),
         )
 
     def _get_prompt_updates(
@@ -748,8 +744,9 @@ class HunYuanVLMultiModalProcessor(BaseMultiModalProcessor[HunYuanVLProcessingIn
         merge_size = image_processor.merge_size
 
         def get_replacement_hunyuan_vl(item_idx: int, modality: str):
-            out_item = out_mm_kwargs[modality][item_idx]
-            grid_thw = out_item[f"{modality}_grid_thw"].data
+            assert modality=="image", "Only support image mode"
+
+            grid_thw = out_mm_kwargs[f"{modality}_grid_thw"][item_idx]
             assert isinstance(grid_thw, torch.Tensor)
 
             _, grid_h, grid_w = grid_thw
@@ -905,12 +902,8 @@ class HunYuanVLForConditionalGeneration(
         )
 
     def _parse_and_validate_image_input(
-        self, **kwargs: object
+        self, pixel_values, image_embeds, image_grid_thw
     ) -> HunYuanVLImageInputs | None:
-        pixel_values = kwargs.pop("pixel_values", None)
-        image_embeds = kwargs.pop("image_embeds", None)
-        image_grid_thw = kwargs.pop("image_grid_thw", None)
-
         if pixel_values is None and image_embeds is None:
             return None
 
@@ -955,17 +948,37 @@ class HunYuanVLForConditionalGeneration(
 
     def _parse_and_validate_multimodal_inputs(self, **kwargs: object) -> dict:
         mm_input_by_modality = {}
+        ret_list = []
 
-        # Preserve the order of modalities if there are multiple of them
-        # from the order of kwargs.
-        for input_key in kwargs:
-            if (
-                input_key in ("pixel_values", "image_embeds")
-                and "image" not in mm_input_by_modality
-            ):
-                mm_input_by_modality["image"] = self._parse_and_validate_image_input(
-                    **kwargs
-                )
+        pixel_values = kwargs.pop("pixel_values", None)
+        image_embeds = kwargs.pop("image_embeds", None)
+        image_grid_thw = kwargs.pop("image_grid_thw", None)
+
+        if pixel_values is None and image_embeds is None:
+            return {}
+
+        # The upstream hunyuan ocr model does not consider batch size.
+        # But we always get batch size as the first dim. So split it.
+        batch_sz = pixel_values.shape[0] if pixel_values is not None else image_embeds.shape[0]
+        assert batch_sz >= 1
+        if image_grid_thw is not None:
+            assert batch_sz == image_grid_thw.shape[0]
+
+        have_mm_data = False
+        for i in range(batch_sz):
+            one_input = self._parse_and_validate_image_input(
+                pixel_values[i] if pixel_values is not None else None,
+                image_embeds[i] if image_embeds is not None else None,
+                image_grid_thw[i] if image_grid_thw is not None else None)
+            if one_input is not None:
+                have_mm_data = True
+
+            ret_list.append(one_input)
+
+        if have_mm_data == False:
+            return {}
+
+        mm_input_by_modality["image"] = ret_list
         return mm_input_by_modality
 
     def get_language_model(self) -> torch.nn.Module:
@@ -989,15 +1002,28 @@ class HunYuanVLForConditionalGeneration(
                 multimodal_embeddings += tuple(image_embeddings)
         return multimodal_embeddings
 
-    def get_multimodal_embeddings(self, **kwargs: object):
-        return self.embed_multimodal(**kwargs)
+    def get_multimodal_embeddings(
+            self, **kwargs: object) -> MultiModalEmbeddings | None:
+        mm_input_by_modality = self._parse_and_validate_multimodal_inputs(**kwargs)
+        if not mm_input_by_modality:
+            return []
+
+        multimodal_input = mm_input_by_modality["image"]
+
+        all_vision_embeddings = [None] * len(multimodal_input)
+        for index, mm_input in enumerate(multimodal_input):
+            if mm_input is not None:
+                image_embeddings = self._process_image_input(mm_input)
+                all_vision_embeddings[index] = image_embeddings
+
+        return all_vision_embeddings
 
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        intermediate_tensors: IntermediateTensors | None,
-        inputs_embeds: torch.Tensor | None,
+        intermediate_tensors: IntermediateTensors = None,
+        inputs_embeds: torch.Tensor = None,
         **kwargs: object,
     ) -> torch.Tensor | IntermediateTensors:
         if intermediate_tensors is not None:
@@ -1014,8 +1040,9 @@ class HunYuanVLForConditionalGeneration(
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
     ) -> torch.Tensor | None:
-        return self.language_model.compute_logits(hidden_states)
+        return self.language_model.compute_logits(hidden_states, sampling_metadata)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(
@@ -1033,3 +1060,53 @@ class HunYuanVLForConditionalGeneration(
             connector="visual.perceive",
             tower_model="visual",
         )
+
+    def _get_text_embeddings(
+        self,
+        input_ids: torch.Tensor,
+        get_input_embeddings: Callable[[torch.Tensor], torch.Tensor],
+    ) -> torch.Tensor:
+        return get_input_embeddings(input_ids)
+
+    def get_input_embeddings(
+        self,
+        input_ids: torch.Tensor,
+        multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
+    ) -> torch.Tensor:
+        """
+        Apply token embeddings to `input_ids`.
+
+        If `multimodal_embeddings` is passed, scatter them into
+        `input_ids` according to the mask `is_multimodal`.
+
+        In case the multi-modal token IDs exceed the vocabulary size of
+        the language model, you can set `handle_oov_mm_token=False`
+        to avoid calling the language model's `get_input_embeddings` method
+        on those tokens. Note however that doing so increases memory usage
+        as an additional buffer is needed to hold the input embeddings.
+        """
+        from .utils import _merge_multimodal_embeddings
+
+        inputs_embeds = self._get_text_embeddings(
+            input_ids,
+            self.get_language_model().get_input_embeddings,
+        )
+
+        if multimodal_embeddings is None or len(multimodal_embeddings) == 0:
+            return inputs_embeds
+
+        is_multimodal = (input_ids == self.config.image_token_id)
+        ret = _merge_multimodal_embeddings(inputs_embeds, is_multimodal,
+                                            multimodal_embeddings)
+
+        return ret
+
+    def prepare_attn_masks(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        mask_dtype: torch.dtype,
+        **kwargs,
+    ):
+        return kwargs
+
