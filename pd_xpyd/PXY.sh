@@ -86,7 +86,7 @@ if [ -n "$ENV_FILE" ]; then
         P_NUM_INSTANCE=${USR_P_NUM_INSTANCE:-0}
         TOTAL_PREFILL_NODES=${#PREFILL_LIST[@]}
         
-        if [ "$P_NUM_INSTANCE" -gt 0 ] && [ "$P_NUM_INSTANCE" -lt "$TOTAL_PREFILL_NODES" ]; then
+        if [ "$P_NUM_INSTANCE" -gt 0 ] && [ "$P_NUM_INSTANCE" -le "$TOTAL_PREFILL_NODES" ]; then
             # Check if TOTAL_PREFILL_NODES is evenly divisible by P_NUM_INSTANCE
             REMAINDER=$(( TOTAL_PREFILL_NODES % P_NUM_INSTANCE ))
             if [ "$REMAINDER" -ne 0 ]; then
