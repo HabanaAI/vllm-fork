@@ -80,6 +80,7 @@ from vllm.transformers_utils.configs.hunyuan_vl import (
 from vllm.transformers_utils.processors.hunyuan_vl import HunYuanVLProcessor
 from vllm.transformers_utils.processors.hunyuan_vl_image import smart_resize
 from vllm.tensor_schema import TensorSchema, TensorShape
+from vllm.platforms import _Backend, current_platform
 
 from .interfaces import (
     MultiModalEmbeddings,
@@ -95,6 +96,11 @@ from .utils import (
     init_vllm_registered_model,
     maybe_prefix,
 )
+
+is_hpu = current_platform.is_hpu()
+if is_hpu:
+    import habana_frameworks.torch as htorch
+    import habana_frameworks.torch.core as htcore
 
 logger = init_logger(__name__)
 
@@ -246,10 +252,11 @@ class HunYuanVisionAttention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        attn_mask: torch.Tensor = None,
     ) -> torch.Tensor:
         qkv, _ = self.qkv(x)
         q, k, v = qkv.chunk(3, dim=-1)
-        out = self.attn(q, k, v)
+        out = self.attn(q, k, v, attn_mask)
         output, _ = self.o_proj(out)
         return output
 
@@ -294,8 +301,9 @@ class HunYuanVisionBlock(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        attn_mask: torch.Tensor = None,
     ) -> torch.Tensor:
-        x = x + self.self_attn(self.input_layernorm(x))
+        x = x + self.self_attn(self.input_layernorm(x), attn_mask)
         x = x + self.mlp(self.post_attention_layernorm(x))
         return x
 
@@ -554,6 +562,125 @@ class HunYuanVisionTransformer(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
+
+class HunYuanVisionTransformerStaticShape(HunYuanVisionTransformer):
+    def __init__(
+        self,
+        vision_config: HunYuanVLVisionConfig,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+        use_data_parallel: bool = False,
+        multimodal_config: MultiModalConfig | None = None,
+        attn_backend_override = None,
+    ) -> None:
+        super().__init__(vision_config=vision_config, quant_config=quant_config,
+            prefix=prefix, use_data_parallel=use_data_parallel,
+            multimodal_config=multimodal_config,
+            attn_backend_override=attn_backend_override)
+
+    def pad_multimodal_data(self,
+                            pixel_values,
+                            vision_buckets,
+                            constant_value=0):
+        orig_len = pixel_values.shape[0]
+        desired_number_of_pixels = vision_buckets.get_multimodal_bucket(orig_len)
+        padding_len = desired_number_of_pixels - orig_len
+        if padding_len <= 0:
+            logger_msg = "No big enough size in bucket to do pad " \
+                + str(orig_len)
+            logger.warning(logger_msg)
+            return pixel_values, orig_len
+
+        logger_msg = "Padding current number pixel " \
+            + str(orig_len) \
+            + " to " \
+            + str(desired_number_of_pixels)
+        logger.debug(logger_msg)
+
+        pixel_values = F.pad(pixel_values, (0, 0, 0, padding_len), "constant",
+                             constant_value)
+
+        return pixel_values, orig_len
+
+    def create_block_diagonal_attention_mask_outerprod(self, indices):
+        maxsize = indices[-1]
+        range_to_max_for_each_img = torch.arange(
+            maxsize,
+            device=indices.device).unsqueeze(0).repeat(indices.shape[0] - 1, 1)
+
+        lesser = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+        greater_eq = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+        range_indices = torch.logical_and(lesser, greater_eq).float()
+        # can reduce sum externally or as batchmatmul
+        if range_indices.shape[-1] > 40000:
+            log_msg = "einsum running on CPU :" + str(range_indices.shape)
+            logger.info(log_msg)
+            range_indices = range_indices.to("cpu")
+            res = torch.einsum('bi,bj->ij', range_indices, range_indices)
+            res = res.to("hpu")
+        else:
+            res = torch.einsum('bi,bj->ij', range_indices, range_indices)
+
+        return res.bool()
+
+    def get_image_embeds(
+        self,
+        x: torch.Tensor,
+        grid_thw: torch.Tensor,
+        vision_buckets,
+    ) -> torch.Tensor:
+        seq_len = x.size(0)
+        cu_seqlens: list = [0]
+
+        hidden_states = x.to(device=self.device, dtype=self.dtype)
+        hidden_states = self.embeddings(hidden_states, grid_thw)
+
+        for t, h, w in grid_thw:
+            t, h, w = int(t), int(h), int(w)
+            cu_seqlens.append(h * w)
+
+        cu_seqlens = torch.tensor(cu_seqlens, dtype=torch.int32)
+        cu_seqlens = torch.cumsum(cu_seqlens, dim=0, dtype=torch.int32)
+        cu_seqlens = cu_seqlens.to(device=self.device, non_blocking=True)
+
+        hidden_states = hidden_states.reshape(seq_len, -1)
+        hidden_states_padded, orig_len = self.pad_multimodal_data(hidden_states, vision_buckets, 0)
+
+        indice_list = torch.tensor([0, orig_len, hidden_states_padded.shape[0]], device=self.device)
+        attn_mask = self.create_block_diagonal_attention_mask_outerprod(indice_list)
+
+        hidden_states_padded = hidden_states_padded.unsqueeze(0)
+        # Gaudi get graph error if broadcasting attn_mask,
+        # so make it the same dim as the hidden_states
+        attn_mask = attn_mask.unsqueeze(0)
+        attn_mask = attn_mask.unsqueeze(0)
+
+        htcore.mark_step()
+        hidden_states_padded = self.forward(hidden_states_padded, attn_mask)
+        htcore.mark_step()
+
+        hidden_states = hidden_states_padded[..., :orig_len, :].clone()
+
+        # adapter
+        split_lengths = (cu_seqlens[1:] - cu_seqlens[:-1]).tolist()
+        split_items = hidden_states.split(split_lengths, dim=1)
+        image_embeds_list = []
+        for grid, split_item in zip(grid_thw, split_items):
+            image_embeds_list.append(
+                self.perceive(split_item.contiguous(), size=grid[1:]).squeeze(0)
+            )
+
+        return image_embeds_list
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attn_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        for layer_num, layer in enumerate(self.layers):
+            hidden_states = layer(hidden_states, attn_mask)
+
+        return hidden_states
 
 def _hunyuan_vl_field_config(hf_inputs: Mapping[str, torch.Tensor]):
     image_grid_thw = hf_inputs.get("image_grid_thw", torch.empty((0, 3)))
@@ -878,7 +1005,12 @@ class HunYuanVLForConditionalGeneration(
                 else None
             )
 
-            self.visual = HunYuanVisionTransformer(
+            if is_hpu:
+                hunyuan_visionTransformer = HunYuanVisionTransformerStaticShape
+            else:
+                hunyuan_visionTransformer = HunYuanVisionTransformer
+
+            self.visual = hunyuan_visionTransformer(
                 config.vision_config,
                 quant_config=self.quant_config,
                 prefix=maybe_prefix(prefix, "visual"),
@@ -941,8 +1073,17 @@ class HunYuanVLForConditionalGeneration(
         else:
             pixel_values = image_input["pixel_values"]
 
-            # TODO: use_data_parallel (split image_embeds in visual)
-            image_embeds = self.visual(pixel_values, grid_thw=grid_thw_list)
+            if is_hpu:
+                assert isinstance(self.visual,
+                                  HunYuanVisionTransformerStaticShape)
+                image_embeds = self.visual.get_image_embeds(
+                    pixel_values,
+                    grid_thw=grid_thw_list,
+                    vision_buckets=self.vision_buckets,
+                )
+            else:
+                # TODO: use_data_parallel (split image_embeds in visual)
+                image_embeds = self.visual(pixel_values, grid_thw=grid_thw_list)
 
         return image_embeds
 
@@ -959,7 +1100,10 @@ class HunYuanVLForConditionalGeneration(
 
         # The upstream hunyuan ocr model does not consider batch size.
         # But we always get batch size as the first dim. So split it.
-        batch_sz = pixel_values.shape[0] if pixel_values is not None else image_embeds.shape[0]
+        if pixel_values is not None:
+            batch_sz = len(pixel_values) if isinstance(pixel_values, list) else pixel_values.shape[0]
+        else:
+            batch_sz = len(image_embeds) if isinstance(image_embeds, list) else image_embeds.shape[0]
         assert batch_sz >= 1
         if image_grid_thw is not None:
             assert batch_sz == image_grid_thw.shape[0]

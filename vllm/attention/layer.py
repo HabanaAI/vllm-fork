@@ -322,6 +322,7 @@ class MultiHeadAttention(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
+        attn_mask: torch.Tensor = None,
     ) -> torch.Tensor:
         """Input shape: batch_size x seq_len x hidden_size"""
         # TODO(Isotr0py): Use existing backend implementations and support FA3
@@ -367,7 +368,7 @@ class MultiHeadAttention(nn.Module):
                 out = fsdpa_op(query,
                                key,
                                value,
-                               None,
+                               attn_mask,
                                dropout_p=0.0,
                                is_causal=False,
                                scale=self.scale,
@@ -378,6 +379,7 @@ class MultiHeadAttention(nn.Module):
                 out = F.scaled_dot_product_attention(query,
                                                      key,
                                                      value,
+                                                     attn_mask=attn_mask,
                                                      scale=self.scale)
             out = out.transpose(1, 2)
 

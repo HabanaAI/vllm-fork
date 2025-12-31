@@ -110,17 +110,17 @@ class VisionBuckets:
 
     def __init__(self,
                  is_batch_based,
-                 sub_image_list: Optional[list[int]] = None):
+                 multimodal_buckets_list: Optional[list[int]] = None):
         self.is_batch_based = is_batch_based
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "").lower()
         if envvar == 'none':
             self.multimodal_buckets = None
         else:
             if envvar == "":
-                if sub_image_list is not None:
-                    assert isinstance(sub_image_list, list), \
-                        "sub_image_list must be a list"
-                    multimodal_buckets = sub_image_list
+                if multimodal_buckets_list is not None:
+                    assert isinstance(multimodal_buckets_list, list), \
+                        "user provided multimodal_buckets_list must be a list"
+                    multimodal_buckets = multimodal_buckets_list
                 elif is_batch_based:
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
@@ -213,12 +213,17 @@ def is_mm_optimized(model):
         'DeepseekOCRForCausalLM' in str(type(model))
 
 
-def fixed_sub_image_list(model):
-    # So far, in deepseek OCR model, the sub image mode only
-    # supports 0~6 excluding 1. 1 means the sub image is equal
-    # to global image, which is not allowed.
-    return [i for i in range(6+1) if i!=1] \
-        if model.config.model_type == 'deepseek_ocr' else None
+# Provide the model specific multimodal_buckets_list
+def get_model_multimodal_buckets_list(model):
+    if model.config.model_type == 'deepseek_ocr':
+        # So far, in deepseek OCR model, the sub image mode only
+        # supports 0~6 excluding 1. 1 means the sub image is equal
+        # to global image, which is not allowed.
+        return [i for i in range(6+1) if i!=1]
+    elif model.config.model_type == 'hunyuan_vl':
+        return [1600, 3136, 4096, 6400, 9600]
+    else:
+        return None
 
 
 def pad_flat_tensor(tensor, desired_size):
@@ -1899,7 +1904,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def add_vision_buckets_to_mrope_mm_optimized(self):
         model = self.get_model()
         self.is_mm_optimized = is_mm_optimized(model)
-        sub_image_list = fixed_sub_image_list(model)
+        sub_image_list = get_model_multimodal_buckets_list(model)
         if self.model_is_mrope or self.model_is_xdrope or self.is_mm_optimized:
             model.vision_buckets = \
                 VisionBuckets(self.is_mm_optimized, sub_image_list)
