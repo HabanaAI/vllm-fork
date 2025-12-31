@@ -113,6 +113,7 @@ set_length(){
         if [ "$chunk_size" -lt "$max_num_batched_tokens" ]; then
             max_num_batched_tokens=$chunk_size
         fi
+        disable_zero_padding=true
     fi
     # Ceiling max_num_batched_tokens to a multiple of BLOCK_SIZE
     max_num_batched_tokens=$( ceil $max_num_batched_tokens $BLOCK_SIZE )
@@ -285,6 +286,10 @@ set_bucketing(){
     prompt_seq_min=$block_size
     prompt_seq_step=$block_size
     prompt_seq_max=$max_num_batched_tokens
+    if [ "$chunk_size" != "" ]; then
+        prompt_seq_step=$max_num_batched_tokens
+        prompt_seq_max=$max_model_len
+    fi
     export VLLM_PROMPT_SEQ_BUCKET_MIN=${VLLM_PROMPT_SEQ_BUCKET_MIN:-$prompt_seq_min}
     export VLLM_PROMPT_SEQ_BUCKET_STEP=${VLLM_PROMPT_SEQ_BUCKET_STEP:-$prompt_seq_step}
     export VLLM_PROMPT_SEQ_BUCKET_MAX=${VLLM_PROMPT_SEQ_BUCKET_MAX:-$prompt_seq_max}
@@ -336,6 +341,14 @@ set_perf_tuning(){
     else
         echo "VLLM_ZERO_PADDING is enabled"
         export VLLM_ZERO_PADDING=true
+    fi
+    if [ "$chunk_size" != "" ]; then
+        echo "VLLM_DELAYED_SAMPLING is disabled"
+        export VLLM_DELAYED_SAMPLING=false
+        echo "VLLM_CONTIGUOUS_PA is disabled"
+        export VLLM_CONTIGUOUS_PA=false
+        echo "VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT is enabled"
+        export VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT=1
     fi
 
     # VLLM_FP32_SOFTMAX=false by default, set to true for models with accuracy issues.

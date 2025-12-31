@@ -2084,7 +2084,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 f"{self.max_num_batched_tokens=} for chunked prefill"
             )
 
-            max_prompt_len = self.max_num_batched_tokens
+            max_prompt_len = max(
+                self.bucketing_manager.find_prompt_bucket(bs, target_query_len,
+                                                          ctx)[1], self.block_size)
         else:
             if bs > 1 and self.use_merged_prefill:
                 bs = 1
@@ -3055,6 +3057,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             attn_metadata = prefill_attn_metadata if \
                 prefill_attn_metadata is not None else decode_attn_metadata
 
+        if attn_metadata is not None and input_positions is not None:
+            attn_metadata.input_positions = input_positions
         return self._model_input_cls(input_tokens=input_tokens,
                                      seq_lens=seq_lens,
                                      query_lens=query_lens,
@@ -3782,7 +3786,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 0,
                                 seq_len + ctx * self.block_size,
                                 True,
-                                lora_request=dummy_lora_requests_per_seq[i]
+                                lora_request=dummy_lora_requests_per_seq[0]
                                 if dummy_lora_requests_per_seq else None,
                                 img_args=img_args,
                                 temperature=temperature,
@@ -4429,7 +4433,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def _check_config(self, batch_size, seq_len, ctx, attn_metadata,
                       warmup_mode):
         is_prefix_caching = self.vllm_config.cache_config.enable_prefix_caching
-        is_chunked_prefill = self.vllm_config.scheduler_config.enable_chunked_prefill
+        scheduler_config = self.vllm_config.scheduler_config
+        is_chunked_prefill = scheduler_config.enable_chunked_prefill
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
         if is_prefix_caching or is_chunked_prefill:
