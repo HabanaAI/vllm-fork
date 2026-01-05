@@ -96,6 +96,7 @@ execute_model_count = 0
 g_profile_run_mode = False
 g_is_dummy_run = False
 g_warmup_mode = False
+VLLM_ENABLE_PERFORMANCE_LOG = os.environ.get('VLLM_ENABLE_PERFORMANCE_LOG', '0').lower() in ('1', 'true')
 
 class PhaseType(Enum):
     
@@ -1029,7 +1030,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 global g_profile_run_mode
                 global g_is_dummy_run
                 global g_warmup_mode
-                if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                if VLLM_ENABLE_PERFORMANCE_LOG and not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
                     logger.info(f"<rank {torch.distributed.get_rank()}> align_dp_groups in _add_dummy_seq took {(end-start)*1000:.3f} milliseconds")
             if align_worker:
                 batch_size_padded = align_tp_groups(
@@ -1541,7 +1542,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     global g_profile_run_mode
                     global g_is_dummy_run
                     global g_warmup_mode
-                    if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                    if VLLM_ENABLE_PERFORMANCE_LOG and not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
                         logger.info(f"<rank {torch.distributed.get_rank()}> align_dp_groups in _prepare_decode took {(end-start)*1000:.3f} milliseconds")
                 if align_worker:
                     block_bucket_size = align_tp_groups(
@@ -2686,7 +2687,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             global g_profile_run_mode
             global g_is_dummy_run
             global g_warmup_mode
-            if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+            if VLLM_ENABLE_PERFORMANCE_LOG and not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
                 logger.info(f"<rank {torch.distributed.get_rank()}> prepare_input_tensors took {(end-start)*1000:.3f} milliseconds")
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
@@ -3296,7 +3297,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         'bypass_model_exec  ': bypass_model_exec,
                         'need_recv_kv': need_recv_kv
                     }
-                    if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                    if VLLM_ENABLE_PERFORMANCE_LOG and not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
                         logger.info(f"<rank {torch.distributed.get_rank()}> bypass_model_exec: {bypass_model_exec}")
                     if not bypass_model_exec:
                         with self.profiler.record_event('internal',
@@ -3308,7 +3309,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 selected_token_indices=sampling_metadata.
                                 selected_token_indices)
                             end = time.perf_counter()
-                            if not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
+                            if VLLM_ENABLE_PERFORMANCE_LOG and not g_profile_run_mode and not g_is_dummy_run and not g_warmup_mode:
                                 logger.info(f"<rank {torch.distributed.get_rank()}> model forward took {(end-start)*1000:.3f} milliseconds @ {execute_model_count=}")
                             if profile_run_mode and not is_dummy_run:
                                 torch.hpu.synchronize()
