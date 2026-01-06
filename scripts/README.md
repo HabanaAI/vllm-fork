@@ -117,7 +117,7 @@ Options:
     Used to control the maximum batched tokens to be captured in HPUgraph.
     Reduce this value could decrease memory usage, but not smaller than 2048.
 -k  enable-chunked prefill and cap max-num-batched-tokens
-    to the specified value, int, default=disabled
+    to the specified value, int, default=disabled.Recommended setting: -k 8192
 -u  gpu-memory-utilization, float, default=0.9
     Used to control the GPU memory utilization. Reduce this value if OOM occurs.
 -e  Extra vLLM server parameters, str, default=None

@@ -607,7 +607,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 common_args = self.common_attention_args(block_list, attn_data.key_cache,
                                                             attn_data.value_cache,
                                                             attn_metadata.block_size)
-                attn_bias = attn_metadata.attn_bias
                 position_bias = None
 
                 out = ops.prompt_attention(
@@ -682,8 +681,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                              attn_metadata.block_size))
         # Reshape the output tensor.
         if decode_output is None:
-            prompt_output = prompt_output.view(
-                prefill_batch_size , prefill_seq_len, prefill_hidden_size)
             return prompt_output
         elif prompt_output is None:
             return decode_output.view(decode_batch_size * decode_seq_len,

@@ -1935,7 +1935,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 prompt_tokens = prompt_tokens[context_len:]
                 prefix_block_tables.append(computed_block_nums)
             elif self.scheduler_config.chunked_prefill_enabled:
-                if seq_group_metadata.block_tables is not None and (not envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT or context_len > 0):
+                if (
+                    seq_group_metadata.block_tables is not None
+                    and (
+                        not envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT
+                        or context_len > 0
+                    )
+                ):
                     # Prefill has chunked before.
                     block_table = seq_group_metadata.block_tables[seq_id]
                     if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
@@ -2928,19 +2934,27 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self.scheduler_config.enable_chunked_prefill:
                 if num_prefills > 0:
                     max_len = input_tokens.size(1)
+                    # Ensure tensor type for static checking.
+                    assert isinstance(input_tokens, torch.Tensor)
+                    assert isinstance(input_positions, torch.Tensor)
                     input_tokens = input_tokens.flatten()
                     input_positions = input_positions.flatten()
                     if num_decode_tokens > 0:
+                        # Ensure tensor type for static checking.
+                        assert isinstance(decode_input_tokens, torch.Tensor)
+                        assert isinstance(decode_input_positions, torch.Tensor)
                         decode_input_tokens = decode_input_tokens.flatten()
                         decode_input_positions = decode_input_positions.flatten()
                         input_tokens = torch.cat(
                             (input_tokens, decode_input_tokens), dim=0)
                         input_positions = torch.cat(
                             (input_positions, decode_input_positions), dim=0)
-                        #max_len += decode_input_tokens.size(0)
 
                 else:
                     max_len = decode_input_tokens.size(1)
+                    # Ensure tensor type for static checking.
+                    assert isinstance(decode_input_tokens, torch.Tensor)
+                    assert isinstance(decode_input_positions, torch.Tensor)
                     input_tokens = decode_input_tokens.flatten()
                     input_positions = decode_input_positions.flatten()
                 # FIXME: We need to adjust selected_token_indices to accommodate
@@ -3777,7 +3791,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         dummy_lora_requests.append(dummy_lora_request)
                     dummy_lora_requests_per_seq = [
                         dummy_lora_requests[idx % len(dummy_lora_requests)]
-                        for idx in range(batch_size)
+                        for idx in range(batch_size + decode_bs)
                     ]
             self.profiler.start('internal', scenario_name)
             times = num_iters if use_graphs or is_pt_profiler_run else 1
@@ -3797,10 +3811,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             blocks[0] += decode_ctx % decode_bs
             for i, b in enumerate(blocks):
                 seqs_decode = self.create_dummy_seq_group_metadata(
-                    i,  # type: ignore[has-type]
+                    i + batch_size,  # type: ignore[has-type]
                     b * self.block_size - 1,
                     False,
-                    lora_request=dummy_lora_requests_per_seq[i]
+                    lora_request=dummy_lora_requests_per_seq[i + batch_size]
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature,
                     ctx=decode_ctx)
