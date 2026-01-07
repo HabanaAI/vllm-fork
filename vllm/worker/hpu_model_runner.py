@@ -429,7 +429,7 @@ class HpuModelAdapter(torch.nn.Module):
         # This is to ensure that we keeps
         # the static and dynamic parts distinct.
         if htorch.utils.internal.is_lazy():
-            if (self.model_is_mrope and hasattr(self.model, 'visual') and
+            if ((self.model_is_mrope or self.model_is_xdrope) and hasattr(self.model, 'visual') and
                 model_config is not None
                 and model_config.model_type not in
                 ("glm4v_moe", "paddleocr_vl")) \
@@ -3337,7 +3337,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
                                                     lora_request, seq_len):
-        assert self.model_is_mrope or self.is_mm_optimized, \
+        assert self.model_is_mrope or self.model_is_xdrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
@@ -3364,7 +3364,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "images_spatial_crop": images_spatial_crop,
             }
             num_image_tokens = 1
-        elif self.model_is_mrope:
+        elif self.model_is_mrope or self.model_is_xdrope:
             if not hasattr(self.get_model().config, "vision_config"):
                 raise ValueError("Expect mrope model to have vision_config")
             vision_config = self.get_model().config.vision_config
@@ -3380,6 +3380,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             image_grid_thw = torch.tensor(
                 [[1, image_h, int(img_args / image_h)]])
             embed_dim = 1176
+
             if any([
                     model_type in self.get_model().config.model_type
                     for model_type in ['qwen3_vl', "qwen3_omni"]
@@ -3391,6 +3392,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    getattr(vision_config, "patch_size", 0) ** 2)
                 if vision_feat_dim > 0:
                     embed_dim = vision_feat_dim  # 588
+            elif 'hunyuan_vl' in self.get_model().config.model_type:
+                embed_dim = 768
+                num_image_tokens = (image_grid_thw[0][1] // vision_config.spatial_merge_size) * (image_grid_thw[0][2] // vision_config.spatial_merge_size + 1) + 2
+
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
                 embed_dim)  # TODO: figure out the variable name
@@ -3568,7 +3573,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      lora_request=lora_request)
 
     def is_mm_run(self) -> bool:
-        return (self.is_mm_optimized or self.model_is_mrope) and \
+        return (self.is_mm_optimized or self.model_is_mrope or self.model_is_xdrope) and \
             (self.multimodal_buckets is not None)
 
     def profile_run(self) -> None:
@@ -3586,7 +3591,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
-        if self.model_is_mrope or self.is_mm_optimized:
+        if self.model_is_mrope or self.model_is_xdrope or self.is_mm_optimized:
             # Using batch_size 1 is profile multimodal models
             max_batch_size = 1
             model = self.get_model()
@@ -3681,7 +3686,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         num_iters=3,
                         align_worker=False,
                         is_dummy_run=False) -> None:
-        return
         phase = 'prompt' if is_prompt else 'decode'
         use_graphs = is_dummy_run or self._use_graphs(batch_size, seq_len, ctx)
 
@@ -4634,11 +4638,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         ])
 
     def _get_img_args_from_model_input(self, model_input):
-        if (not self.model_is_mrope and not self.is_mm_optimized) or \
+        if (not self.model_is_mrope and not self.model_is_xdrope and not self.is_mm_optimized) or \
             not model_input.multi_modal_kwargs or \
             'pixel_values' not in model_input.multi_modal_kwargs:
             return None
-        if self.model_is_mrope:
+        if self.model_is_mrope or self.model_is_xdrope:
             pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
             if isinstance(pixel_values_list, torch.Tensor):
                 pixel_values_list = [pixel_values_list]

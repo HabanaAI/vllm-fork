@@ -586,9 +586,10 @@ class HunYuanVisionTransformerStaticShape(HunYuanVisionTransformer):
         desired_number_of_pixels = vision_buckets.get_multimodal_bucket(orig_len)
         padding_len = desired_number_of_pixels - orig_len
         if padding_len <= 0:
-            logger_msg = "No big enough size in bucket to do pad " \
-                + str(orig_len)
-            logger.warning(logger_msg)
+            if padding_len < 0:
+                logger_msg = "No big enough size in bucket to do pad " \
+                    + str(orig_len)
+                logger.warning(logger_msg)
             return pixel_values, orig_len
 
         logger_msg = "Padding current number pixel " \
