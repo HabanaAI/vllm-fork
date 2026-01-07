@@ -483,8 +483,8 @@ class HpuModelAdapter(torch.nn.Module):
         if hasattr(self._rotary_embed_module, "sin"):
             delattr(self._rotary_embed_module, "sin")
 
-    def _set_attn_bias_chunked(self, seq_len, context_len, query_len, device,
-                               dtype):
+    def _set_attn_bias_chunked(self, attn_metadata, batch_size, seq_len,
+                               context_len, query_len, device, dtype):
         """
         Construct the attention bias for chunked prefill.
         example:
@@ -503,12 +503,17 @@ class HpuModelAdapter(torch.nn.Module):
             - Columns 4..7: new KV with causal upper-triangular masking.
             - 0 indicates allowed attention; -inf indicates masked positions.
         """
-        con_len = context_len.item()
-        past_mask = torch.arange(0, con_len, dtype=torch.int32, device=device)
+
         if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
+            block_list = attn_metadata.block_list
+            max_context_len = (block_list.size(-1) //
+                               batch_size if block_list is not None else 0)
+            con_len = max_context_len * self.block_size
             attn_len = seq_len
         else:
+            con_len = context_len.item()
             attn_len = seq_len - con_len
+        past_mask = torch.arange(0, con_len, dtype=torch.int32, device=device)
         past_mask = (past_mask.view(1, -1).expand(1, -1).ge(con_len).view(
             1, 1, -1).expand(1, seq_len, -1).view(1, 1, seq_len, -1))
         len_mask = (torch.arange(0, attn_len, device=device,
@@ -720,8 +725,8 @@ class HpuModelAdapter(torch.nn.Module):
                         "only supports bs=1")
                 for i in range(batch_size):
                     single_attn_bias = self._set_attn_bias_chunked(
-                        int(seq_len), context_lens_t[i], query_lens_t[i],
-                        device, dtype)
+                        attn_metadata, batch_size, int(seq_len),
+                        context_lens_t[i], query_lens_t[i], device, dtype)
                     if attn_bias is None:
                         attn_bias = single_attn_bias
                     else:
