@@ -1,12 +1,7 @@
 #set -x
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
-if [ -z "$1" ] || [ "$1" == "g10" ]; then
-    source "$BASH_DIR"/start_etcd_mooncake_master.sh
-    echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
-fi
-
-sleep 30
+sleep 20
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g10}.json
