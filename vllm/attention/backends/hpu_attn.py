@@ -152,6 +152,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     decode_attn_bias: Optional[torch.Tensor] = None
     chunk_prefill_enabled: bool = False
 
+
 class HPUAttentionData:
     query: torch.Tensor = None
     key: torch.Tensor = None
@@ -162,6 +163,7 @@ class HPUAttentionData:
     seq_len: int = 0
     hidden_size: int = 0
     seq_len_kv: int = 0
+
 
 @dataclass
 class HPUMLAMetadata(HPUAttentionMetadata, AttentionMetadata):
@@ -616,7 +618,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     **common_args)
 
             else:
-                # TODO: enable FusedSDPA
                 block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
 
@@ -643,7 +644,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                             0, (-1, attn_metadata.block_size)),
                         attn_metadata.block_list).view(kv_shape)
                     common_args['need_context'] = False
-
 
                 out = ops.prompt_attention(
                     impl=self.prefill_impl,
@@ -1057,4 +1057,3 @@ def _make_decode_alibi_bias(
     per_head_bias.mul_(alibi_slopes[None, :, None])
 
     return per_head_bias
-

@@ -3886,7 +3886,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if not is_dummy_run:
                 gc.collect()
 
-
     def remove_all_loras(self):
         if not self.lora_manager:
             raise RuntimeError("LoRA is not enabled.")
@@ -5237,4 +5236,3 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # need to do that manually.
                     sg.seq_group.prompt_logprobs = [None] + real_logprobs
         self.has_patched_prev_output = True
-

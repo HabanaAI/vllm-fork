@@ -13,7 +13,6 @@ os.environ["VLLM_DELAYED_SAMPLING"] = "false"
 
 
 if __name__ == "__main__":
-
     from vllm import LLM, SamplingParams
 
     # Sample prompts.
@@ -50,4 +49,3 @@ if __name__ == "__main__":
         prompt = output.prompt
         generated_text = output.outputs[0].text
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
-
