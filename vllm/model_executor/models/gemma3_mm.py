@@ -584,7 +584,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             "shape": list(pixel_values_np.shape),
             #"dtype": str(pixel_values_np.dtype)
         }
-        server_url = "http://localhost:8000"
+        server_url = os.environ.get('VT_SERVER_URL', 'http://localhost:8000')
         response = requests.post(f"{server_url}/encode", json=payload)
 
         if response.status_code != 200:

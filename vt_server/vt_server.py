@@ -36,11 +36,11 @@ async def load_model():
     global model, processor, device
 
     # load SigLIP model
-    full_model_name = "google/gemma-3-12b-it"
+    full_model_name = "google/gemma-3-4b-it"
     full_model = AutoModel.from_pretrained(full_model_name)
     model = full_model.vision_tower
 
-    device = torch.device("hpu")
+    device = torch.device(app.state.device_type)
     model = model.to(device)
     model.eval()
 
@@ -93,7 +93,11 @@ async def encode_images(request: TensorRequest):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Vision Encoder Service')
     parser.add_argument("--server-url", default="http://localhost:8000", help="Server URL")
+    parser.add_argument("--device", type=str, default="hpu", help="Device to use for inference")
     args = parser.parse_args()
+    
+    # Store device type in app state for access in startup handler
+    app.state.device_type = args.device
     
     # Parse the URL to extract host and port
     parsed_url = urlparse(args.server_url)
