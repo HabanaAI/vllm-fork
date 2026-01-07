@@ -597,10 +597,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             kv_shape = (prefill_batch_size, attn_data.seq_len_kv,
                         self.num_kv_heads, self.head_size)
 
-            if attn_metadata is None or attn_metadata.block_list is None:
+            if attn_metadata.block_list is None:
 
-                block_list = attn_metadata.block_list if attn_metadata \
-                and attn_metadata.block_list is not None else None
+                block_list = attn_metadata.block_list
 
                 common_args = self.common_attention_args(
                     block_list, attn_data.key_cache, attn_data.value_cache,
@@ -618,8 +617,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     **common_args)
 
             else:
-                block_list = attn_metadata.block_list if attn_metadata \
-                and attn_metadata.block_list is not None else None
+                block_list = attn_metadata.block_list
 
                 common_args = self.common_attention_args(
                     block_list, attn_data.key_cache, attn_data.value_cache,

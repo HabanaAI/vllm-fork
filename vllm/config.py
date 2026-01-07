@@ -2209,7 +2209,7 @@ class SchedulerConfig:
         return hash_str
 
     def __post_init__(self) -> None:
-        if envs.VLLM_USE_V1:
+        if envs.VLLM_USE_V1 or self.enable_chunked_prefill:
             self.use_padding_aware_scheduling = False
 
         if self.max_model_len is None:
