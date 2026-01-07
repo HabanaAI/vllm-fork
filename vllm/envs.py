@@ -876,7 +876,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
 
     # Use chunked prefill with dynamic input shapes for HPU backend.
     "VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT":
-    lambda: bool(int(os.getenv("VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT", "0"))),
+    lambda: bool(int(os.getenv("VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT", "0"))
+                 ),
 }
 
 # --8<-- [end:env-vars-definition]

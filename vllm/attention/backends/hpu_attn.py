@@ -9,15 +9,14 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-import habana_frameworks.torch as htorch
 import torch
-import vllm.envs as envs
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.runtime import get_config
 from vllm_hpu_extension.utils import (FP8Matmul, Matmul, ModuleFusedSDPA,
                                       Softmax, VLLMFP8KVCache, VLLMKVCache)
 
+import vllm.envs as envs
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
                                               AttentionMetadata, AttentionType)
@@ -539,11 +538,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
 
-            attn_data.key_cache = self.k_cache(key,
-                                               key_cache,
-                                               slot_mapping)
-            attn_data.value_cache = self.v_cache(value,
-                                                 value_cache,
+            attn_data.key_cache = self.k_cache(key, key_cache, slot_mapping)
+            attn_data.value_cache = self.v_cache(value, value_cache,
                                                  slot_mapping)
         attn_data.key = key
         attn_data.value = value
@@ -604,9 +600,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
 
-                common_args = self.common_attention_args(block_list, attn_data.key_cache,
-                                                            attn_data.value_cache,
-                                                            attn_metadata.block_size)
+                common_args = self.common_attention_args(
+                    block_list, attn_data.key_cache, attn_data.value_cache,
+                    attn_metadata.block_size)
                 position_bias = None
 
                 out = ops.prompt_attention(
@@ -624,27 +620,28 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
 
-                common_args = self.common_attention_args(block_list, attn_data.key_cache,
-                                                            attn_data.value_cache,
-                                                            attn_metadata.block_size)
+                common_args = self.common_attention_args(
+                    block_list, attn_data.key_cache, attn_data.value_cache,
+                    attn_metadata.block_size)
                 attn_bias = attn_metadata.attn_bias
                 position_bias = None
 
                 if envs.VLLM_HPU_CHUNKED_PREFILL_DYNAMIC_INPUT:
                     assert prefill_batch_size == 1, (
                         "Only batch size 1 is supported for chunked prefill "
-                        "with dynamic block list."
-                    )
+                        "with dynamic block list.")
                     key_attn = attn_data.key.view(kv_shape)
                     value_attn = attn_data.value.view(kv_shape)
                     common_args['need_context'] = True
                 else:
                     key_attn = self.k_cache.fetch_from_cache(
-                            attn_data.key_cache.unflatten(0, (-1, attn_metadata.block_size)),
-                            attn_metadata.block_list).view(kv_shape)
+                        attn_data.key_cache.unflatten(
+                            0, (-1, attn_metadata.block_size)),
+                        attn_metadata.block_list).view(kv_shape)
                     value_attn = self.v_cache.fetch_from_cache(
-                            attn_data.value_cache.unflatten(0, (-1, attn_metadata.block_size)),
-                            attn_metadata.block_list).view(kv_shape)
+                        attn_data.value_cache.unflatten(
+                            0, (-1, attn_metadata.block_size)),
+                        attn_metadata.block_list).view(kv_shape)
                     common_args['need_context'] = False
 
 
@@ -671,12 +668,15 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             decode_seq_len = attn_data.seq_len
             decode_hidden_size = attn_data.hidden_size
             decode_output = HPUPagedAttention.forward_decode(
-                query=attn_data.query.view(attn_data.batch_size, attn_data.seq_len, attn_data.hidden_size),
+                query=attn_data.query.view(attn_data.batch_size,
+                                           attn_data.seq_len,
+                                           attn_data.hidden_size),
                 block_mapping=attn_metadata.block_mapping,
                 block_bias=attn_metadata.decode_attn_bias,
                 block_groups=attn_metadata.block_groups,
                 position_bias=None,
-                **self.common_attention_args(attn_metadata.decode_block_list, attn_data.key_cache,
+                **self.common_attention_args(attn_metadata.decode_block_list,
+                                             attn_data.key_cache,
                                              attn_data.value_cache,
                                              attn_metadata.block_size))
         # Reshape the output tensor.
