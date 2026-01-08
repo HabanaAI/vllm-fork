@@ -656,11 +656,8 @@ class SupportsXDRoPE(Protocol):
         XDRope of your model class.
     """
 
-    def get_xdrope_input_positions(
-        self,
-        input_tokens: list[int],
-        mm_features: list["MultiModalFeatureSpec"],
-    ) -> torch.Tensor:
+    def get_xdrope_input_positions(self, input_tokens: list[int],
+                                   mm_features) -> torch.Tensor:
         """
         Get XD-RoPE input positions and delta value for this specific model.
 
@@ -679,11 +676,13 @@ class SupportsXDRoPE(Protocol):
 
 
 @overload
-def supports_xdrope(model: type[object]) -> TypeIs[type[SupportsXDRoPE]]: ...
+def supports_xdrope(model: type[object]) -> TypeIs[type[SupportsXDRoPE]]:
+    ...
 
 
 @overload
-def supports_xdrope(model: object) -> TypeIs[SupportsXDRoPE]: ...
+def supports_xdrope(model: object) -> TypeIs[SupportsXDRoPE]:
+    ...
 
 
 def supports_xdrope(

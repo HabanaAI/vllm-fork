@@ -50,7 +50,8 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.rotary_embedding import (MRotaryEmbedding, XDRotaryEmbedding)
+from vllm.model_executor.layers.rotary_embedding import (MRotaryEmbedding,
+                                                         XDRotaryEmbedding)
 from vllm.model_executor.layers.sampler import (SampleResultArgsType,
                                                 SamplerOutput, get_logprobs,
                                                 get_pythonized_sample_results,
@@ -71,8 +72,8 @@ from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
 from vllm.transformers_utils.config import uses_mrope, uses_xdrope_dim
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
                         make_mrope_positions_tensor_with_pad,
-                        make_xdrope_positions_tensor_with_pad,
-                        make_tensor_with_pad)
+                        make_tensor_with_pad,
+                        make_xdrope_positions_tensor_with_pad)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
@@ -219,7 +220,7 @@ def get_model_multimodal_buckets_list(model):
         # So far, in deepseek OCR model, the sub image mode only
         # supports 0~6 excluding 1. 1 means the sub image is equal
         # to global image, which is not allowed.
-        return [i for i in range(6+1) if i!=1]
+        return [i for i in range(6 + 1) if i != 1]
     elif model.config.model_type == 'hunyuan_vl':
         return [1600, 3136, 4096, 6400, 9600]
     else:
@@ -408,7 +409,7 @@ class HpuModelAdapter(torch.nn.Module):
         model_config = getattr(self.model, "config", None)
 
         self.model_is_mrope = uses_mrope(model_config)
-        self.model_is_xdrope = True if uses_xdrope_dim(model_config) > 0 else False
+        self.model_is_xdrope = (uses_xdrope_dim(model_config) > 0)
         self.is_mm_optimized = is_mm_optimized(self.model)
         text_config = vllm_config.model_config.hf_config.get_text_config()
         self.interleaved_sliding_window = getattr(
@@ -429,8 +430,9 @@ class HpuModelAdapter(torch.nn.Module):
         # This is to ensure that we keeps
         # the static and dynamic parts distinct.
         if htorch.utils.internal.is_lazy():
-            if ((self.model_is_mrope or self.model_is_xdrope) and hasattr(self.model, 'visual') and
-                model_config is not None
+            if ((self.model_is_mrope or self.model_is_xdrope)
+                and hasattr(self.model, 'visual')
+                and model_config is not None
                 and model_config.model_type not in
                 ("glm4v_moe", "paddleocr_vl")) \
                or (model_config is not None and
@@ -846,7 +848,9 @@ class HpuModelAdapter(torch.nn.Module):
 
         if 'inputs_embeds' in kwargs:
             return kwargs
-        if not self.model_is_mrope and not self.is_mm_optimized and not self.model_is_xdrope:
+        if not self.model_is_mrope and \
+           not self.is_mm_optimized and \
+           not self.model_is_xdrope:
             return None
         # For Qwen2.5-VL/Gemma3 VL multimodal embedding,
         # this embedding part should be executed
@@ -924,7 +928,9 @@ class HpuModelAdapter(torch.nn.Module):
 
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
-        if self._rotary_prepare_cos_sin is not None and not self.model_is_mrope and not self.model_is_xdrope:
+        if self._rotary_prepare_cos_sin is not None and \
+           not self.model_is_mrope and \
+           not self.model_is_xdrope:
             self._rotary_prepare_cos_sin(
                 kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
         if self.model_is_mrope or self.model_is_xdrope or self.is_mm_optimized:
@@ -1423,7 +1429,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._model_is_xdrope = getattr(self, '_model_is_xdrope', None)
         if self._model_is_xdrope is None:
             config = self.model_config.hf_config
-            self._model_is_xdrope = True if uses_xdrope_dim(config) > 0 else False
+            self._model_is_xdrope = bool(uses_xdrope_dim(config) > 0)
         return self._model_is_xdrope
 
     def _is_quant_with_inc(self):
@@ -1845,11 +1851,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         token_ids = seq_data.get_token_ids()
 
         mrope_positions = XDRotaryEmbedding.get_input_positions(
-                token_ids,
-                hf_config=hf_config,
-                image_grid_thw=image_grid_thw,
-                video_grid_thw=video_grid_thw,
-            )
+            token_ids,
+            hf_config=hf_config,
+            image_grid_thw=image_grid_thw,
+            video_grid_thw=video_grid_thw,
+        )
 
         return mrope_positions
 
@@ -2070,8 +2076,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             .extend(mrope_positions[idx])
                 elif self.model_is_xdrope:
                     seq_data_xdrope_positions = self._get_xdrope_positions(
-                            seq_data=seq_data,
-                            mm_kwargs=mm_kwargs)
+                        seq_data=seq_data, mm_kwargs=mm_kwargs)
 
                 multi_modal_kwargs_list.append(mm_kwargs)
 
@@ -2492,11 +2497,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_tokens = output[:real_batch_size].clone()
 
         if self.model_is_mrope:
-            input_positions = torch.tensor(input_mrope_positions, dtype=torch.long, device='cpu')
+            input_positions = torch.tensor(input_mrope_positions,
+                                           dtype=torch.long,
+                                           device='cpu')
         elif self.model_is_xdrope:
-            input_positions = torch.tensor(input_xdrope_positions, dtype=torch.long, device='cpu')
+            input_positions = torch.tensor(input_xdrope_positions,
+                                           dtype=torch.long,
+                                           device='cpu')
         else:
-            input_positions = torch.tensor(input_positions, dtype=torch.long, device='cpu')
+            input_positions = torch.tensor(input_positions,
+                                           dtype=torch.long,
+                                           device='cpu')
 
         num_decode_tokens = len(seq_lens)
 
@@ -3337,7 +3348,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
                                                     lora_request, seq_len):
-        assert self.model_is_mrope or self.model_is_xdrope or self.is_mm_optimized, \
+        assert self.model_is_mrope or \
+            self.model_is_xdrope or \
+            self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
@@ -3394,7 +3407,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     embed_dim = vision_feat_dim  # 588
             elif 'hunyuan_vl' in self.get_model().config.model_type:
                 embed_dim = 768
-                num_image_tokens = (image_grid_thw[0][1] // vision_config.spatial_merge_size) * (image_grid_thw[0][2] // vision_config.spatial_merge_size + 1) + 2
+                num_image_tokens = (
+                    image_grid_thw[0][1] // vision_config.spatial_merge_size
+                ) * (image_grid_thw[0][2] // vision_config.spatial_merge_size +
+                     1) + 2
 
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
@@ -3573,7 +3589,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      lora_request=lora_request)
 
     def is_mm_run(self) -> bool:
-        return (self.is_mm_optimized or self.model_is_mrope or self.model_is_xdrope) and \
+        return (self.is_mm_optimized or \
+                self.model_is_mrope or \
+                self.model_is_xdrope) and \
             (self.multimodal_buckets is not None)
 
     def profile_run(self) -> None:
@@ -4638,7 +4656,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         ])
 
     def _get_img_args_from_model_input(self, model_input):
-        if (not self.model_is_mrope and not self.model_is_xdrope and not self.is_mm_optimized) or \
+        if (not self.model_is_mrope and \
+            not self.model_is_xdrope and \
+            not self.is_mm_optimized) or \
             not model_input.multi_modal_kwargs or \
             'pixel_values' not in model_input.multi_modal_kwargs:
             return None
@@ -4942,7 +4962,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
                 if not bypass_model_exec:
-                    if self.model_is_mrope or self.model_is_xdrope or self.is_mm_optimized:
+                    if self.model_is_mrope or \
+                       self.model_is_xdrope or \
+                       self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             if warmup_mode and not is_pt_profiler_run:

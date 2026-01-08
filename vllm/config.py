@@ -1849,7 +1849,7 @@ class ParallelConfig:
     """Use expert parallelism instead of tensor parallelism for MoE layers."""
     enable_eplb: bool = False
     """Enable expert parallelism load balancing for MoE layers."""
-    eplb_config: EPLBConfig = field(default=EPLBConfig)
+    eplb_config: EPLBConfig = field(default_factory=EPLBConfig)
     """Expert parallelism configuration."""
     max_parallel_loading_workers: Optional[int] = None
     """Maximum number of parallel loading workers when loading model
@@ -3151,7 +3151,8 @@ class MultiModalConfig:
     mm_encoder_attn_backend = None
     """Optional override for the multi-modal encoder attention backend when
     using vision transformers. Accepts any value from
-    `vllm.attention.backends.registry.AttentionBackendEnum` (e.g. `FLASH_ATTN`)."""
+    `vllm.attention.backends.registry.AttentionBackendEnum`
+    (e.g. `FLASH_ATTN`)."""
 
     def compute_hash(self) -> str:
         """

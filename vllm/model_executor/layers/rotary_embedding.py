@@ -2921,26 +2921,26 @@ class XDRotaryEmbedding(DynamicNTKAlphaRotaryEmbedding):
         num_tokens = positions.shape[-1]
         cos_sin = self.cos_sin_cache[positions]
         cos, sin = cos_sin.chunk(2, dim=-1)
-        cos = torch.cat(
-            [m[i] for i, m in enumerate(cos.split(self.xdrope_section, dim=-1))], dim=-1
-        )
-        sin = torch.cat(
-            [m[i] for i, m in enumerate(sin.split(self.xdrope_section, dim=-1))], dim=-1
-        )
+        cos = torch.cat([
+            m[i] for i, m in enumerate(cos.split(self.xdrope_section, dim=-1))
+        ],
+                        dim=-1)
+        sin = torch.cat([
+            m[i] for i, m in enumerate(sin.split(self.xdrope_section, dim=-1))
+        ],
+                        dim=-1)
 
         query_shape = query.shape
         query = query.view(num_tokens, -1, self.head_size)
-        query_rot = query[..., : self.rotary_dim]
-        query_pass = query[..., self.rotary_dim :]
-        #query_rot = apply_rotary_emb_dispatch(query_rot, cos, sin, self.is_neox_style)
+        query_rot = query[..., :self.rotary_dim]
+        query_pass = query[..., self.rotary_dim:]
         query_rot = _apply_rotary_emb(query_rot, cos, sin, self.is_neox_style)
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
 
         key_shape = key.shape
         key = key.view(num_tokens, -1, self.head_size)
-        key_rot = key[..., : self.rotary_dim]
-        key_pass = key[..., self.rotary_dim :]
-        #key_rot = apply_rotary_emb_dispatch(key_rot, cos, sin, self.is_neox_style)
+        key_rot = key[..., :self.rotary_dim]
+        key_pass = key[..., self.rotary_dim:]
         key_rot = _apply_rotary_emb(key_rot, cos, sin, self.is_neox_style)
         key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
         return query, key
@@ -2965,7 +2965,7 @@ class XDRotaryEmbedding(DynamicNTKAlphaRotaryEmbedding):
             context_len + num_new_tokens,
             dtype=out.dtype,
         )
-        out[:, out_offset : out_offset + num_new_tokens] = values
+        out[:, out_offset:out_offset + num_new_tokens] = values
 
     @classmethod
     def get_input_positions(
@@ -2974,7 +2974,7 @@ class XDRotaryEmbedding(DynamicNTKAlphaRotaryEmbedding):
         hf_config: PretrainedConfig,
         image_grid_thw: Optional[Union[list[list[int]], torch.Tensor]],
         video_grid_thw: Optional[Union[list[list[int]], torch.Tensor]],
-    ) -> tuple[list[list[int]], int]:
+    ) -> tuple[list[list[int]], int] | None:
         if hf_config.model_type in ["hunyuan_vl"]:
             return cls._hunyan_vl_get_input_positions_tensor(
                 input_tokens=input_tokens,
@@ -2997,8 +2997,7 @@ class XDRotaryEmbedding(DynamicNTKAlphaRotaryEmbedding):
 
         input_tokens_tensor = torch.tensor(input_tokens)
         image_start_indices = torch.argwhere(
-            input_tokens_tensor == image_start_token_id
-        ).squeeze(1)
+            input_tokens_tensor == image_start_token_id).squeeze(1)
 
         p_index = torch.arange(len(input_tokens_tensor))
         w_index = torch.arange(len(input_tokens_tensor))
@@ -3015,19 +3014,13 @@ class XDRotaryEmbedding(DynamicNTKAlphaRotaryEmbedding):
             )
 
             token_num = (llm_grid_w + 1) * llm_grid_h
-            w_index[pos : pos + token_num].copy_(
-                torch.arange(0, llm_grid_w + 1)
-                .reshape(1, -1)
-                .expand(llm_grid_h, -1)
-                .reshape(-1)
-            )
-            h_index[pos : pos + token_num].copy_(
-                torch.arange(0, llm_grid_h)
-                .reshape(-1, 1)
-                .expand(-1, llm_grid_w + 1)
-                .reshape(-1)
-            )
-            h_index[pos : pos + token_num] = 0
+            w_index[pos:pos + token_num].copy_(
+                torch.arange(0, llm_grid_w + 1).reshape(1, -1).expand(
+                    llm_grid_h, -1).reshape(-1))
+            h_index[pos:pos + token_num].copy_(
+                torch.arange(0, llm_grid_h).reshape(-1, 1).expand(
+                    -1, llm_grid_w + 1).reshape(-1))
+            h_index[pos:pos + token_num] = 0
 
         if xd_num == 4:
             llm_positions = torch.stack([p_index, w_index, h_index, t_index])
