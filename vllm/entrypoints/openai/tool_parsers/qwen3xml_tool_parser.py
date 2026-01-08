@@ -8,6 +8,7 @@ from xml.parsers.expat import ParserCreate
 
 import regex as re
 
+# Swapped for native random_tool_call_id to maintain branch compatibility
 from vllm.entrypoints.chat_utils import random_tool_call_id
 from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               ChatCompletionToolsParam,
