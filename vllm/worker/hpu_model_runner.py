@@ -3767,7 +3767,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         use_graphs = is_dummy_run or self._use_graphs(batch_size, seq_len)
         buckets = self.bucketing_manager.decode_buckets
         num_candidates = len(buckets)
+        seen_decode_bs: Set[int] = set()
         for idx, (decode_bs, _, decode_ctx) in enumerate(reversed(buckets)):
+            if decode_bs in seen_decode_bs:
+                continue
+            seen_decode_bs.add(decode_bs)
             scenario_name = ("warmup_"
                              f"{phase}_"
                              f"prefill_bs{batch_size}_"
@@ -3986,8 +3990,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             total_batch_seq += batch_seq
 
         if self.scheduler_config.chunked_prefill_enabled and is_prompt:
+            seen_query_len: Set[int] = set()
             for idx, (batch_size, query_len,
                       ctx) in enumerate(reversed(buckets)):
+                if query_len in seen_query_len:
+                    continue
+                seen_query_len.add(query_len)
                 # Graph memory usage is proportional to seq dimension in a batch
                 phase = f"Graph/{'mix'}/{'prompt'}"
                 seq_len = query_len + ctx * self.block_size
@@ -4463,6 +4471,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             phase = self._phase(attn_metadata)
             num_blocks = self._num_blocks(attn_metadata)
             cfg = (batch_size, seq_len, num_blocks, phase)
+
+            # batch_size is the total number of batched tokens,
+            # including both prefill and decode tokens.
+            # seq_len is the prompt length.
+            # When this condition is true, it indicates a mixed
+            # prefill/decode scenario under chunked prefill.
+            # In this case, don't warm up the context-length
+            # dimension, which significantly reduces warmup time.
+            if is_chunked_prefill and (batch_size
+                                       > seq_len) and phase.value != 'decode':
+                cfg = (batch_size, seq_len)
         else:
             phase = 'prompt' if attn_metadata.is_prompt else 'decode'
             cfg = (batch_size, seq_len, phase)
