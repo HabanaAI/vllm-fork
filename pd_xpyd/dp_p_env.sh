@@ -8,7 +8,7 @@ echo "PLATFORM_TYPE=${PLATFORM_TYPE}"
 if [ "${PLATFORM_TYPE}" = "SEDV" ]; then
   echo "SEDV platform type detected"
   export HCL_HLS3RACK_NUM_DEVICES=4
-  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=8
+  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=${PREFILL_EP_SIZE}
   export HLS3_RACK_SCALEOUT_PORT_MASK=0
   export GLOO_SOCKET_IFNAME=ens11f1np1
   export ENABLE_EXPERIMENTAL_FLAGS=true
@@ -21,7 +21,7 @@ if [ "${PLATFORM_TYPE}" = "SEDV" ]; then
 elif [ "${PLATFORM_TYPE}" = "WB" ]; then
   echo "WB platform type detected"
   export HCL_HLS3RACK_NUM_DEVICES=4
-  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=8
+  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=${PREFILL_EP_SIZE}
   export HLS3_RACK_SCALEOUT_PORT_MASK=0
   dev_name=`ip -o addr show | grep -E "inet 10\.240\." | awk '{print $2}'`
   export GLOO_SOCKET_IFNAME=$dev_name
@@ -34,8 +34,8 @@ elif [ "${PLATFORM_TYPE}" = "WB" ]; then
   #export CONGESTION_WINDOW=8 #32 or 16 or 32
 elif [ "${PLATFORM_TYPE}" = "SKYRIVERV3" ]; then
   echo "SKYRIVERV3 platform type detected"
-  export HCL_HLS3RACK_NUM_DEVICES=8
-  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=8
+  export HCL_HLS3RACK_NUM_DEVICES=$(( PREFILL_EP_SIZE > 16 ? 16 : PREFILL_EP_SIZE ))
+  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=${PREFILL_EP_SIZE}
   export HLS3_RACK_SCALEOUT_PORT_MASK=0
   #export GLOO_SOCKET_IFNAME=ens11f1np1
   export ENABLE_EXPERIMENTAL_FLAGS=true

@@ -7,7 +7,7 @@ source "$BASH_DIR"/pd_env.sh
 if [ "${PLATFORM_TYPE}" = "SEDV" ]; then
   echo "SEDV platform type detected"
   export HCL_HLS3RACK_NUM_DEVICES=4
-  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=16
+  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=${DECODE_EP_SIZE}
   export HLS3_RACK_SCALEOUT_PORT_MASK=0
   export GLOO_SOCKET_IFNAME=ens11f1np1
   export ENABLE_EXPERIMENTAL_FLAGS=true
@@ -17,16 +17,17 @@ if [ "${PLATFORM_TYPE}" = "SEDV" ]; then
 elif [ "${PLATFORM_TYPE}" = "WB" ]; then
   echo "WB platform type detected"
   export HCL_HLS3RACK_NUM_DEVICES=4
-  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=16
+  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=${DECODE_EP_SIZE}
   export HLS3_RACK_SCALEOUT_PORT_MASK=0
-  dev_name=`ip -o addr show | grep -E "inet 10\.240\." | awk '{print $2}'`
+  #dev_name=`ip -o addr show | grep -E "inet 10\.240\." | awk '{print $2}'`
+  dev_name=`ip -o addr show | grep -E "inet 11\.1\." | awk '{print $2}' | head -n 1`
   export GLOO_SOCKET_IFNAME=$dev_name
   export ENABLE_EXPERIMENTAL_FLAGS=true
   export CONGESTION_CONTROL_ENABLE=1
 elif [ "${PLATFORM_TYPE}" = "SKYRIVERV3" ]; then
   echo "SKYRIVERV3 platform type detected"
   export HCL_HLS3RACK_NUM_DEVICES=16
-  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=16
+  export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=${DECODE_EP_SIZE}
   export HLS3_RACK_SCALEOUT_PORT_MASK=0
   #export GLOO_SOCKET_IFNAME=ens11f1np1
   export ENABLE_EXPERIMENTAL_FLAGS=true
@@ -98,7 +99,7 @@ env | grep VLLM_DECODE_BLOCK
 # ***************************************  bucketing ends ************************************* #
 
 SWAP_SPACE=64 # GB, memory per rank for preemption.swap.
-export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_d,false,1638400,false
+export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_d,false,16384000,false
 
 # decode specific settings
 export VLLM_DP_SIZE=2
