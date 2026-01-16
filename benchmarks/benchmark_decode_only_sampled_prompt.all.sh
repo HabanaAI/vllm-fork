@@ -5,27 +5,22 @@ unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 ## Adjust or extend as needed.
 
 cases=(
-  #"3500 160"
-  #"20 160"
-  #"28000 36"
-  #"28000 40"
-  #"20 114"
-  #"20 128"
-  #"20 160"
-  #"20 96"
-  #"20 112"
   #"3500 72"
   #"3500 80"
   #"3500 88"
   #"3500 80"
   #"7000 16"
   #"7000 128"
-  #"3500 1"
+  "3500 1"
   #"3500 16"
-  #"3500 32"
+  "3500 32"
   #"3500 48"
-  #"3500 64"
+  "3500 64"
+  #"3500 80"
   "3500 96"
+  #"3500 112"
+  #"3500 128"
+  #"3500 336"
   #"3500 112"
   #"3500 128"
   #"3500 144"
@@ -108,6 +103,7 @@ run_benchmark() {
     local output_length=$1
     local endpoint=$2
     local concurrency=$3
+    local input_len=$4
 
     python3 benchmark_serving.py \
         --backend vllm \
@@ -117,7 +113,7 @@ run_benchmark() {
         --host "$ip" \
         --port "8868" \
         --endpoint "$endpoint" \
-        --sonnet-input-len 2000 \
+        --sonnet-input-len "$input_len" \
         --sonnet-output-len "$output_length" \
         --sonnet-prefix-len 100 \
         --trust-remote-code \
@@ -153,9 +149,9 @@ for case in "${cases[@]}"; do
     echo "########################################################"
     # Call the function with the provided output length
     echo "Start Prefill Run."
-    run_benchmark 1 $PREFILL_ENDPOINT $concurrency
+    run_benchmark 1 $PREFILL_ENDPOINT $concurrency $input_len
     echo "Start Decode Run, output_len: $OUTPUT_LEN"
-    run_benchmark 1000 $DECODE_ENDPOINT $concurrency
+    run_benchmark 1000 $DECODE_ENDPOINT $concurrency $input_len
   done
 done
 
