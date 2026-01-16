@@ -1932,8 +1932,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_lens.append(seq_len)
 
             # NOTE: This only works for oooooooxxx style attention.
-            if computed_block_nums is not None and len(
-                    computed_block_nums) > 0 and self.sliding_window is None:
+            # When context_len == 0, this indicates the first chunk in chunked
+            # prefill, or the non-chunked prefill case.
+            # Only the first chunk or the non-chunked case updates the context
+            # length via APC; otherwise, it is maintained by chunked prefill.
+            if (computed_block_nums is not None
+                    and len(computed_block_nums) > 0
+                    and self.sliding_window is None and context_len == 0):
+
                 # Prefix is not supported with sliding_window
                 context_len = len(computed_block_nums) * self.block_size
                 if context_len == seq_len \
