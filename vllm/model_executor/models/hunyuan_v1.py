@@ -397,6 +397,7 @@ class HunYuanSparseMoeBlock(nn.Module):
 
         self.n_logical_experts = self.n_routed_experts
         self.n_redundant_experts = eplb_config.num_redundant_experts
+        assert self.n_redundant_experts == 0
         self.n_physical_experts = (self.n_logical_experts +
                                    self.n_redundant_experts)
         self.n_local_physical_experts = (self.n_physical_experts //
@@ -415,8 +416,6 @@ class HunYuanSparseMoeBlock(nn.Module):
             renormalize=top_k > 1,
             quant_config=quant_config,
             prefix=f"{prefix}.experts",
-            enable_eplb=self.enable_eplb,
-            num_redundant_experts=self.n_redundant_experts,
         )
 
         self.gate = ReplicatedLinear(
@@ -723,7 +722,6 @@ class HunYuanModel(nn.Module):
                 ckpt_down_proj_name="down_proj",
                 ckpt_up_proj_name="up_proj",
                 num_experts=self.config.num_experts,
-                num_redundant_experts=self.num_redundant_experts,
             )
         else:
             return []
@@ -873,17 +871,16 @@ class HunYuanModel(nn.Module):
                     # available replicas.
                     weight_loader = typing.cast(Callable[..., bool],
                                                 param.weight_loader)
-                    success = weight_loader(
+                    weight_loader(
                         param,
                         loaded_weight,
                         name_mapped,
                         shard_id=shard_id,
                         expert_id=expert_id,
-                        return_success=True,
                     )
-                    if success:
-                        name = name_mapped
-                        break
+
+                    name = name_mapped
+                    break
                 else:
                     if is_expert_weight:
                         # We've checked that this is an expert weight
