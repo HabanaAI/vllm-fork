@@ -404,7 +404,6 @@ cd vllm-hpu-extension/calibration
      -r 2
 ```
 
-
 #### 2.3.4 创建 quantization 目录
 
 在 start_gaudi_vllm_server.sh 的同级目录下面创建 quantization 目录。
