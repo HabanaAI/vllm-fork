@@ -14,8 +14,8 @@ sudo echo 0 > /proc/sys/kernel/numa_balancing
 
 ## Software Requirements
 * The supported OS are in [Supported Configurations and Components](https://docs.habana.ai/en/latest/Support_Matrix/Support_Matrix.html#support-matrix)
-* Refer to [Driver and Software Installation](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html) to install the Intel(R) Gaudi(R) driver and software stack (>= 1.21.3) on each node. Make sure `habanalabs-container-runtime` is installed.
-* Refer to [Firmware Upgrade](https://docs.habana.ai/en/latest/Installation_Guide/Firmware_Upgrade.html) to upgrade the Gaudi(R) firmware to 1.20.1 version or newer version on each node.
+* Refer to [Driver and Software Installation](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html) to install the Intel(R) Gaudi(R) driver and software stack (>= 1.23.0) on each node. Make sure `habanalabs-container-runtime` is installed.
+* Refer to [Firmware Upgrade](https://docs.habana.ai/en/latest/Installation_Guide/Firmware_Upgrade.html) to upgrade the Gaudi(R) firmware to 1.21.3 version or newer version on each node.
 * Refer to [Configure Container Runtime](https://docs.habana.ai/en/latest/Installation_Guide/Additional_Installation/Docker_Installation.html#configure-container-runtime) to configure the `habana` container runtime on each node.
 
 ## Install vLLM
@@ -26,7 +26,7 @@ sudo echo 0 > /proc/sys/kernel/numa_balancing
         -e HABANA_VISIBLE_DEVICES=all \
         -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
         --cap-add=sys_nice --net=host --ipc=host \
-        vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+        vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
     ```
 
 2. Install vLLM：

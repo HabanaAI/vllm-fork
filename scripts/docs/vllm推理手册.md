@@ -53,6 +53,7 @@
 - 设置 CPU 为性能模式（performance mode）
 - 开启 CPU P-state
 - 关闭 CPU C6 状态
+- 关闭 subNUMA （ 通常BIOS setup的设置位置：Advanced -> Chipset Configuration -> Uncore Configuration -> SNC [Disabled]）
 
 #### 1.1.2 Linux OS 设置
 
@@ -95,17 +96,17 @@ echo "vm.nr_hugepages=15000" | sudo tee -a /etc/sysctl.conf
 
 #### 1.2.1 基础镜像及网络配置
 
-在 Host 使用如下命令启动最新的容器（以 1.21.3 docker image 为例）：
+在 Host 使用如下命令启动最新的容器（以 1.23.0 docker image 为例）：
 
 ```bash
 docker run -it --name gaudi_server --runtime=habana \
     -e HABANA_VISIBLE_DEVICES=all \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
-    --cap-add=sys_nice --net=host --ipc=host \
-    vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+    --cap-add=sys_nice --net=host --ipc=host --privileged \
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
 ```
 
-若服务器配置了高速互联网卡（如 Mellanox CX6 / CX7）并连接至交换机，需要在容器内安装 libfabric 及 hccl_ofi_wrapper 库来使能 4 卡以上的通信互联。  
+若Gaudi 2E服务器需要使用8卡运行模型推理，需要在容器内安装 libfabric 及 hccl_ofi_wrapper 库来使能 4 卡以上的通信互联。  
 进入容器后请参考该链接执行：  
 [Host NIC Scale Out Setup](https://github.com/HabanaAI/hccl_demo?tab=readme-ov-file#host-nic-scale-out-setup)
 
@@ -121,10 +122,12 @@ Gaudi2 通过 HCCL Demo 来验证通信功能：
 ```bash
 cd /root && git clone https://github.com/HabanaAI/hccl_demo.git
 cd hccl_demo && make -j
-HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 10000 --ranks_per_node 8
+HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1000 --ranks_per_node 8
 ```
 
 当出现带宽的结果时则证明多卡间高速互联功能已开启（带宽数值随高速网卡配置变化）。
+
+如果Gaudi-2E 服务器在没有配置高速互联网卡（如Mellanox CX6/CX7）的情况下仍然需要运行8卡的模型推理，请安装hccl_SHM的性能优化包，安装后，8卡 all_reduce "Algo Bandwidth" 可以达到20GB/s左右。
 
 ### 1.3 模型权重文件下载
 
@@ -132,11 +135,11 @@ HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --si
 也可以在容器外下载模型权重文件，然后在启动容器时，把模型权重所在的目录映射进容器。
 
 您可以在 HuggingFace 或 ModelScope 网站上下载需要的模型权重文件。  
-例如从 ModelScope 下载 Qwen2-72B 模型权重文件：
+例如从 ModelScope 下载 Qwen3-32B 模型权重文件：
 
 ```bash
 pip install modelscope
-modelscope download --model Qwen/Qwen2-72B-Instruct --local_dir /models/Qwen2-72B-Instruct
+modelscope download --model Qwen/Qwen3-32B --local_dir /models/Qwen3-32B
 ```
 
 ### 1.4 安装 vLLM
@@ -147,12 +150,18 @@ modelscope download --model Qwen/Qwen2-72B-Instruct --local_dir /models/Qwen2-72
 ```bash
 # install vllm
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+cd vllm-fork
+git checkout cac5baeb68809e9c43f316f1bb4b2a2c4a1f665e
+cd ..
 pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install -r vllm-fork/requirements-hpu.txt
 VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
 
 # [optional] install vllm-hpu-extension to do calibration and run in fp8
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+cd vllm-hpu-extension
+git checkout 28e8ebdca6fc9a420c7d6a8f631577ada8aca2c2
+cd ..
 pip install -e vllm-hpu-extension --no-build-isolation
 ```
 
@@ -246,13 +255,13 @@ Options:
 
 ### 2.2 模型预热
 
-以下启动命令表示启动 vLLM 服务在 Qwen2-72B-Instruct 模型上，使用 Gaudi 的 4 张卡，module ID 分别是 0、1、2、3，最大模型长度为 16384，推理精度是 BF16，vLLM 服务侦听在 30001 端口上。
+以下启动命令表示启动 vLLM 服务在 Qwen3-32B 模型上，使用 Gaudi 的 2 张卡，module ID 分别是 0、1，最大模型长度为 16384，推理精度是 BF16，vLLM 服务侦听在 30001 端口上。
 
 ```bash
 bash start_gaudi_vllm_server.sh \
-    -w "/models/Qwen2-72B-Instruct" \
-    -t 4 \
-    -m 0,1,2,3 \
+    -w "/models/Qwen3-32B" \
+    -t 2 \
+    -m 0,1 \
     -a 127.0.0.1:30001 \
     -d bfloat16 \
     -x 16384 \
@@ -260,7 +269,7 @@ bash start_gaudi_vllm_server.sh \
     -c /data/warmup_cache
 ```
 
-该模型在该配置下大约需要 10 分钟左右预热完成。当出现如下信息则 vLLM 服务可用。
+该模型在该配置下大约需要 5 分钟左右预热完成。当出现如下信息则 vLLM 服务可用。
 
 ```
 INFO 03-25 09:01:25 launcher.py:27 Route: /v1/score, Methods: POST
@@ -395,17 +404,6 @@ cd vllm-hpu-extension/calibration
      -r 2
 ```
 
-##### 2.3.3.3 对流水线并行模式进行校准
-
-要使用流水线并行 (PP) 运行模型，必须设置 -x <TP_SIZE_WITH_PP>，其中 TP_SIZE_WITH_PP 表示启用 PP 时的 TP 大小。以 GLM-4.5-FP8 为例，TP=4，PP=2：
-
-```bash
-bash calibrate_model.sh \
-     -m /models/GLM-4.5-FP8 \
-     -d NeelNanda/pile-10k \
-     -o quantization \
-     -t 8 -x 4 -u
-```
 
 #### 2.3.4 创建 quantization 目录
 
@@ -429,18 +427,18 @@ qwen3-235b-a22b-fp8  qwen2.5-72b-instruct
 
 使用 FP8 精度启动 vllm 需要更多时间来进行预热。建议创建预热缓存文件，以便下次加快预热速度。
 
-下面是使用 FP8 精度来运行 Qwen2.5-72B-Instruct 的示例。
+下面是使用 FP8 精度来运行 Qwen3-235B-A22B-FP8 的示例。
 
 ```bash
 bash start_gaudi_vllm_server.sh \
-    -w "/models/Qwen2.5-72B-Instruct" \
-    -t 2 \
-    -m 0,1 \
+    -w "/models/Qwen3-235B-A22B-FP8" \
+    -t 4 \
+    -m 0,1,2,3 \
     -a "127.0.0.1:30001" \
     -d fp8 \
     -b 128 \
     -x 16384 \
-    -c /vllm_cache/Qwen2.5-32B-Instruct
+    -c /vllm_cache/Qwen3-235B-A22B-FP8
 ```
 
 ## 3.0 大模型服务启动示例
@@ -462,7 +460,7 @@ docker run -it --name deepseek_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     --cap-add=sys_nice --cap-add SYS_PTRACE --cap-add=CAP_IPC_LOCK \
     --ulimit memlock=-1:-1 --net=host --ipc=host \
-    vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -477,6 +475,7 @@ modelscope download --model deepseek-ai/DeepSeek-R1-0528 --local_dir /data/hf_mo
 ```bash
 git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-fork.git
 cd vllm-fork
+git checkout 3e2cd45c4
 pip install torch safetensors numpy --extra-index-url https://download.pytorch.org/whl/cpu
 python scripts/convert_for_g2.py -i /data/hf_models/DeepSeek-R1-0528 -o /data/hf_models/DeepSeek-R1-0528-G2
 ```
@@ -489,7 +488,13 @@ python scripts/convert_for_g2.py -i /data/hf_models/DeepSeek-R1-0528 -o /data/hf
 
 ```bash
 git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-fork.git
+cd vllm-fork
+git checkout 3e2cd45c4
+cd ..
 git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-hpu-extension.git
+cd vllm-hpu-extension
+git checkout 005a97f9d
+cd ..
 pip install -e vllm-fork
 pip install -e vllm-hpu-extension
 ```
@@ -516,7 +521,7 @@ huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scr
 查看 vLLM 启动参数：
 
 ```bash
-cd vllm-fork/quickstart
+cd vllm-fork/scripts/quickstart
 bash start_vllm.sh -h
 ```
 
@@ -538,7 +543,7 @@ q  Enable inc fp8 quantization
 h  Help info
 ```
 
-您可以使用如下命令启动 vLLM，服务监听在 127.0.0.1:8688 上，支持最大并发 128，16k 上下文长度，预热缓存在 `/data/warmup_cache` 目录。
+您可以使用如下命令启动 vLLM，服务监听在 127.0.0.1:8688 上，支持最大并发 128，32k 上下文长度，预热缓存在 `/data/warmup_cache` 目录。
 
 ```bash
 bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-0528-G2 -q -u 127.0.0.1 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
@@ -565,7 +570,7 @@ docker run -it --name deepseek_r1_distill_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/models \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -585,12 +590,18 @@ modelscope download --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --local_dir
 ```bash
 # install vllm
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+cd vllm-fork
+git checkout cac5bae
+cd ..
 pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install -r vllm-fork/requirements-hpu.txt
 VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
 
 # [optional] install vllm-hpu-extension to do calibration and run in fp8
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+cd vllm-hpu-extension
+git checkout 28e8ebd
+cd ..
 pip install -e vllm-hpu-extension --no-build-isolation
 ```
 
@@ -648,7 +659,7 @@ docker run -it --name qwen_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/models \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -668,12 +679,18 @@ modelscope download --model Qwen/Qwen3-8B --local_dir /data/hf_models/Qwen3-8B
 ```bash
 # install vllm
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+cd vllm-fork
+git checkout cac5bae
+cd ..
 pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install -r vllm-fork/requirements-hpu.txt
 VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
 
 # [optional] install vllm-hpu-extension to do calibration and run in fp8
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+cd vllm-hpu-extension
+git checkout 28e8ebd
+cd ..
 pip install -e vllm-hpu-extension --no-build-isolation
 ```
 
@@ -913,7 +930,7 @@ pip install -r requirements.txt
 ```bash
 PT_HPU_LAZY_MODE=1 ./calibrate_model.sh \
     -m /data/Qwen3-VL-235B-A22B-Instruct-FP8 \
-    -d /data/pile-10k \
+    -d NeelNanda/pile-10k \
     -o /data/output \
     -b 128 -t 8 -u -l 4096
 ```
@@ -925,13 +942,14 @@ PT_HPU_LAZY_MODE=1 ./calibrate_model.sh \
 ```bash
 QUANT_CONFIG=/data/output/qwen3-vl-235b-a22b-instruct-fp8/maxabs_quant_g2.json \
 PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
-    /data/Qwen3-VL-30B-A3B-Instruct-FP8 \
+    /data/Qwen3-VL-235B-A22B-Instruct-FP8 \
     --port 8000 \
     --host 127.0.0.1 \
     --limit-mm-per-prompt video=5,image=5 \
     --mm_processor_kwargs max_pixels=1003520,min_pixels=3136 \
     --tensor-parallel-size 8 \
-    --enable-expert-parallel
+    --enable-expert-parallel \
+    --max-model-len 131072
 ```
 
 #### 3.4.4 FP8 dynamic quant
