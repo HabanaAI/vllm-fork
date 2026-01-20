@@ -9,7 +9,9 @@ if [ "${PLATFORM_TYPE}" = "SEDV" ]; then
   export HCL_HLS3RACK_NUM_DEVICES=4
   export HCL_HLS3RACK_SCALEUP_GROUP_SIZE=${DECODE_EP_SIZE}
   export HLS3_RACK_SCALEOUT_PORT_MASK=0
-  export GLOO_SOCKET_IFNAME=ens11f1np1
+  #export GLOO_SOCKET_IFNAME=ens11f1np1
+  dev_name=`ip -o addr show | grep -E "inet 10\.112\." | awk '{print $2}' | head -n 1`
+  export GLOO_SOCKET_IFNAME=$dev_name
   export ENABLE_EXPERIMENTAL_FLAGS=true
   export CONGESTION_CONTROL_ENABLE=1
   #export EXP_FLAGS=1
@@ -42,11 +44,13 @@ export VLLM_GRAPH_RESERVED_MEM=0.3
 # Enable packed allgather optimization
 export ENABLE_PACKED_ALLGATHER=1
 export SHARED_EXPERT_DISPOSITION=0
-export VLLM_USE_NUMACTL=1
+export VLLM_USE_NUMACTL=0
 export VLLM_SPLIT_CPU_BIND=1
 export VLLM_DEBUG_TOPO=1
 export VLLM_USE_ASYNC_RECV_KV_CACHES_OPT=0
 
+
+export VLLM_ENABLE_PERFORMANCE_LOG=1
 # This is to avoid logic in torch.distributed.hccl.__init__.py _setup_module_id overwriting
 # this env var incorrectly
 export HLS_MODULE_ID=-1
@@ -60,8 +64,8 @@ export VLLM_DELAYED_SAMPLING="true"
 
 model_len=40960
 max_num_batched_tokens=40960
-max_num_seqs=12
-input_min=3000
+max_num_seqs=3
+input_min=1500
 input_max=4000
 output_max=1500
 

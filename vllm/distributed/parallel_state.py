@@ -998,6 +998,7 @@ def init_distributed_environment(
         # offset the rank by the data parallel rank
         local_rank = parallel_config.data_parallel_rank_local * world_size + rank
         rank = parallel_config.data_parallel_rank * world_size + rank
+        
         # adjust the world size to take into account data parallelism
         world_size = parallel_config.world_size_across_dp
         ip = parallel_config.data_parallel_master_ip
@@ -1215,6 +1216,14 @@ def get_tensor_model_parallel_world_size():
 def get_tensor_model_parallel_rank():
     """Return my rank for the tensor model parallel group."""
     return get_tp_group().rank_in_group
+
+def get_data_parallel_rank():
+    """Return my rank for the data parallel group."""
+    return get_dp_group().rank_in_group
+
+def get_data_parallel_world_size():
+    """Return world size for the data parallel group."""
+    return get_dp_group().world_size
 
 
 def destroy_model_parallel():

@@ -108,6 +108,8 @@ echo "Decode IPs: ${DECODE_IPS[*]}"
 
 DBASE_PORT=8200
 DECODE_ARGS=""
+NUM_DECODE=1
+D_INSTANCE_NUMBER=1
 for ((i=0; i<$NUM_DECODE; i++)); do
     PORT=$((DBASE_PORT + i))
     for ((j=0; j<D_INSTANCE_NUMBER; j++)); do

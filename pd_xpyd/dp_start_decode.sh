@@ -233,17 +233,84 @@ do
   RANK=$((DP_INDEX * DP_RANK + i))
   port=$((8200 + i))
 
-  # Derive Habana module id for this rank and bind to the corresponding NUMA/CPU
-  MOD_ID=$((i % 16))
-  CPU_BIND_VAR="CPU_BIND_${MOD_ID}"
-  MEM_BIND_VAR="MEM_BIND_${MOD_ID}"
-  CPU_BIND="${!CPU_BIND_VAR}"
-  MEM_BIND="${!MEM_BIND_VAR}"
+  # Derive Habana module ids for this rank (TP modules)
+  # Each DP rank uses DECODE_TP_SIZE consecutive modules
+  # For example: if TP=2, rank 0 gets modules 0,1; rank 1 gets modules 2,3; etc.
+  BASE_MOD_ID=$((i * DECODE_TP_SIZE))
+  
+  # Build module ID list for TP (comma-separated)
+  MOD_IDS=()
+  CPU_BINDS=()
+  MEM_BINDS=()
+  for ((tp_idx=0; tp_idx<DECODE_TP_SIZE; tp_idx++))
+  do
+    MOD_ID=$((BASE_MOD_ID + tp_idx))
+    # Handle wraparound if needed (assuming max 16 modules per node)
+    # This ensures modules wrap around within the available modules on the node
+    if [ "$MOD_ID" -ge 16 ]; then
+      MOD_ID=$((MOD_ID % 16))
+    fi
+    MOD_IDS+=($MOD_ID)
+    
+    CPU_BIND_VAR="CPU_BIND_${MOD_ID}"
+    MEM_BIND_VAR="MEM_BIND_${MOD_ID}"
+    CPU_BIND_VAL="${!CPU_BIND_VAR}"
+    MEM_BIND_VAL="${!MEM_BIND_VAR}"
+    
+    CPU_BINDS+=("$CPU_BIND_VAL")
+    MEM_BINDS+=("$MEM_BIND_VAL")
+  done
+  echo $CPU_BINDS
+  echo $MEM_BINDS
+  # Combine module IDs into comma-separated string for HLS_MODULE_ID
+  HLS_MODULE_ID=$(IFS=','; echo "${MOD_IDS[*]}")
+  
+  # Combine CPU bindings from all TP modules
+  # If CPUs are split into groups, combine corresponding groups
+  CPU_BIND_COMBINED=""
+  MEM_BIND_COMBINED=""
+  
+  if [ "${VLLM_SPLIT_CPU_BIND:-0}" -eq 1 ]; then
+    # When CPU binding is split, we need to combine CPUs from each TP module
+    # Each module's CPU_BIND may have comma-separated groups
+    for ((tp_idx=0; tp_idx<DECODE_TP_SIZE; tp_idx++))
+    do
+      CPU_BIND_VAL="${CPU_BINDS[$tp_idx]}"
+      if [ -n "$CPU_BIND_VAL" ]; then
+        if [ -z "$CPU_BIND_COMBINED" ]; then
+          CPU_BIND_COMBINED="$CPU_BIND_VAL"
+        else
+          CPU_BIND_COMBINED="$CPU_BIND_COMBINED,$CPU_BIND_VAL"
+        fi
+      fi
+    done
+    
+    # For memory binding, use the first module's NUMA node
+    # (assuming TP modules are on the same NUMA or close)
+    MEM_BIND_COMBINED="${MEM_BINDS[0]}"
+  else
+    # Simple case: combine all CPU ranges from TP modules
+    for ((tp_idx=0; tp_idx<DECODE_TP_SIZE; tp_idx++))
+    do
+      CPU_BIND_VAL="${CPU_BINDS[$tp_idx]}"
+      if [ -n "$CPU_BIND_VAL" ]; then
+        if [ -z "$CPU_BIND_COMBINED" ]; then
+          CPU_BIND_COMBINED="$CPU_BIND_VAL"
+        else
+          CPU_BIND_COMBINED="$CPU_BIND_COMBINED,$CPU_BIND_VAL"
+        fi
+      fi
+    done
+    MEM_BIND_COMBINED="${MEM_BINDS[0]}"
+  fi
+  
+  CPU_BIND="$CPU_BIND_COMBINED"
+  MEM_BIND="$MEM_BIND_COMBINED"
 
   if [ -n "$CPU_BIND" ]; then
     CPU_BIND=$(apply_cpu_blacklist "$CPU_BIND")
     if [ -z "$CPU_BIND" ]; then
-      echo "[WARN] CPU binding for module ${MOD_ID} became empty after applying blacklist. Disabling numactl for this rank." >&2
+      echo "[WARN] CPU binding for modules ${HLS_MODULE_ID} became empty after applying blacklist. Disabling numactl for this rank." >&2
       NUMACTL_ENABLED=0
     fi
   fi
@@ -251,23 +318,28 @@ do
   # Optional: split CPU binding into non-overlapping subgroups per module
   # Enable with VLLM_SPLIT_CPU_BIND=1. Assumes CPU_BIND has comma-separated
   # subgroups that can be allocated distinctly to modules on the same NUMA.
-  if [ "${VLLM_SPLIT_CPU_BIND:-0}" -eq 1 ] && [ -n "$CPU_BIND" ]; then
+  # Note: When TP > 1, CPU_BIND already contains CPUs from all TP modules,
+  # so splitting logic may need adjustment. For now, we skip splitting when TP > 1.
+  if [ "${VLLM_SPLIT_CPU_BIND:-0}" -eq 1 ] && [ -n "$CPU_BIND" ] && [ "$DECODE_TP_SIZE" -eq 1 ]; then
+    # Only apply splitting logic for TP=1 case
+    # For TP > 1, CPU_BIND already combines CPUs from multiple modules
     IFS=',' read -r -a __cpu_chunks <<< "$(echo "$CPU_BIND" | tr -d ' ')"
     __num_chunks=${#__cpu_chunks[@]}
     if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
-      echo "[DEBUG] MOD ${MOD_ID} original CPU_BIND='$CPU_BIND' chunks(${__num_chunks})='${__cpu_chunks[*]}'"
+      echo "[DEBUG] MOD ${HLS_MODULE_ID} original CPU_BIND='$CPU_BIND' chunks(${__num_chunks})='${__cpu_chunks[*]}'"
     fi
     if [ $__num_chunks -lt 1 ]; then
-      echo "[ERROR] Cannot split CPU_BIND (empty) for module ${MOD_ID}" >&2
+      echo "[ERROR] Cannot split CPU_BIND (empty) for modules ${HLS_MODULE_ID}" >&2
       exit 1
     fi
     # Special case: two large ranges shared among modules on a NUMA. Split into subranges.
     if [ $__num_chunks -eq 2 ]; then
-      # Get the number of modules per NUMA for this module
+      # Get the number of modules per NUMA for the first module
+      __first_mod_id=${MOD_IDS[0]}
       __numa_var="MODULES_PER_NUMA_${MEM_BIND}"
       __modules_per_numa="${!__numa_var}"
       if [ -z "$__modules_per_numa" ]; then
-        echo "[WARN] Cannot determine modules per NUMA for module ${MOD_ID} (NUMA ${MEM_BIND}). Using default of 4." >&2
+        echo "[WARN] Cannot determine modules per NUMA for module ${__first_mod_id} (NUMA ${MEM_BIND}). Using default of 4." >&2
         __modules_per_numa=4
       fi
       __r0="${__cpu_chunks[0]}"; __r1="${__cpu_chunks[1]}"
@@ -309,10 +381,10 @@ do
           __mods_on_numa+=($__check_mod)
         fi
       done
-      # Find MOD_ID's position in the sorted list
+      # Find first module's position in the sorted list
       __mod_idx_in_numa=0
       for __idx_check in "${!__mods_on_numa[@]}"; do
-        if [ "${__mods_on_numa[$__idx_check]}" -eq "$MOD_ID" ]; then
+        if [ "${__mods_on_numa[$__idx_check]}" -eq "$__first_mod_id" ]; then
           __mod_idx_in_numa=$__idx_check
           break
         fi
@@ -320,28 +392,34 @@ do
       __idx=$(( __mod_idx_in_numa % ${#__subranges[@]} ))
       __sel_chunk="${__subranges[$__idx]}"
       if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
-        echo "[DEBUG] MOD ${MOD_ID} (NUMA ${MEM_BIND}, ${__modules_per_numa} modules/NUMA, idx ${__mod_idx_in_numa}) split 2-ranges into ${#__subranges[@]}: '${__subranges[*]}', pick idx ${__idx} -> '$__sel_chunk'"
+        echo "[DEBUG] MOD ${HLS_MODULE_ID} (NUMA ${MEM_BIND}, ${__modules_per_numa} modules/NUMA, idx ${__mod_idx_in_numa}) split 2-ranges into ${#__subranges[@]}: '${__subranges[*]}', pick idx ${__idx} -> '$__sel_chunk'"
       fi
       CPU_BIND="$__sel_chunk"
-      unset __r0 __r1 __a0 __b0 __a1 __b1 __modules_per_numa __numa_var __subranges __range0_size __range1_size __subrange0_size __subrange1_size __start0 __end0 __start1 __end1 __i __mod_idx_in_numa __idx __sel_chunk __mods_on_numa __check_mod __check_mem_var __check_mem __idx_check
+      unset __r0 __r1 __a0 __b0 __a1 __b1 __modules_per_numa __numa_var __subranges __range0_size __range1_size __subrange0_size __subrange1_size __start0 __end0 __start1 __end1 __i __mod_idx_in_numa __idx __sel_chunk __mods_on_numa __check_mod __check_mem_var __check_mem __idx_check __first_mod_id
     else
-      __idx=$(( MOD_ID % __num_chunks ))
+      # For non-2-chunk case, use first module ID
+      __first_mod_id=${MOD_IDS[0]}
+      __idx=$(( __first_mod_id % __num_chunks ))
       if [ $__num_chunks -le $__idx ]; then
-        echo "[ERROR] Not enough CPU subgroups in CPU_BIND='$CPU_BIND' for module ${MOD_ID}" >&2
+        echo "[ERROR] Not enough CPU subgroups in CPU_BIND='$CPU_BIND' for modules ${HLS_MODULE_ID}" >&2
         exit 1
       fi
       __sel_chunk="${__cpu_chunks[$__idx]}"
       if [ -z "$__sel_chunk" ]; then
-        echo "[ERROR] Selected CPU subgroup is empty for module ${MOD_ID} from '$CPU_BIND'" >&2
+        echo "[ERROR] Selected CPU subgroup is empty for modules ${HLS_MODULE_ID} from '$CPU_BIND'" >&2
         exit 1
       fi
       if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
-        echo "[DEBUG] MOD ${MOD_ID} select chunk index ${__idx} -> '$__sel_chunk'"
+        echo "[DEBUG] MOD ${HLS_MODULE_ID} select chunk index ${__idx} -> '$__sel_chunk'"
       fi
       CPU_BIND="$__sel_chunk"
-      unset __idx __sel_chunk
+      unset __idx __sel_chunk __first_mod_id
     fi
     unset __cpu_chunks __num_chunks
+  elif [ "${VLLM_SPLIT_CPU_BIND:-0}" -eq 1 ] && [ "$DECODE_TP_SIZE" -gt 1 ]; then
+    if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
+      echo "[DEBUG] TP=${DECODE_TP_SIZE}: CPU_BIND already combines CPUs from modules ${HLS_MODULE_ID}, skipping split logic"
+    fi
   fi
   
   CMD=(
@@ -376,8 +454,11 @@ do
   if [ "$NUMACTL_ENABLED" -eq 1 ]; then
     echo "CPU_BIND: $CPU_BIND"
     echo "MEM_BIND: $MEM_BIND"
-    echo "HLS_MODULE_ID: $MOD_ID"
+    echo "HLS_MODULE_ID: $HLS_MODULE_ID"
     echo "DP_RANK: $RANK"
+    if [ "$DECODE_TP_SIZE" -gt 1 ]; then
+      echo "TP_SIZE: $DECODE_TP_SIZE (modules: ${MOD_IDS[*]})"
+    fi
   fi
 
   extra_env=()
@@ -386,21 +467,26 @@ do
   # Execute command
   if [ "$DP_RANK" -ne 1 ]; then
     if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
-      echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]}"
-      env HLS_MODULE_ID="$MOD_ID" VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" 2>&1 | tee "$log_file" &
+      echo "env HLS_MODULE_ID=$HLS_MODULE_ID VLLM_DP_RANK=$RANK numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]}"
+      env HLS_MODULE_ID="$HLS_MODULE_ID" VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" 2>&1 | tee "$log_file" &
     else
+      unset HLS_MODULE_ID
       echo "VLLM_DP_RANK_LOCAL=$i VLLM_DP_RANK=$RANK ${CMD[*]}"
       env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" 2>&1 | tee "$log_file" &
     fi
   else
     if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
       echo "numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]}"
-      env HLS_MODULE_ID="$MOD_ID" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" &
+      env HLS_MODULE_ID="$HLS_MODULE_ID" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" &
     else
+      unset HLS_MODULE_ID
       echo "${CMD[*]}"
       "${CMD[@]}" &
     fi
   fi
+  
+  # Clean up temporary variables for this iteration
+  unset MOD_IDS CPU_BINDS MEM_BINDS CPU_BIND_COMBINED MEM_BIND_COMBINED HLS_MODULE_ID BASE_MOD_ID CPU_BIND_VAR MEM_BIND_VAR CPU_BIND_VAL MEM_BIND_VAL
 done
 
 wait

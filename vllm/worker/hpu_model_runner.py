@@ -39,6 +39,8 @@ from vllm.attention.backends.hpu_attn import HPUAttentionImpl
 from vllm.config import DeviceConfig, VllmConfig
 from vllm.distributed import (broadcast_tensor_dict, get_kv_transfer_group,
                               get_tensor_model_parallel_rank,
+                              get_data_parallel_rank, 
+                              get_data_parallel_world_size,
                               get_tensor_model_parallel_world_size,
                               tensor_model_parallel_all_reduce)
 from vllm.distributed.parallel_state import (get_dp_group, get_pp_group,
@@ -1726,7 +1728,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         is_prompt = seq_group_metadata_list[0].is_prompt
         base_event_name = 'prompt' if is_prompt else 'decode'
         self.profiler.start('internal', base_event_name)
-
         seq_group_metadata_list, real_batch_size, batch_size_padded = (
             self._add_dummy_seq(seq_group_metadata_list, is_prompt,
                                 align_worker))
@@ -3091,7 +3092,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     if kv_cache_fetched:
                                         kv_cache_for_cur_seq = torch.zeros(
                                             kv_cache_shape,
-                                            dtype=torch.bfloat16,
+                                            #dtype=torch.bfloat16,
+                                            dtype=kv_caches[0][0].dtype,
                                             device="hpu")
                                         hidden_states = torch.zeros(
                                             (1, 7168),
@@ -3481,10 +3483,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         # when use_delayed_sampling if the computation
                         # of logits depends on the sampled results
                         # we obtain the actual sampled results in advance
-                        #start = time.perf_counter()
+                        start = time.perf_counter()
                         self._patch_prev_output()
-                        #end = time.perf_counter()
-                        #logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 111 took {(end-start)*1000:.3f} milliseconds")
+                        end = time.perf_counter()
+                        logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 111 took {(end-start)*1000:.3f} milliseconds")
 
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
@@ -3527,10 +3529,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             # but not yet updated for some requests.
                             if penalty_are_requested:
                                 is_prev_output_patched = True
-                                #start = time.perf_counter()
+                                start = time.perf_counter()
                                 self._patch_prev_output()
-                                #end = time.perf_counter()
-                               # logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 222 took {(end-start)*1000:.3f} milliseconds")
+                                end = time.perf_counter()
+                                logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 222 took {(end-start)*1000:.3f} milliseconds")
 
                     if need_send_kv and self.skip_prefill_sampling:
                         # prefill and skip prefill sampling return dummy output
@@ -3553,10 +3555,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_outputs.append(output)
                     if use_delayed_sampling and self.is_driver_worker:
                         if not is_prev_output_patched:
-                            #start = time.perf_counter()
+                            start = time.perf_counter()
                             self._patch_prev_output()
-                            #end = time.perf_counter()
-                            #logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 333 took {(end-start)*1000:.3f} milliseconds")
+                            end = time.perf_counter()
+                            logger.info(f"<rank {torch.distributed.get_rank()}> _patch_prev_output 333 took {(end-start)*1000:.3f} milliseconds")
                         output = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
                         self.cached_step_outputs.append(output)

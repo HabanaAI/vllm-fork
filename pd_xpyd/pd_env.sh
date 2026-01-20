@@ -58,7 +58,7 @@ fi
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 DEBUG_LOG=1
 DEBUG_GRAPH=0
-DEBUG_PROFILE=0
+DEBUG_PROFILE=1
 INC_FP8=1
 # When using benchmark mode (not benchmark_decode) in proxy server, be sure to set BENCHMARK_MODE=1
 BENCHMARK_MODE=0 
@@ -89,7 +89,7 @@ if [ "$DEBUG_PROFILE" == "1" ]; then
 
     export HABANA_PROFILE=1
     # set this to true to enable high level profile
-    export VLLM_PROFILER_ENABLED=1
+    export VLLM_PROFILER_ENABLED=true
     export VLLM_PROFILE_CONFIG_PATH=./profile_config.json
     export VLLM_TORCH_PROFILER_DIR=./profiles
     export HABANA_PROFILE_WRITE_HLTV=1
@@ -131,6 +131,8 @@ if [ "$INC_FP8" -eq 1 ]; then
   elif [ "$(hostname)" == "sys41" ] || [ "$(hostname)" == "sys42" ] || [ "$(hostname)" == "sys43" ] \
   || [ "$(hostname)" == "sys51" ] || [ "$(hostname)" == "sys62" ] || [ "$(hostname)" == "sys53" ]; then
     model_path=/host/mnt/kefei/hf_models/DeepSeek-R1
+  elif [[ "$(hostname)" =~ ^jf11x ]]; then
+    model_path=/host/mnt/nvme1/DeepSeek-R1
   else
     model_path=/host/mnt/disk001/HF_Models/DeepSeek-R1
   fi

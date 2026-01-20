@@ -3,7 +3,8 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
 
 export VLLM_EP_SIZE=16
-export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g14}.json
+#export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g14}.json
+export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_`hostname`.json
 
 unset VLLM_DP_SIZE
 unset VLLM_USE_V1
@@ -14,6 +15,6 @@ ray stop --force
 
 sleep 3s
 
-ray start --address="${2:-10.239.129.81:8826}"
+ray start --address="${2:-10.112.242.153:8826}"
 
 

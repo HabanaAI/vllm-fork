@@ -127,5 +127,10 @@ EOF
     cat "$MOONCAKE_CONFIG_PATH"
 fi
 
-source "$BASH_DIR"/dp_start_decode.sh $INSTANCE_IDX
+#source "$BASH_DIR"/dp_start_decode.sh $INSTANCE_IDX
+if [ "$(hostname)" = "G3D-sys01" ]; then
+    bash "$BASH_DIR/2d_start_decode_head.sh"
+elif [ "$(hostname)" = "G3D-sys04" ]; then
+    bash "$BASH_DIR/2d_start_decode_node.sh"
+fi
 

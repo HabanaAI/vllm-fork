@@ -3,7 +3,7 @@
 set -euo pipefail
 
 XPYD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-WORK_DIR=${USR_WORK_DIR:-$XPYD_DIR}
+WORK_DIR=${USR_WORK_DIR:-/workspace/}
 
 P_ARGS=
 DRY_RUN=0
@@ -150,7 +150,7 @@ for p_instance_idx in $(seq 0 $((P_NUM_INSTANCE - 1))); do
     prefill_cmd=(
       ssh
       root@"$ip"
-      "cd $WORK_DIR; NFS_LOG_DIR=${USR_NFS_LOG_DIR:-./pd_test_log} ROLE=${role_type} P_INSTANCE_IDX=$p_instance_idx P_INTRA_INSTANCE_IDX=$intra_idx BENCHMARK_MODE=$BENCHMARK_MODE ENV_FILE=$ENV_FILE HEAD_ADDR=$instance_head_ip $XPYD_DIR/P.sh"
+      "cd $WORK_DIR; NFS_LOG_DIR=${USR_NFS_LOG_DIR:-/host/mnt/ctrl/disk1/kf/vllm-fork-deepseek_r1-dev/pd_xpyd/pd_test_log} ROLE=${role_type} P_INSTANCE_IDX=$p_instance_idx P_INTRA_INSTANCE_IDX=$intra_idx BENCHMARK_MODE=$BENCHMARK_MODE ENV_FILE=$ENV_FILE HEAD_ADDR=$instance_head_ip $XPYD_DIR/P.sh"
     )
     if [[ $DRY_RUN -eq 1 ]]; then
       echo "[DRY-RUN] ${prefill_cmd[*]}"
@@ -186,7 +186,7 @@ for d_instance_idx in $(seq 0 $((D_NUM_INSTANCE - 1))); do
     decode_cmd=(
       ssh
       root@"$ip"
-      "cd $WORK_DIR; NFS_LOG_DIR=${USR_NFS_LOG_DIR:-./pd_test_log} ENV_FILE=$ENV_FILE D_INSTANCE_IDX=$d_instance_idx D_INTRA_INSTANCE_IDX=$intra_idx D_INSTANCE_MASTER_IP=$instance_master_ip $XPYD_DIR/D.sh"
+      "cd $WORK_DIR; NFS_LOG_DIR=${USR_NFS_LOG_DIR:-/host/mnt/ctrl/disk1/kf/vllm-fork-deepseek_r1-dev/pd_xpyd/pd_test_log} ENV_FILE=$ENV_FILE D_INSTANCE_IDX=$d_instance_idx D_INTRA_INSTANCE_IDX=$intra_idx D_INSTANCE_MASTER_IP=$instance_master_ip $XPYD_DIR/D.sh"
     )
     if [[ $DRY_RUN -eq 1 ]]; then
       echo "[DRY-RUN] ${decode_cmd[*]}"
