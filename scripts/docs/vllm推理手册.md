@@ -390,7 +390,7 @@ bash calibrate_model.sh \
 
 ##### 2.3.3.2 对 BF16 模型进行校准
 
-对于仅支持 BF16 精度的模型，例如 Qwen2.5-72B-Insturct，可以使用以下命令在 4 张 Gaudi 卡上进行校准。
+对于仅支持 BF16 精度的模型，例如 Qwen2.5-72B-Instruct，可以使用以下命令在 4 张 Gaudi 卡上进行校准。
 
 测量数据将保存到 quantization 文件夹中。利用这些测量数据，vLLM 可以使用 2 张或 4 张 Gaudi 卡以 FP8 精度运行此模型。
 
