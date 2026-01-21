@@ -287,7 +287,21 @@ set_bucketing(){
     prompt_seq_step=$block_size
     prompt_seq_max=$max_num_batched_tokens
     if [ "$chunk_size" != "" ]; then
-        prompt_seq_step=$max_num_batched_tokens
+        has_prefix_caching=false
+        for p in "${extra_params[@]}"; do
+            if [ "$p" == "--enable-prefix-caching" ]; then
+                has_prefix_caching=true
+                break
+            fi
+        done
+
+        # if prefix caching is disabled, increasing prompt_seq_step to reduce the number of context-length buckets.
+        if [ "$has_prefix_caching" == "false" ]; then
+            prompt_seq_step=$max_num_batched_tokens
+        else
+            # if prefix caching is enabled, align FSDPA slice chunk size with chunk_size.
+            export VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE=$chunk_size
+        fi
         prompt_seq_max=$max_model_len
     fi
     export VLLM_PROMPT_SEQ_BUCKET_MIN=${VLLM_PROMPT_SEQ_BUCKET_MIN:-$prompt_seq_min}

@@ -2220,6 +2220,7 @@ class Scheduler:
         num_uncached_new_tokens = 0
 
         seqs = seq_group.get_seqs(status=status)
+        adjust_new_tokens = False
         # Compute the number of new uncached and cached tokens for
         # each sequence.
         for seq in seqs:
@@ -2268,6 +2269,11 @@ class Scheduler:
 
             num_uncached_new_tokens += num_uncached_new_tokens_seq
             num_cached_new_tokens += num_cached_new_tokens_seq
+            if (self.scheduler_config.chunked_prefill_enabled
+                    and num_computed_tokens_seq == 0
+                    and num_cached_tokens_seq != 0
+                    and num_uncached_new_tokens > budget.token_budget):
+                adjust_new_tokens = True
 
         if num_uncached_new_tokens == 0 and num_cached_new_tokens > 0:
             # For a fully cached hit sequence, we actually need to recompute the
@@ -2290,6 +2296,12 @@ class Scheduler:
                 partial_prefill_metadata,
             )
 
+        if adjust_new_tokens:
+            # For the first chunk, if APC detects a prefix cache hit,
+            # adjust the number of new tokens so that the resulting
+            # context length is aligned to the chunk size after execution.
+            adjust_count = num_cached_tokens_seq % budget.token_budget
+            num_uncached_new_tokens -= adjust_count
         return num_uncached_new_tokens, num_cached_new_tokens
 
     @staticmethod
