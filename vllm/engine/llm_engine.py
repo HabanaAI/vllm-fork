@@ -1779,6 +1779,15 @@ class LLMEngine:
 
             for idx, scheduled_seq_group in enumerate(
                     scheduler_outputs.scheduled_seq_groups):
+                # When using chunked prefill, the initial value of
+                # actual_num_batched_tokens only includes prefill tokens.
+                # Decode tokens should also be added; otherwise,
+                # the statistics log will be incorrect.
+
+                if (self.scheduler_config.chunked_prefill_enabled
+                        and idx >= scheduler_outputs.num_prefill_groups):
+                    actual_num_batched_tokens += 1
+
                 # Skip double logging when using async output proc
                 if finished_before and idx in finished_before:
                     actual_num_batched_tokens -= 1
