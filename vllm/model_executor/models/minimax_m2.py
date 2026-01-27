@@ -115,7 +115,8 @@ class MiniMaxM2MoE(nn.Module):
         param.data.copy_(loaded_weight.to(torch.float32))
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        bs, seq_len, hidden_dim = hidden_states.shape
+        orig_shape = hidden_states.shape
+        hidden_dim = hidden_states.shape[-1]
         hidden_states = hidden_states.view(-1, hidden_dim)
 
         # router_logits: (bs * seq_len, n_experts)
@@ -127,7 +128,7 @@ class MiniMaxM2MoE(nn.Module):
             final_hidden_states = tensor_model_parallel_all_reduce(
                 final_hidden_states)
 
-        return final_hidden_states.view(bs, seq_len, hidden_dim)
+        return final_hidden_states.view(orig_shape)
 
 
 class MiniMaxM2Attention(nn.Module):
