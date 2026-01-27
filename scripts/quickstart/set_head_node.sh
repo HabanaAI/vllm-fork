@@ -29,12 +29,20 @@ export QUANT_CONFIG=$(realpath "$BASH_DIR/../quant_configs/inc_quant_per_channel
 if [ -n "$QUANT_CONFIG" ]; then
     export VLLM_REQUANT_FP8_INC=1
     export VLLM_ENABLE_RUNTIME_DEQUANT=1
-    export VLLM_HPU_MARK_SCALES_AS_CONST=false
+    export VLLM_HPU_MARK_SCALES_AS_CONST="false"
     export VLLM_MOE_N_SLICE=1
+    
+    # Enable patch in INC
+    export INC_APPLY_OOT_PATCH="true"
+    export VLLM_HPU_FSDPA_SLICE_CAUSAL="true"
     export INC_FORCE_NAIVE_SCALING=1
+
     clean_inc_scale
 else
     export VLLM_MOE_N_SLICE=8
+    export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=1
+    export PT_HPU_SDPA_BR_FACTOR=4096       # slice size on the query
+    export PT_HPU_SDPA_BC_FACTOR=4096       # siice size on the kv
 fi
 
 export HCCL_SOCKET_IFNAME=$GLOO_SOCKET_IFNAME

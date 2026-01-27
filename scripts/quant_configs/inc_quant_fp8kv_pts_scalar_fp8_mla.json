@@ -14,5 +14,5 @@
             "mlp\\.gate\\b"
         ]
     },
-    "dump_stats_path": "./scripts/quantization/DeepSeek-R1-G2/g2/inc_output"
+    "dump_stats_path": "./scripts/nc_workspace_measure_kvcache/inc_measure_output"
 }

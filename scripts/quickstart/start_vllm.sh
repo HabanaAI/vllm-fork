@@ -75,12 +75,20 @@ if [ "$inc_fp8_quant" = "true" ]; then
     KV_CACHE_DTYPE=fp8_inc
     export VLLM_REQUANT_FP8_INC=1
     export VLLM_ENABLE_RUNTIME_DEQUANT=1
-    export VLLM_HPU_MARK_SCALES_AS_CONST=false
+    export VLLM_HPU_MARK_SCALES_AS_CONST="false"
     export VLLM_MOE_N_SLICE=1
+
+    # Enable patch in INC
+    export INC_APPLY_OOT_PATCH="true"
+    export VLLM_HPU_FSDPA_SLICE_CAUSAL="true"
     export INC_FORCE_NAIVE_SCALING=1
+    
     clean_inc_scale
 else
     export VLLM_MOE_N_SLICE=8
+    export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=1
+    export PT_HPU_SDPA_BR_FACTOR=4096       # slice size on the query
+    export PT_HPU_SDPA_BC_FACTOR=4096       # siice size on the kv
 fi
 
 
@@ -211,6 +219,4 @@ python3 -m vllm.entrypoints.openai.api_server --host $host --port $vllm_port \
 --use-v2-block-manager \
 --distributed_executor_backend ray \
 --gpu_memory_utilization $VLLM_GPU_MEMORY_UTILIZATION \
---disable-log-requests \
---enable-reasoning \
---reasoning-parser deepseek_r1
+--disable-log-requests
