@@ -86,7 +86,7 @@ set_bucketing(){
     # decode_block_min = ROUNDUP(input_min / block_size, 0)
     decode_block_min=$(( ($input_min + $block_size - 1) / $block_size ))
     # decode_block_min = CEILING.MATH(decode_block_min, decode_block_step)
-    # decode_block_min=$(( ($decode_block_min + $decode_block_step -1) / $decode_block_step * $decode_block_step ))
+    decode_block_min=$(( ($decode_block_min + $decode_block_step -1) / $decode_block_step * $decode_block_step ))
     # decode_block_max = (CEILING.MATH(input_max + output_max, block_size) + decode_bs_max
     decode_block_max=$(( (($input_max + $output_max + $block_size -1) / $block_size + 1) * $decode_bs_max))
     export VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN:-$decode_block_min}
