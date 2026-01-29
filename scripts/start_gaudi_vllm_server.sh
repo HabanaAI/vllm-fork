@@ -155,6 +155,15 @@ cache_path=${cache_path:-""}
 skip_warmup=${skip_warmup:-"false"}
 profile=${profile:-"false"}
 
+# check if the port is occupied. If occupied, notify user and exit
+if command -v ss >/dev/null 2>&1; then
+    CHECK=$(ss -tlnp | grep ":$port ")
+    if [ ! -z "$CHECK" ]; then
+        echo "[ERROR]: The port $port is occupied. Please specify other port with the parameter '-a'."
+        exit 1
+    fi
+fi
+
 model_name=$(basename "$weights_path")
 model_name_lower=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
 
