@@ -159,7 +159,7 @@ profile=${profile:-"false"}
 if command -v ss >/dev/null 2>&1; then
     CHECK=$(ss -tlnp | grep ":$port ")
     if [ ! -z "$CHECK" ]; then
-        echo "[ERROR]: The port $port is occupied. Please specify other port with the parameter '-a'."
+        echo "[ERROR]: The port $port is occupied. Please specify another port with '-a <IP:PORT>'."
         exit 1
     fi
 fi
