@@ -460,7 +460,7 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
 #### 1.2.4 （可选项）环境安装
 
 在安装好驱动及相关组件后，依据自身的使用场景，选择合适的环境进行安装。
-- Bare Metal 环境安装 - 在裸金属上安装Intel Gaudi Pytorch 环境。 参考官方手册 [Bare Metal 环境安装手册](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/Bare_Metal_Installation.html#bare-metal-pytorch)
+- Bare Metal 环境安装 - 在裸机上安装Intel Gaudi Pytorch 环境。 参考官方手册 [Bare Metal 环境安装手册](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/Bare_Metal_Installation.html#bare-metal-pytorch)
 
 如过选择 Kubernetes 或 OpenShift 等云基础架构环境
 - Kubernetes 环境安装 - 使用 Intel Gaudi Base Operator 在 Kubernetes 环境中安装并自动化管理所有 Intel Gaudi 的驱动和软件。 参考官方手册 [Kubernetes 环境安装手册](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/Kubernetes_Installation/index.html#kubernetes-install)
@@ -608,7 +608,7 @@ Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，�
     chmod 777 ${LIBFABRIC_ROOT}
     cd libfabric-$REQUIRED_VERSION/
     ./configure --prefix=$LIBFABRIC_ROOT --with-synapseai=/usr
-    make -j 32 && make install
+    make -j $(nproc) && make install
     popd
     rm -rf /tmp/libfabric
     ```
@@ -624,14 +624,14 @@ Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，�
 2. 定义`LIBFABRIC_ROOT` 环境变量：
 
     ```bash
-    export LIBFABRIC_ROOT=/tmp/libfabric-1.20.0
+    export LIBFABRIC_ROOT=/opt/libfabric
     ```
 
 3. 编译 hccl_ofi_wrapper：
 
     ```bash
     cd hccl_ofi_wrapper
-    mkdir -j 10
+    make -j $(nproc)
     ```
 
 4. 拷贝 `libhccl_ofi_wrapper.so` 文件到 `/usr/lib/habanalabs/` 目录下并加载：
