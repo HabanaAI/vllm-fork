@@ -26,8 +26,8 @@ class Qwen3ReasoningParser(ReasoningParser):
     output.
     """
 
-    def __init__(self, tokenizer: PreTrainedTokenizerBase):
-        super().__init__(tokenizer)
+    def __init__(self, tokenizer: PreTrainedTokenizerBase, *args, **kwargs):
+        super().__init__(tokenizer, *args, **kwargs)
         self.think_start_token = "<think>"
         self.think_end_token = "</think>"
 
