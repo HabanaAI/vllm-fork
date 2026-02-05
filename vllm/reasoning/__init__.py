@@ -8,6 +8,8 @@ from .granite_reasoning_parser import GraniteReasoningParser
 from .holo2_reasoning_parser import Holo2ReasoningParser
 from .hunyuan_a13b_reasoning_parser import HunyuanA13BReasoningParser
 from .identity_reasoning_parser import IdentityReasoningParser
+from .minimax_m2_reasoning_parser import (MiniMaxM2AppendThinkReasoningParser,
+                                          MiniMaxM2ReasoningParser)
 from .qwen3_reasoning_parser import Qwen3ReasoningParser
 
 __all__ = [
@@ -20,4 +22,6 @@ __all__ = [
     "Glm4MoeModelReasoningParser",
     "Holo2ReasoningParser",
     "IdentityReasoningParser",
+    "MiniMaxM2ReasoningParser",
+    "MiniMaxM2AppendThinkReasoningParser",
 ]
