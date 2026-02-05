@@ -4002,6 +4002,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if query_len in seen_query_len:
                     continue
                 seen_query_len.add(query_len)
+                ctx = 0
                 # Graph memory usage is proportional to seq dimension in a batch
                 phase = f"Graph/{'mix'}/{'prompt'}"
                 seq_len = query_len + ctx * self.block_size
@@ -4017,6 +4018,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         kv_caches,
                         temperature=1.0
                         if batch_size not in warmed_random_sampler_bs else 0,
+                        img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
                     )
                 warmed_random_sampler_bs.add(batch_size)
                 used_mem = align_workers(mem_prof.consumed_device_memory,

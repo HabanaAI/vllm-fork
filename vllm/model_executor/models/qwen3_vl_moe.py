@@ -364,3 +364,9 @@ class Qwen3VLMoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
                         config.text_config.hidden_size)
             for _ in range(self.deepstack_num_level)
         ] if self.use_deepstack else None
+
+        # multimodal chunked prefill offsets
+        self.mm_offset_image = 0
+        self.mm_offset_image_multiscale = 0
+        self.mm_offset_video = 0
+        self.mm_offset_video_multiscale = 0
