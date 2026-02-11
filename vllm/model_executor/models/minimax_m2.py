@@ -24,10 +24,10 @@
 # limitations under the License.
 """Inference-only MiniMaxM2 model."""
 
+import os
 from collections.abc import Iterable
 from typing import Any, Optional
 
-import os
 import torch
 from torch import nn
 from transformers import PretrainedConfig
@@ -35,8 +35,7 @@ from transformers import PretrainedConfig
 from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, ModelConfig, VllmConfig
-from vllm.distributed import (get_pp_group,
-                              get_tensor_model_parallel_rank,
+from vllm.distributed import (get_pp_group, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               tensor_model_parallel_all_reduce)
 from vllm.model_executor.layers.fused_moe import FusedMoE
@@ -177,7 +176,7 @@ class MiniMaxM2Attention(nn.Module):
         self.max_position_embeddings = max_position_embeddings
 
         self.enable_unit_moe = os.environ.get('VLLM_ENABLE_UNIT_MOE',
-            'false').lower() == 'true'
+                                              'false').lower() == 'true'
 
         if self.enable_unit_moe:
             self.q_proj = ReplicatedLinear(
@@ -201,11 +200,9 @@ class MiniMaxM2Attention(nn.Module):
                 quant_config=quant_config,
                 prefix=f"{prefix}.v_proj",
             )
-            self.q_norm = RMSNorm(self.head_dim *
-                                  self.total_num_heads,
+            self.q_norm = RMSNorm(self.head_dim * self.total_num_heads,
                                   eps=rms_norm_eps)
-            self.k_norm = RMSNorm(self.head_dim *
-                                  self.total_num_kv_heads,
+            self.k_norm = RMSNorm(self.head_dim * self.total_num_kv_heads,
                                   eps=rms_norm_eps)
         else:
             self.qkv_proj = QKVParallelLinear(
@@ -250,13 +247,9 @@ class MiniMaxM2Attention(nn.Module):
             prefix=f"{prefix}.attn",
         )
 
-    def hpu_qgemm(
-        self,
-        qinput: torch.Tensor,
-        weight: torch.Tensor,
-        input_scale: torch.Tensor,
-        weight_scale: torch.Tensor
-    ) -> torch.Tensor:
+    def hpu_qgemm(self, qinput: torch.Tensor, weight: torch.Tensor,
+                  input_scale: torch.Tensor,
+                  weight_scale: torch.Tensor) -> torch.Tensor:
         return torch.ops.hpu.fp8_gemm_v2(A=qinput,
                                          trans_A=False,
                                          B=weight.contiguous(),
@@ -280,8 +273,7 @@ class MiniMaxM2Attention(nn.Module):
             x = hidden_states.reshape(-1, self.hidden_size)
             x_fp8 = torch.ops.hpu.cast_to_fp8_v2(x,
                                                  1.0 / self.q_proj.input_scale,
-                                                 False,
-                                                 False,
+                                                 False, False,
                                                  torch.float8_e4m3fn)[0]
             qweight_slice = self.q_proj.weight.size(1) // self.tp_size
             kweight_slice = self.k_proj.weight.size(1) // self.tp_size
@@ -319,21 +311,20 @@ class MiniMaxM2Attention(nn.Module):
                                weight_scale=S_V).reshape(bs, seq, -1)
 
             if bs * seq > 256:
-                q, k = RMSNorm.forward_qk(self.q_norm,
-                                          self.k_norm,
-                                          q.contiguous(),
-                                          k.contiguous())
+                q, k = RMSNorm.forward_qk(self.q_norm, self.k_norm,
+                                          q.contiguous(), k.contiguous())
             else:
                 q = self.q_norm(q)
                 k = self.k_norm(k)
-                q = q.reshape(bs, seq, self.tp_size, -1).permute(2, 0, 1, 3)[self.tp_rank]
-                k = k.reshape(bs, seq, self.tp_size, -1).permute(2, 0, 1, 3)[self.tp_rank]
+                q = q.reshape(bs, seq, self.tp_size,
+                              -1).permute(2, 0, 1, 3)[self.tp_rank]
+                k = k.reshape(bs, seq, self.tp_size,
+                              -1).permute(2, 0, 1, 3)[self.tp_rank]
         else:
             qkv, _ = self.qkv_proj(hidden_states)
             q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
                                 dim=-1)
-            q, k = MiniMaxText01RMSNormTP.forward_qk(self.q_norm,
-                                                     self.k_norm,
+            q, k = MiniMaxText01RMSNormTP.forward_qk(self.q_norm, self.k_norm,
                                                      q.contiguous(),
                                                      k.contiguous())
 
@@ -508,14 +499,14 @@ class MiniMaxM2Model(nn.Module):
 
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
-        disable_unit_moe = not os.environ.get('VLLM_ENABLE_UNIT_MOE',
-            'false').lower() == 'true'
+        enable_unit_moe = os.environ.get('VLLM_ENABLE_UNIT_MOE',
+                                         'false').lower() == 'true'
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("qkv_proj", "q_proj", "q"),
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
-        ] if disable_unit_moe else []
+        ] if not enable_unit_moe else []
 
         # Params for weights, fp8 weight scales, fp8 activation scales
         # (param_name, weight_name, expert_id, shard_id)
