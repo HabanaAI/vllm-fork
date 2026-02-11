@@ -271,7 +271,7 @@ class Qwen3NextSparseMoeBlock(nn.Module):
                                 hidden_size=config.hidden_size,
                                 intermediate_size=config.moe_intermediate_size,
                                 reduce_results=False,
-                                renormalize=config.norm_topk_prob,
+                                renormalize=getattr(config, "norm_topk_prob", True),
                                 quant_config=quant_config,
                                 prefix=f"{prefix}.experts")
 
@@ -972,7 +972,7 @@ class Qwen3NextModel(nn.Module):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
 
-        config: Qwen3NextConfig = vllm_config.model_config.hf_config
+        config: Qwen3NextConfig = vllm_config.model_config.hf_text_config
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
@@ -1054,7 +1054,7 @@ class Qwen3NextModel(nn.Module):
             ckpt_gate_proj_name="gate_proj",
             ckpt_down_proj_name="down_proj",
             ckpt_up_proj_name="up_proj",
-            num_experts=self.config.num_experts)
+            num_experts=getattr(self.config, "num_experts", 0))
 
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
@@ -1145,7 +1145,7 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
-        config = vllm_config.model_config.hf_config
+        config = vllm_config.model_config.hf_text_config
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
@@ -1283,7 +1283,7 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
             cls, vllm_config: "VllmConfig"
     ) -> tuple[tuple[int, int], tuple[int, int]]:
         parallel_config = vllm_config.parallel_config
-        hf_config = vllm_config.model_config.hf_config
+        hf_config = vllm_config.model_config.hf_text_config
         tp_size = parallel_config.tensor_parallel_size
         num_spec = (vllm_config.speculative_config.num_speculative_tokens
                     if vllm_config.speculative_config else 0)

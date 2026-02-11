@@ -236,6 +236,14 @@ _MULTIMODAL_MODELS = {
     ),
     "Qwen3VLForConditionalGeneration": ("qwen3_vl", "Qwen3VLForConditionalGeneration"),  # noqa: E501
     "Qwen3VLMoeForConditionalGeneration": ("qwen3_vl_moe", "Qwen3VLMoeForConditionalGeneration"),  # noqa: E501
+        "Qwen3_5ForConditionalGeneration": (
+        "qwen3_5",
+        "Qwen3_5ForConditionalGeneration",
+    ),
+    "Qwen3_5MoeForConditionalGeneration": (
+        "qwen3_5",
+        "Qwen3_5MoeForConditionalGeneration",
+    ),
     "Phi4MMForCausalLM": ("phi4mm", "Phi4MMForCausalLM"),
     "TarsierForConditionalGeneration": ("tarsier", "TarsierForConditionalGeneration"),  # noqa: E501
     "UltravoxModel": ("ultravox", "UltravoxModel"),
@@ -257,6 +265,8 @@ _SPECULATIVE_DECODING_MODELS = {
     "Glm4MoeMTPModel": ("glm4_moe_mtp", "Glm4MoeMTP"),
     "MedusaModel": ("medusa", "Medusa"),
     "MLPSpeculatorPreTrainedModel": ("mlp_speculator", "MLPSpeculator"),
+    "Qwen3_5MTP": ("qwen3_5_mtp", "Qwen3_5MTP"),
+    "Qwen3_5MoeMTP": ("qwen3_5_mtp", "Qwen3_5MoeMTP"),
 }
 
 _TRANSFORMERS_MODELS = {
