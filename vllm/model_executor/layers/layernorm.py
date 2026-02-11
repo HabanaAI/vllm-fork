@@ -231,6 +231,10 @@ class RMSNorm(CustomOp):
             self.variance_epsilon,
         )
 
+    # This path is used to reduce number of all_reduce calls.
+    # When RMSNorm is initialized but we want to apply TP to qk,
+    # it is better to combine qk tensors and perform one all_reduce
+    # if bs * seq is small.
     @staticmethod
     def forward_qk(
         q_norm: "RMSNorm",
@@ -259,7 +263,6 @@ class RMSNorm(CustomOp):
         q = q.to(orig_dtype)
         k = k.to(orig_dtype)
         return q, k
-
 
     def extra_repr(self) -> str:
         s = f"hidden_size={self.weight.data.size(0)}"

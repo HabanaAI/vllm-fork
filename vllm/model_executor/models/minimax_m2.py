@@ -177,6 +177,7 @@ class MiniMaxM2Attention(nn.Module):
 
         self.enable_unit_moe = os.environ.get('VLLM_ENABLE_UNIT_MOE',
                                               'false').lower() == 'true'
+        self.qknorm_tp_limit = int(os.environ.get("VLLM_QKNORM_TP_LIMIT", 256))
 
         if self.enable_unit_moe:
             self.q_proj = ReplicatedLinear(
@@ -278,7 +279,7 @@ class MiniMaxM2Attention(nn.Module):
             qweight_slice = self.q_proj.weight.size(1) // self.tp_size
             kweight_slice = self.k_proj.weight.size(1) // self.tp_size
 
-            if bs * seq > 256:
+            if bs * seq > self.qknorm_tp_limit:
                 s = self.tp_rank
                 e = self.tp_rank + 1
                 W_Q = self.q_proj.weight.transpose(0, 1)[ \
@@ -310,7 +311,7 @@ class MiniMaxM2Attention(nn.Module):
                                input_scale=self.q_proj.input_scale,
                                weight_scale=S_V).reshape(bs, seq, -1)
 
-            if bs * seq > 256:
+            if bs * seq > self.qknorm_tp_limit:
                 q, k = RMSNorm.forward_qk(self.q_norm, self.k_norm,
                                           q.contiguous(), k.contiguous())
             else:
