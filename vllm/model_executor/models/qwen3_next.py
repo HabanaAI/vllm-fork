@@ -931,13 +931,11 @@ class Qwen3NextDecoderLayer(nn.Module):
             hidden_states, residual = self.input_layernorm(
                 hidden_states, residual)
 
-        self_attention_output = torch.empty_like(hidden_states)
-        num_tokens = hidden_states.size(1)
         if self.layer_type == "linear_attention":
-            self_attention_output[:,:num_tokens] = self.linear_attn(
+            self_attention_output = self.linear_attn(
                 hidden_states=hidden_states, )
         elif self.layer_type == "full_attention":
-            self_attention_output[:,:num_tokens] = self.self_attn(
+            self_attention_output = self.self_attn(
                 hidden_states=hidden_states,
                 positions=positions,
             )
