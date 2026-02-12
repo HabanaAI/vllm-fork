@@ -532,7 +532,8 @@ class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
         # Qwen3.5 use all layers for MLP / Qwen3.5-MoE use sparse MoE blocks
         if config.model_type == "qwen3_5_moe_text":
             self.mlp = Qwen3NextSparseMoeBlock(
-                vllm_config=vllm_config,
+                config=config,
+                quant_config=quant_config,
                 prefix=f"{prefix}.mlp",
             )
         elif config.model_type == "qwen3_5_text":
@@ -633,7 +634,7 @@ class Qwen3_5Model(Qwen3NextModel):
     ) -> bool:
         param = params_dict[name]
         weight_loader = typing.cast(Callable[..., bool], param.weight_loader)
-        loaded_local_expert = False
+        loaded_local_expert = True #False
         for expert_id in range(num_experts):
             curr_expert_weight = loaded_weight[expert_id]
             success = weight_loader(
@@ -642,7 +643,7 @@ class Qwen3_5Model(Qwen3NextModel):
                 name,
                 shard_id,
                 expert_id,
-                return_success=True,
+#                return_success=True,
             )
             if success:
                 loaded_local_expert = True
@@ -760,7 +761,7 @@ class Qwen3_5Model(Qwen3NextModel):
                             name_mapped,
                             shard_id=shard_id,
                             expert_id=expert_id,
-                            return_success=True,
+#                            return_success=True,
                         )
                     if success:
                         name = name_mapped
@@ -1153,6 +1154,9 @@ class Qwen3_5MoeForConditionalGeneration(
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors
         )
+
+        self.use_deepstack = False
+        self.text_dim = config.text_config.hidden_size
 
         # set MoE hyperparameters
         self.set_moe_parameters()
