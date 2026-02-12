@@ -154,7 +154,8 @@ class SlidingWindowSpec(AttentionSpec):
         # window [CDEF] of 6 tokens.
         return (cdiv(num_tokens, self.block_size) + 1) * self.page_size_bytes
 
-@dataclass(frozen=True)
+
+@dataclass
 class MambaSpec(KVCacheSpec):
     shapes: tuple[tuple[int, ...], ...]
     dtypes: tuple[torch.dtype]
@@ -182,6 +183,7 @@ class MambaSpec(KVCacheSpec):
             return self.page_size_bytes * (2 + self.num_speculative_blocks)
         else:
             return self.page_size_bytes * (1 + self.num_speculative_blocks)
+
 
 @dataclass
 class KVCacheTensor:

@@ -1456,14 +1456,15 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 input_ids, inputs_embeds, multimodal_embeddings,
                 [self.config.image_token_id, self.config.video_token_id])
 
-        if deepstack_input_embeds is None:
+        if deepstack_input_embeds is None and self.use_deepstack:
             deepstack_input_embeds = torch.zeros(inputs_embeds.size(0),
                                                  inputs_embeds.size(1),
                                                  self.deepstack_num_level *
                                                  self.text_dim,
                                                  device=inputs_embeds.device,
                                                  dtype=inputs_embeds.dtype)
-        inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
+        if deepstack_input_embeds:
+            inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
                                   dim=-1)
         return inputs_embeds
 

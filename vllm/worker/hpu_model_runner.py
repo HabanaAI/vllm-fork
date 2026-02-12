@@ -1761,7 +1761,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     # fla is short for Flat Linear Attention
     def _is_fla_model(self):
-        return hasattr(self.model_config.hf_config, "linear_conv_kernel_dim")
+        return (hasattr(self.model_config.hf_config, "linear_conv_kernel_dim") or
+               (hasattr(self.model_config.hf_config, "text_config") and
+                hasattr(self.model_config.hf_config.text_config,
+                        "linear_conv_kernel_dim")))
 
     def _use_graphs(self, batch_size, seq_len, ctx_blocks=0):
         if self.enforce_eager:
@@ -1982,8 +1985,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # TODO: if seq_len < conv_kernel_dim, padding token should be
             # masked in the prompt stage
             if self._is_fla_model():
+                if hasattr(self.model_config.hf_config, "linear_conv_kernel_dim"):
+                    linear_conv_kernel_dim = self.model_config.hf_config.linear_conv_kernel_dim
+                else:
+                    linear_conv_kernel_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim
                 conv_state_indices_list.append(list(range(seq_len + 1 - \
-                self.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
+                linear_conv_kernel_dim, seq_len)))
 
             token_types_ids = seq_group_metadata.token_type_ids
             token_types.append(token_types_ids) if token_types_ids else []
@@ -3325,7 +3332,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             embed_dim = 1176
             if any([
                     model_type in self.get_model().config.model_type
-                    for model_type in ['qwen3_vl', "qwen3_omni"]
+                    for model_type in ['qwen3_vl', "qwen3_omni",
+                                       'qwen3_5', 'qwen3_5_moe']
             ]):
                 embed_dim = 1536
             elif 'ernie4_5_moe_vl' in self.get_model().config.model_type:
@@ -3585,7 +3593,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def add_fla_dummy_data(self, inputs) -> None:
         assert self._is_fla_model()
-        conv_dim = self.model_config.hf_config.linear_conv_kernel_dim
+        if hasattr(self.model_config.hf_config, "linear_conv_kernel_dim"):
+            conv_dim = self.model_config.hf_config.linear_conv_kernel_dim
+        else:
+            conv_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim
         bs, seq_len = inputs.input_tokens.shape
         mamba_cache_indices = list(range(bs))
         mamba_cache_indices = torch.tensor(mamba_cache_indices,

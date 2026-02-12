@@ -765,11 +765,15 @@ class Qwen3NextAttention(nn.Module):
             prefix=f"{prefix}.o_proj",
         )
 
+        if hasattr(config, "rope_theta"):
+            rope_theta = config.rope_theta
+        else:
+            rope_theta = config.rope_parameters.get("rope_theta", 10000)
         self.rotary_emb = get_rope(
             head_size=self.head_dim,
             rotary_dim=self.head_dim,
             max_position=config.max_position_embeddings,
-            base=config.rope_theta,
+            base=rope_theta,
             rope_scaling=config.rope_scaling,
             partial_rotary_factor=config.partial_rotary_factor,
             dual_chunk_attention_config=self.dual_chunk_attention_config,
@@ -927,11 +931,13 @@ class Qwen3NextDecoderLayer(nn.Module):
             hidden_states, residual = self.input_layernorm(
                 hidden_states, residual)
 
+        self_attention_output = torch.empty_like(hidden_states)
+        num_tokens = hidden_states.size(1)
         if self.layer_type == "linear_attention":
-            self_attention_output = self.linear_attn(
+            self_attention_output[:,:num_tokens] = self.linear_attn(
                 hidden_states=hidden_states, )
         elif self.layer_type == "full_attention":
-            self_attention_output = self.self_attn(
+            self_attention_output[:,:num_tokens] = self.self_attn(
                 hidden_states=hidden_states,
                 positions=positions,
             )
@@ -1133,8 +1139,52 @@ class Qwen3NextModel(nn.Module):
         return loaded_params
 
 
+class QwenNextMixtureOfExperts(MixtureOfExperts):
+    def update_physical_experts_metadata(
+        self,
+        num_physical_experts: int,
+        num_local_physical_experts: int,
+    ) -> None:
+        assert self.num_local_physical_experts == num_local_physical_experts
+        self.num_physical_experts = num_physical_experts
+        self.num_local_physical_experts = num_local_physical_experts
+        self.num_redundant_experts = num_physical_experts - self.num_logical_experts
+        for layer in self.model.layers:
+            if isinstance(layer.mlp, Qwen3NextSparseMoeBlock):
+                moe = layer.mlp
+                moe.n_local_physical_experts = num_local_physical_experts
+                moe.n_physical_experts = num_physical_experts
+                moe.n_redundant_experts = self.num_redundant_experts
+                moe.experts.update_expert_map()
+
+    def set_moe_parameters(self):
+        self.expert_weights = []
+
+        self.moe_layers = []
+        example_moe = None
+        for layer in self.model.layers:
+            if isinstance(layer, Qwen3NextDecoderLayer) and isinstance(
+                layer.mlp, Qwen3NextSparseMoeBlock
+            ):
+                example_moe = layer.mlp
+                self.moe_layers.append(layer.mlp.experts)
+
+        if example_moe is None:
+            raise RuntimeError("No Qwen3Next layer found in the model.layers.")
+
+        # Set MoE hyperparameters
+        self.num_moe_layers = len(self.moe_layers)
+        self.num_expert_groups = 1
+        self.num_shared_experts = 0
+        self.num_logical_experts = example_moe.n_logical_experts
+        self.num_physical_experts = example_moe.n_physical_experts
+        self.num_local_physical_experts = example_moe.n_local_physical_experts
+        self.num_routed_experts = example_moe.n_routed_experts
+        self.num_redundant_experts = example_moe.n_redundant_experts
+
+
 class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
-                           MixtureOfExperts, IsHybrid):
+                           QwenNextMixtureOfExperts, IsHybrid):
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",

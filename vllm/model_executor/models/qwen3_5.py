@@ -28,6 +28,7 @@ import typing
 from collections.abc import Callable, Iterable
 
 import torch
+import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 from transformers.activations import ACT2FN
@@ -39,7 +40,7 @@ from transformers.models.qwen3_5_moe.configuration_qwen3_5_moe import (
     Qwen3_5MoeConfig,
     Qwen3_5MoeTextConfig,
 )
-
+from vllm.attention import AttentionMetadata
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import (
     CacheConfig,
@@ -54,6 +55,7 @@ from vllm.distributed import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
 )
+from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import (
     GemmaRMSNorm as Qwen3_5RMSNorm,
@@ -74,6 +76,8 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
     MambaStateDtypeCalculator,
     MambaStateShapeCalculator,
 )
+from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
+    causal_conv1d_update)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead,
@@ -83,6 +87,7 @@ from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader,
     sharded_weight_loader,
 )
+from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.platforms import current_platform
@@ -105,9 +110,12 @@ from .qwen3_next import (
     Qwen3NextModel,
     Qwen3NextSparseMoeBlock,
     QwenNextMixtureOfExperts,
+    torch_chunk_gated_delta_rule,
+    torch_recurrent_gated_delta_rule,
 )
 from .qwen3_vl import (
     Qwen3_VisionTransformer,
+    Qwen3_VisionTransformerStaticShape,
     Qwen3VLDummyInputsBuilder,
     Qwen3VLForConditionalGeneration,
     Qwen3VLMultiModalProcessor,
@@ -124,6 +132,7 @@ from .utils import (
     maybe_prefix,
 )
 
+is_hpu = current_platform.is_hpu()
 logger = init_logger(__name__)
 
 
@@ -140,6 +149,7 @@ class Qwen3_5MoeProcessingInfo(Qwen3VLProcessingInfo):
 class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
     def __init__(
         self,
+        vllm_config: VllmConfig,
         config: Qwen3_5TextConfig | Qwen3_5MoeTextConfig,
         model_config: ModelConfig | None = None,
         cache_config: CacheConfig | None = None,
@@ -185,6 +195,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             prefix=f"{prefix}.conv1d",
         )
         self.conv1d.weight.data = self.conv1d.weight.data.unsqueeze(1)
+        self.conv1d_weight = None
 
         self.in_proj_qkv = MergedColumnParallelLinear(
             input_size=self.hidden_size,
@@ -234,6 +245,36 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             },
         )
 
+        max_prefill_bs = vllm_config.scheduler_config.max_num_prefill_seqs
+        max_decode_bs = vllm_config.scheduler_config.max_num_seqs
+
+        mamba_cache_bs = max_decode_bs + max(8, max_decode_bs)
+        if max_prefill_bs is not None:
+            mamba_cache_bs += max_prefill_bs
+        else:
+            mamba_cache_bs += max_decode_bs
+
+        conv_state_shape = (
+            mamba_cache_bs,
+            self.conv_kernel_size - 1,
+            divide(self.conv_dim, self.tp_size),
+        )
+        temporal_state_shape = (mamba_cache_bs,
+                                divide(self.num_v_heads, self.tp_size),
+                                self.head_k_dim, self.head_v_dim)
+
+        self.conv_state = torch.empty(conv_state_shape,
+                                      dtype=torch.float32,
+                                      device=self.conv1d.weight.device)
+        self.ssm_state = torch.empty(temporal_state_shape,
+                                     dtype=torch.float32,
+                                     device=self.conv1d.weight.device)
+
+        self.chunk_size = 64
+        self.eye_constant = torch.eye(self.chunk_size,
+                                      dtype=torch.float32,
+                                      device=self.conv1d.weight.device)
+
         # selective projection used to make dt, B and C input dependant
 
         # time step projection (discretization)
@@ -255,7 +296,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             eps=self.layer_norm_epsilon,
             group_size=None,
             norm_before_gate=True,
-            device=current_platform.current_device(),
             dtype=config.dtype,
         )
 
@@ -287,7 +327,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        output: torch.Tensor,
+        # output: torch.Tensor,
     ):
         """
         Forward pass with three parts:
@@ -295,6 +335,12 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         2. Core attention (custom op)
         3. Output projection
         """
+        forward_context = get_forward_context()
+        attn_metadata: AttentionMetadata = forward_context.attn_metadata
+        conv_state = self.conv_state
+        ssm_state = self.ssm_state
+
+
         num_tokens = hidden_states.size(0)
 
         # ============================================================
@@ -302,43 +348,145 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         # ============================================================
         mixed_qkv, _ = self.in_proj_qkv(hidden_states)
         z, _ = self.in_proj_z(hidden_states)
-        z = z.reshape(z.size(0), -1, self.head_v_dim)
+        z = z.reshape(z.size(0), z.size(1), -1, self.head_v_dim)
         b, _ = self.in_proj_b(hidden_states)
         a, _ = self.in_proj_a(hidden_states)
 
-        b = b.contiguous()
-        a = a.contiguous()
+        b = b.contiguous().float()
+        a = a.contiguous().float()
+        z = z.float()
+        mixed_qkv = mixed_qkv.float()
 
         # ============================================================
         # Part 2: Core Attention (Custom Op)
         # ============================================================
         # Note: we should not use torch.empty here like other attention backends,
         # see discussions in https://github.com/vllm-project/vllm/pull/28182
-        core_attn_out = torch.zeros(
-            (num_tokens, self.num_v_heads // self.tp_size, self.head_v_dim),
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
+        mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
+        mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
 
-        torch.ops.vllm.gdn_attention_core(
-            mixed_qkv,
-            b,
-            a,
-            core_attn_out,
-            self.prefix,
+        if self.conv1d_weight is None:
+            self.conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
+                0, 1).flatten().reshape(self.conv_kernel_size,
+                                        self.conv_dim // self.tp_size).float()
+            del self.conv1d.weight
+
+        if attn_metadata.is_prompt:
+            bs, seq_len, qkv_dim = mixed_qkv.shape
+            conv_state_indices = attn_metadata.conv_state_indices
+            prefill_conv_state = torch.index_select(
+                mixed_qkv.reshape(-1, qkv_dim),
+                dim=0,
+                index=conv_state_indices).reshape(bs, -1, qkv_dim)
+            conv_state.index_copy_(dim=0,
+                                   index=mamba_cache_prefill_indices,
+                                   source=prefill_conv_state)
+
+            mixed_qkv_with_pad = F.pad(mixed_qkv,
+                                       (0, 0, self.conv_kernel_size - 1, 0))
+            for idx in range(self.conv_kernel_size):
+                qkv_slice = mixed_qkv_with_pad[:, idx:(idx + seq_len), :]
+                conv1d_weight_slice = self.conv1d_weight[idx]
+                qkv_conv = qkv_slice * conv1d_weight_slice
+                if idx == 0:
+                    mixed_qkv_non_spec = qkv_conv
+                else:
+                    mixed_qkv_non_spec.add_(qkv_conv)
+
+            mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
+
+        else:
+            mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
+                mixed_qkv,
+                conv_state,
+                self.conv1d_weight,
+                self.conv1d.bias,
+                self.activation,
+                conv_state_indices=mamba_cache_decode_indices,
+            )
+            conv_state.index_copy_(0, mamba_cache_decode_indices,
+                                   cur_conv_state)
+
+        query, key, value = torch.split(
+            mixed_qkv_non_spec,
+            [
+                self.key_dim // self.tp_size,
+                self.key_dim // self.tp_size,
+                self.value_dim // self.tp_size,
+            ],
+            dim=-1,
         )
+        query_non_spec = query.reshape(query.shape[0], query.shape[1], -1,
+                                       self.head_k_dim)
+        key_non_spec = key.reshape(key.shape[0], key.shape[1], -1,
+                                   self.head_k_dim)
+        value_non_spec = value.reshape(value.shape[0], value.shape[1], -1,
+                                       self.head_v_dim)
+
+        beta = b.sigmoid()
+        g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
+
+        if self.num_v_heads // self.num_k_heads > 1:
+            query_non_spec = query_non_spec.repeat_interleave(
+                self.num_v_heads // self.num_k_heads, dim=2)
+            key_non_spec = key_non_spec.repeat_interleave(self.num_v_heads //
+                                                          self.num_k_heads,
+                                                          dim=2)
+
+        if attn_metadata.is_prompt:
+            core_attn_out, last_recurrent_state = (
+                torch_chunk_gated_delta_rule(
+                    query_non_spec,
+                    key_non_spec,
+                    value_non_spec,
+                    g=g,
+                    beta=beta,
+                    eye_constant=self.eye_constant,
+                    chunk_size=self.chunk_size,
+                    initial_state=None,
+                    output_final_state=True,
+                    use_qk_l2norm_in_kernel=True,
+                ))
+            ssm_state.index_copy_(dim=0,
+                                  index=mamba_cache_prefill_indices,
+                                  source=last_recurrent_state)
+        else:
+            recurrent_state = torch.index_select(
+                ssm_state,
+                dim=0,
+                index=mamba_cache_decode_indices,
+            )
+            core_attn_out, last_recurrent_state = (
+                torch_recurrent_gated_delta_rule(
+                    query_non_spec,
+                    key_non_spec,
+                    value_non_spec,
+                    g=g,
+                    beta=beta,
+                    recurrent_state=recurrent_state,
+                    output_final_state=True,
+                    use_qk_l2norm_in_kernel=True,
+                ))
+            ssm_state.index_copy_(
+                dim=0,
+                index=mamba_cache_decode_indices,
+                source=last_recurrent_state,
+            )
 
         # ============================================================
         # Part 3: Output Projection
         # ============================================================
         z_shape_og = z.shape
-        # Reshape input data into 2D tensor
+        # reshape input data into 2D tensor
         core_attn_out = core_attn_out.reshape(-1, core_attn_out.shape[-1])
         z = z.reshape(-1, z.shape[-1])
-        core_attn_out = self.norm(core_attn_out, z)
+        core_attn_out = self.norm(core_attn_out, z).to(hidden_states.dtype)
         core_attn_out = core_attn_out.reshape(z_shape_og)
-        core_attn_out = rearrange(core_attn_out, "... h d -> ... (h d)")
-        output[:num_tokens], _ = self.out_proj(core_attn_out)
+        core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
+                                              core_attn_out.shape[1], -1)
+
+        output, _ = self.out_proj(core_attn_out)
+        return output
 
 
 class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
@@ -361,6 +509,7 @@ class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
 
         if self.layer_type == "linear_attention":
             self.linear_attn = Qwen3_5GatedDeltaNet(
+                vllm_config,
                 config,
                 model_config=model_config,
                 cache_config=cache_config,
@@ -392,7 +541,7 @@ class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
                 intermediate_size=config.intermediate_size,
                 hidden_act=config.hidden_act,
                 quant_config=quant_config,
-                prefix=f"{prefix}.mlp",
+                # prefix=f"{prefix}.mlp",
             )
         else:
             raise ValueError(f"Invalid model_type {config.model_type}")
@@ -443,8 +592,8 @@ class Qwen3_5Model(Qwen3NextModel):
         )
         parallel_config = vllm_config.parallel_config
 
-        eplb_config = parallel_config.eplb_config
-        self.num_redundant_experts = eplb_config.num_redundant_experts
+        # eplb_config = parallel_config.eplb_config
+        # self.num_redundant_experts = eplb_config.num_redundant_experts
 
         self.config = config
 
@@ -663,11 +812,11 @@ class Qwen3_5ForCausalLMBase(
         cache_config = vllm_config.cache_config
 
         scheduler_config = vllm_config.scheduler_config
-        if cache_config.mamba_cache_mode == "all":
-            raise NotImplementedError(
-                "Qwen3.5 currently does not support 'all' prefix caching, "
-                "please use '--mamba-cache-mode=align' instead"
-            )
+        # if cache_config.mamba_cache_mode == "all":
+        #     raise NotImplementedError(
+        #         "Qwen3.5 currently does not support 'all' prefix caching, "
+        #         "please use '--mamba-cache-mode=align' instead"
+        #     )
         self.quant_config = vllm_config.quant_config
 
         super().__init__()
@@ -714,8 +863,10 @@ class Qwen3_5ForCausalLMBase(
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
     ) -> torch.Tensor | None:
-        return self.logits_processor(self.lm_head, hidden_states)
+        return self.logits_processor(self.lm_head, hidden_states,
+                                     sampling_metadata)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(
@@ -723,6 +874,9 @@ class Qwen3_5ForCausalLMBase(
             skip_prefixes=["mtp."],
         )
         return loader.load_weights(weights)
+
+    def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
+        return self.model.get_input_embeddings(input_ids)
 
 
 class Qwen3_5ForCausalLM(Qwen3_5ForCausalLMBase):
@@ -760,28 +914,35 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid)
 
         self.config = config
         self.multimodal_config = multimodal_config
-        self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
-        self.video_pruning_rate = multimodal_config.video_pruning_rate
-        self.is_multimodal_pruning_enabled = (
-            multimodal_config.is_multimodal_pruning_enabled()
+        # self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
+        # self.video_pruning_rate = multimodal_config.video_pruning_rate
+        # self.is_multimodal_pruning_enabled = (
+        #     multimodal_config.is_multimodal_pruning_enabled()
+        # )
+
+        # with self._mark_tower_model(vllm_config, {"image", "video"}):
+        if is_hpu:
+            qwen3_visionTransformer = Qwen3_VisionTransformerStaticShape
+        else:
+            qwen3_visionTransformer = Qwen3_VisionTransformer
+        self.visual = qwen3_visionTransformer(
+            config.vision_config,
+            norm_eps=getattr(config, "rms_norm_eps", 1e-6),
+            quant_config=quant_config,
+            prefix=maybe_prefix(prefix, "visual"),
         )
 
-        with self._mark_tower_model(vllm_config, {"image", "video"}):
-            self.visual = Qwen3_VisionTransformer(
-                config.vision_config,
-                norm_eps=getattr(config, "rms_norm_eps", 1e-6),
-                quant_config=quant_config,
-                prefix=maybe_prefix(prefix, "visual"),
-            )
-
-        with self._mark_language_model(vllm_config):
-            self.language_model = Qwen3_5ForCausalLM(
-                vllm_config=vllm_config, prefix=maybe_prefix(prefix, "language_model")
-            )
+        # with self._mark_language_model(vllm_config):
+        self.language_model = Qwen3_5ForCausalLM(
+            vllm_config=vllm_config, prefix=maybe_prefix(prefix, "language_model")
+        )
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors
         )
+
+        self.use_deepstack = False
+        self.text_dim = config.text_config.hidden_size
 
     def embed_input_ids(
         self,
@@ -966,24 +1127,28 @@ class Qwen3_5MoeForConditionalGeneration(
 
         self.config = config
         self.multimodal_config = multimodal_config
-        self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
-        self.video_pruning_rate = multimodal_config.video_pruning_rate
-        self.is_multimodal_pruning_enabled = (
-            multimodal_config.is_multimodal_pruning_enabled()
+        # self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
+        # self.video_pruning_rate = multimodal_config.video_pruning_rate
+        # self.is_multimodal_pruning_enabled = (
+        #     multimodal_config.is_multimodal_pruning_enabled()
+        # )
+
+        # with self._mark_tower_model(vllm_config, {"image", "video"}):
+        if is_hpu:
+            qwen3_visionTransformer = Qwen3_VisionTransformerStaticShape
+        else:
+            qwen3_visionTransformer = Qwen3_VisionTransformer
+        self.visual = qwen3_visionTransformer(
+            config.vision_config,
+            norm_eps=getattr(config, "rms_norm_eps", 1e-6),
+            quant_config=quant_config,
+            prefix=maybe_prefix(prefix, "visual"),
         )
 
-        with self._mark_tower_model(vllm_config, {"image", "video"}):
-            self.visual = Qwen3_VisionTransformer(
-                config.vision_config,
-                norm_eps=getattr(config, "rms_norm_eps", 1e-6),
-                quant_config=quant_config,
-                prefix=maybe_prefix(prefix, "visual"),
-            )
-
-        with self._mark_language_model(vllm_config):
-            self.language_model = Qwen3_5MoeForCausalLM(
-                vllm_config=vllm_config, prefix=maybe_prefix(prefix, "language_model")
-            )
+        # with self._mark_language_model(vllm_config):
+        self.language_model = Qwen3_5MoeForCausalLM(
+            vllm_config=vllm_config, prefix=maybe_prefix(prefix, "language_model")
+        )
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors
