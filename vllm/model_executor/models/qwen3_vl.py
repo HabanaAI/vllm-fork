@@ -1463,7 +1463,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                  self.text_dim,
                                                  device=inputs_embeds.device,
                                                  dtype=inputs_embeds.dtype)
-        if deepstack_input_embeds:
+        if deepstack_input_embeds is not None:
             inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
                                   dim=-1)
         return inputs_embeds
