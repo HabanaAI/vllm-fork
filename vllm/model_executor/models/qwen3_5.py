@@ -215,14 +215,14 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             input_size=self.hidden_size,
             output_size=self.num_v_heads,
             bias=False,
-            quant_config=quant_config,
+            quant_config=None,
             prefix=f"{prefix}.in_proj_ba",
         )
         self.in_proj_a = ColumnParallelLinear(
             input_size=self.hidden_size,
             output_size=self.num_v_heads,
             bias=False,
-            quant_config=quant_config,
+            quant_config=None,
             prefix=f"{prefix}.in_proj_a",
         )
 
@@ -929,7 +929,7 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid)
         self.visual = qwen3_visionTransformer(
             config.vision_config,
             norm_eps=getattr(config, "rms_norm_eps", 1e-6),
-            quant_config=quant_config,
+            quant_config=None,
             prefix=maybe_prefix(prefix, "visual"),
         )
 
@@ -1142,7 +1142,7 @@ class Qwen3_5MoeForConditionalGeneration(
         self.visual = qwen3_visionTransformer(
             config.vision_config,
             norm_eps=getattr(config, "rms_norm_eps", 1e-6),
-            quant_config=quant_config,
+            quant_config=None,
             prefix=maybe_prefix(prefix, "visual"),
         )
 
