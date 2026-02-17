@@ -1472,12 +1472,16 @@ def run_qwen3_5(questions: list[str], modality: str) -> ModelRequestData:
 
 # Qwen3.5 MoE
 def run_qwen3_5_moe(questions: list[str], modality: str) -> ModelRequestData:
-    model_name = "Qwen/Qwen3.5-35B-A3B-Base"
+    model_name = "/data/Qwen3.5-397B-A17B-FP8-G2"
 
     engine_args = EngineArgs(
         model=model_name,
-        max_model_len=4096,
+        max_model_len=16384,
         max_num_seqs=5,
+        enable_expert_parallel=True,
+        trust_remote_code=True,
+        tensor_parallel_size=8,
+        distributed_executor_backend="mp",
         mm_processor_kwargs={
             "min_pixels": 28 * 28,
             "max_pixels": 1280 * 28 * 28,
