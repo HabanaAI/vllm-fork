@@ -130,6 +130,7 @@ def torch_chunk_gated_delta_rule(
         arange = torch.arange(chunk_size, device=query.device)
         row_idx = arange.unsqueeze(1)
         col_idx = arange.unsqueeze(0)
+        attn = attn + eye_constant
         attn_inv = torch.zeros_like(attn) + eye_constant
 
         for k in range(1, chunk_size):
