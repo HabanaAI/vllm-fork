@@ -125,7 +125,7 @@ def torch_chunk_gated_delta_rule(
     attn = ((torch.matmul(k_beta.contiguous(),
                           key.transpose(-1, -2).contiguous())) *
             decay_mask).masked_fill(mask, 0)
-    
+
     if USE_GEMM_INV:
         arange = torch.arange(chunk_size, device=query.device)
         row_idx = arange.unsqueeze(1)
@@ -135,10 +135,8 @@ def torch_chunk_gated_delta_rule(
         for k in range(1, chunk_size):
             row_mask_k = row_idx >= k
             col_mask_k = col_idx < k
-            calc_mask_k = ~(row_mask_k &
-                            col_mask_k &
-                            (row_idx == k) &
-                            col_mask_k)
+            calc_mask_k = ~(row_mask_k & col_mask_k &
+                            (row_idx == k) & col_mask_k)
 
             prod = torch.matmul(attn, attn_inv)
             prod_k = prod.masked_fill(calc_mask_k, 0)
@@ -146,7 +144,7 @@ def torch_chunk_gated_delta_rule(
         attn = attn_inv
     else:
         attn = attn * -1.0
-        
+
         for i in range(1, chunk_size):
             row = attn[..., i, :i].contiguous()
             sub = attn[..., :i, :]
