@@ -358,7 +358,8 @@ class GemmaRMSNorm(CustomOp):
         return self.forward_native(x, residual)
 
 
-class RMSNormGated(nn.Module):
+@CustomOp.register("rms_norm_gated")
+class RMSNormGated(CustomOp):
 
     def __init__(
         self,
@@ -384,7 +385,7 @@ class RMSNormGated(nn.Module):
     def reset_parameters(self):
         torch.nn.init.ones_(self.weight)
 
-    def forward(self, hidden_states, gate=None):
+    def forward_native(self, hidden_states, gate=None):
         """
         If z is not None, we do norm(x) * silu(z)
         if norm_before_gate, else norm(x * silu(z))
@@ -395,7 +396,25 @@ class RMSNormGated(nn.Module):
         # Norm before gate
         hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
         hidden_states = self.weight * hidden_states.to(input_dtype)
-        hidden_states = hidden_states * F.silu(gate.to(torch.float32))
+        if gate is not None:
+            hidden_states = hidden_states * F.silu(gate.to(torch.float32))
+
+        return hidden_states.to(input_dtype)
+
+    def forward_hpu(self, hidden_states, gate=None):
+        """
+        If z is not None, we do norm(x) * silu(z)
+        if norm_before_gate, else norm(x * silu(z))
+        """
+        from vllm_hpu_extension.kernels import rms_norm
+        HPUFusedRMSNorm = rms_norm()
+
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        hidden_states = HPUFusedRMSNorm.apply(hidden_states, self.weight,
+                                              self.eps)
+        if gate is not None:
+            hidden_states = hidden_states * F.silu(gate.to(torch.float32))
 
         return hidden_states.to(input_dtype)
 

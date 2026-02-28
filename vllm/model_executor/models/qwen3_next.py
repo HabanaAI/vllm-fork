@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Inference-only Qwen3Next model."""
+import os
 from collections.abc import Iterable
 from typing import Optional
 
@@ -61,6 +62,9 @@ logger = init_logger(__name__)
 
 KVCache = tuple[torch.Tensor, torch.Tensor]
 
+USE_GEMM_INV = os.environ.get('VLLM_ENABLE_GEMM_INV',
+                              'false').lower() == 'true'
+
 
 def torch_chunk_gated_delta_rule(
     query,
@@ -117,14 +121,36 @@ def torch_chunk_gated_delta_rule(
     g_exp = g.exp()
     decay_mask = ((g.unsqueeze(-1) -
                    g.unsqueeze(-2)).tril().exp().float()).tril()
-    attn = -((torch.matmul(k_beta.contiguous(),
-                           key.transpose(-1, -2).contiguous())) *
-             decay_mask).masked_fill(mask, 0)
-    for i in range(1, chunk_size):
-        row = attn[..., i, :i].contiguous()
-        sub = attn[..., :i, :]
-        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)[..., :i]
-    attn = attn + eye_constant
+
+    attn = ((torch.matmul(k_beta.contiguous(),
+                          key.transpose(-1, -2).contiguous())) *
+            decay_mask).masked_fill(mask, 0)
+
+    if USE_GEMM_INV:
+        arange = torch.arange(chunk_size, device=query.device)
+        row_idx = arange.unsqueeze(1)
+        col_idx = arange.unsqueeze(0)
+        attn_inv = torch.zeros_like(attn) + eye_constant
+
+        for k in range(1, chunk_size):
+            row_mask_k = row_idx >= k
+            col_mask_k = col_idx < k
+            calc_mask_k = ~(row_mask_k & col_mask_k &
+                            (row_idx == k) & col_mask_k)
+
+            prod = torch.matmul(attn, attn_inv)
+            prod_k = prod.masked_fill(calc_mask_k, 0)
+            attn_inv.sub_(prod_k)
+        attn = attn_inv
+    else:
+        attn = attn * -1.0
+
+        for i in range(1, chunk_size):
+            row = attn[..., i, :i].contiguous()
+            sub = attn[..., :i, :]
+            attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)[..., :i]
+        attn = attn + eye_constant
+
     value = attn @ v_beta
     k_cumdecay = attn @ (k_beta * g_exp.unsqueeze(-1))
     last_recurrent_state = (torch.zeros(batch_size, num_heads, k_head_dim,
