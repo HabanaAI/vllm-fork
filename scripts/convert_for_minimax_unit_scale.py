@@ -48,6 +48,7 @@ def copy_other_files(input_path, output_path):
     for file in os.listdir(input_path):
         if file.endswith(".json") or \
             file.endswith(".txt") or \
+            file.endswith(".py") or \
             file.endswith("jinja"):
             print(f"copying {file} to {output_path}")
             shutil.copyfile(
