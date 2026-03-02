@@ -883,7 +883,9 @@ python3 convert_for_minimax_unit_scale.py -i /data/hf_models/MiniMax-M2.5 -o /da
 
 启动 vLLM，进入启动脚本目录，启动 vLLM。
 MiniMax-M2.5 模型4卡部署可使用如下命令启动。
-环境变量*VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
+- 以下命令启动默认上下文长度16384。
+- 请用按照3.4.3章节中转换出来的模型MiniMax-M2.5-G2来启动vLLM。
+- 环境变量*VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
 
 ```bash
 cd vllm-fork/scripts
@@ -898,6 +900,34 @@ bash start_gaudi_vllm_server.sh \
 -d bfloat16 \
 -a 127.0.0.1:30010 \
 -c /data/MiniMax-M2.5-G2_vllm_cache
+```
+部署上下文长度128k，同时启用chunked prefill，prefix caching，以及tool&reasoning parser可以用下面的命令。
+- 128k上下文长度，参数'-x 131072'
+- 启用chunked prefill，参数'-b 16 -n 16 -k 8192'
+- 启用prefix caching，参数'-e "--enable-prefix-caching"'
+- 启用tool& reasoning parser，参数'-e "--tool-call-parser minimax_m2 --reasoning-parser deepseek_r1 --enable-auto-tool-choice"'。MiniMax官方reasoning parser "minimax_m2_append_think" 有已知问题[https://huggingface.co/MiniMaxAI/MiniMax-M2.5/discussions/33](https://huggingface.co/MiniMaxAI/MiniMax-M2.5/discussions/33)，可用"deepseek_r1"替代。
+
+
+```bash
+VLLM_ENABLE_UNIT_MOE=true \
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_SUPPORT_MOE_CHUNK="true" \
+MOE_CHUNKS_SIZE_THRESHOLD_FOR_BUNDLE_EXPANSION=1024 \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=4096 \
+VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE=4096 \
+VLLM_HPU_FSDPA_SLICE_IMPL="slice_qkv" \
+VLLM_HPU_FSDPA_SLICE_CAUSAL="true" \
+VLLM_HPU_FSDPA_SLICE_WITH_MARK_STEP="true" \
+bash start_gaudi_vllm_server.sh \
+-w /data/hf_models/MiniMax-M2.5-G2 \
+-t 4 \
+-m 0,1,2,3 \
+-b 16 -n 16 -k 8192 \
+-x 131072 \
+-a 127.0.0.1:30010 \
+-d bfloat16 \
+-c /data/MiniMax-M2.5-G2_vllm_cache \
+-e "--enable-prefix-caching --tool-call-parser minimax_m2 --reasoning-parser deepseek_r1 --enable-auto-tool-choice"
 ```
 
 ### 3.5 多模态模型
