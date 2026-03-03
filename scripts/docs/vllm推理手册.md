@@ -901,12 +901,12 @@ bash start_gaudi_vllm_server.sh \
 -a 127.0.0.1:30010 \
 -c /data/MiniMax-M2.5-G2_vllm_cache
 ```
+
 部署上下文长度128k，同时启用chunked prefill，prefix caching，以及tool&reasoning parser可以用下面的命令。
 - 128k上下文长度，参数'-x 131072'
 - 启用chunked prefill，参数'-b 16 -n 16 -k 8192'
 - 启用prefix caching，参数'-e "--enable-prefix-caching"'
 - 启用tool& reasoning parser，参数'-e "--tool-call-parser minimax_m2 --reasoning-parser deepseek_r1 --enable-auto-tool-choice"'。MiniMax官方reasoning parser "minimax_m2_append_think" 有已知问题[https://huggingface.co/MiniMaxAI/MiniMax-M2.5/discussions/33](https://huggingface.co/MiniMaxAI/MiniMax-M2.5/discussions/33)，可用"deepseek_r1"替代。
-
 
 ```bash
 VLLM_ENABLE_UNIT_MOE=true \
