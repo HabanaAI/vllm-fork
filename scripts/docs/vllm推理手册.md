@@ -853,7 +853,7 @@ modelscope download --model MiniMaxAI/MiniMax-M2.5 --local_dir /data/hf_models/M
 # install vllm
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
 cd vllm-fork
-git checkout 2ed485a
+git checkout 903944f
 cd ..
 pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install -r vllm-fork/requirements-hpu.txt
