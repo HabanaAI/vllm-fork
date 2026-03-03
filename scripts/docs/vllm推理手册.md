@@ -34,13 +34,18 @@
     - [3.3.2 安装和启动 vLLM](#332-安装和启动-vllm)
     - [3.3.3 Qwen3-235B-A22B-Instruct-2507-FP8（4 卡部署）](#333-qwen3-235b-a22b-instruct-2507-fp8-4-卡部署)
     - [3.3.4 Qwen3-Coder-480B-A35B-Instruct-FP8（8 卡部署）](#334-qwen3-coder-480b-a35b-instruct-fp8-8-卡部署)
-  - [3.4 多模态模型](#34-多模态模型)
-    - [3.4.1 Qwen 系列多模态模型](#341-qwen-系列多模态模型)
-    - [3.4.2 client 端请求格式样例](#342-client-端请求格式样例)
-    - [3.4.3 FP8 static quant](#343-fp8-static-quant)
-    - [3.4.4 FP8 dynamic quant](#344-fp8-dynamic-quant)
-    - [3.4.5 PaddleOCR-VL 模型](#345-paddleocr-vl-模型)
-    - [3.4.6 问题解答](#346-问题解答)
+  - [3.4 MiniMax-M2.5](#34-minimax-m25)
+    - [3.4.1 启动容器和下载模型权重](#341-启动容器和下载模型权重)
+    - [3.4.2 安装 vLLM](#342-安装-vllm)
+    - [3.4.3 模型权重转换](#343-模型权重转换)
+    - [3.4.4 启动 vLLM](#344-启动-vllm)
+  - [3.5 多模态模型](#35-多模态模型)
+    - [3.5.1 Qwen 系列多模态模型](#351-qwen-系列多模态模型)
+    - [3.5.2 client 端请求格式样例](#352-client-端请求格式样例)
+    - [3.5.3 FP8 static quant](#353-fp8-static-quant)
+    - [3.5.4 FP8 dynamic quant](#354-fp8-dynamic-quant)
+    - [3.5.5 PaddleOCR-VL 模型](#355-paddleocr-vl-模型)
+    - [3.5.6 问题解答](#356-问题解答)
 
 ## 1.0 环境部署
 
@@ -817,7 +822,115 @@ bash start_gaudi_vllm_server.sh \
     -c /vllm_cache/Qwen3-Coder-480B-A35B-Instruct-FP8
 ```
 
-### 3.4 多模态模型
+### 3.4 MiniMax-M2.5
+
+#### 3.4.1 启动容器和下载模型权重
+
+请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。
+
+```bash
+docker run -it --name minimax_server --runtime=habana \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+    -v /mnt/disk4:/data \
+    --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+```
+
+下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
+
+```bash
+pip install modelscope
+modelscope download --model MiniMaxAI/MiniMax-M2.5 --local_dir /data/hf_models/MiniMax-M2.5
+```
+
+#### 3.4.2 安装 vLLM
+
+为容器设置正确的网络设置，确保容器可以正常访问 github。
+使用如下命令在镜像环境安装 vLLM v1.22.0：
+
+```bash
+# install vllm
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+cd vllm-fork
+git checkout 2ed485a
+cd ..
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install -r vllm-fork/requirements-hpu.txt
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# [optional] install vllm-hpu-extension to do calibration
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+cd vllm-hpu-extension
+git checkout 5f8e0fc
+cd ..
+pip install -e vllm-hpu-extension --no-build-isolation
+```
+
+#### 3.4.3 模型权重转换
+
+解压复制文件并转换权重
+
+```bash
+cd vllm-fork/script/data
+tar -xvzf minimax-m2.5-input-scale.tar.gz
+cd ../
+cp data/minimax_m2.5_input_scale/minimax-m2.5-input-scale.safetensors ./
+python3 convert_for_minimax_unit_scale.py -i /data/hf_models/MiniMax-M2.5 -o /data/hf_models/MiniMax-M2.5-G2 -s minimax-m2.5-input-scale.safetensors -u
+```
+
+#### 3.4.4 启动 vLLM
+
+启动 vLLM，进入启动脚本目录，启动 vLLM。
+MiniMax-M2.5 模型4卡部署可使用如下命令启动。
+- 以下命令启动默认上下文长度16384。
+- 请用按照3.4.3章节中转换出来的模型MiniMax-M2.5-G2来启动vLLM。
+- 环境变量*VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
+
+```bash
+cd vllm-fork/scripts
+VLLM_ENABLE_UNIT_MOE=true \
+VLLM_SUPPORT_MOE_CHUNK=true \
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+bash start_gaudi_vllm_server.sh \
+-w /data/hf_models/MiniMax-M2.5-G2 \
+-t 4 \
+-m 0,1,2,3 \
+-b 128 \
+-d bfloat16 \
+-a 127.0.0.1:30010 \
+-c /data/MiniMax-M2.5-G2_vllm_cache
+```
+
+部署上下文长度128k，同时启用chunked prefill，prefix caching，以及tool&reasoning parser可以用下面的命令。
+- 128k上下文长度，参数'-x 131072'
+- 启用chunked prefill，参数'-b 16 -n 16 -k 8192'
+- 启用prefix caching，参数'-e "--enable-prefix-caching"'
+- 启用tool& reasoning parser，参数'-e "--tool-call-parser minimax_m2 --reasoning-parser deepseek_r1 --enable-auto-tool-choice"'。MiniMax官方reasoning parser "minimax_m2_append_think" 有已知问题[https://huggingface.co/MiniMaxAI/MiniMax-M2.5/discussions/33](https://huggingface.co/MiniMaxAI/MiniMax-M2.5/discussions/33)，可用"deepseek_r1"替代。
+
+```bash
+VLLM_ENABLE_UNIT_MOE=true \
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_SUPPORT_MOE_CHUNK="true" \
+MOE_CHUNKS_SIZE_THRESHOLD_FOR_BUNDLE_EXPANSION=1024 \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=4096 \
+VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE=4096 \
+VLLM_HPU_FSDPA_SLICE_IMPL="slice_qkv" \
+VLLM_HPU_FSDPA_SLICE_CAUSAL="true" \
+VLLM_HPU_FSDPA_SLICE_WITH_MARK_STEP="true" \
+bash start_gaudi_vllm_server.sh \
+-w /data/hf_models/MiniMax-M2.5-G2 \
+-t 4 \
+-m 0,1,2,3 \
+-b 16 -n 16 -k 8192 \
+-x 131072 \
+-a 127.0.0.1:30010 \
+-d bfloat16 \
+-c /data/MiniMax-M2.5-G2_vllm_cache \
+-e "--enable-prefix-caching --tool-call-parser minimax_m2 --reasoning-parser deepseek_r1 --enable-auto-tool-choice"
+```
+
+### 3.5 多模态模型
 
 如果要做音频处理，需要安装音频相关的库。
 
@@ -825,7 +938,7 @@ bash start_gaudi_vllm_server.sh \
 pip install vllm[audio]
 ```
 
-#### 3.4.1 Qwen 系列多模态模型
+#### 3.5.1 Qwen 系列多模态模型
 
 **启动服务**\
 **Qwen2-VL**: Support Image and Video inputs
@@ -891,7 +1004,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
 - `--limit-mm-per-prompt` 设置每个 prompt 中每种多模态数据的最大个数
 - `--mm_processor_kwargs max_pixels=1003520` 限制输入图片最大尺寸。超过的图片会被保持宽高比例缩小。
 
-#### 3.4.2 client 端请求格式样例
+#### 3.5.2 client 端请求格式样例
 
 多模态 client 端请求格式可以参考脚本 [openai_chat_completion_client_for_multimodal.py](../examples/online_serving/openai_chat_completion_client_for_multimodal.py)
 
@@ -906,7 +1019,7 @@ python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
     -c audio
 ```
 
-#### 3.4.3 FP8 static quant
+#### 3.5.3 FP8 static quant
 
 *static quant*有更好的性能。 **推荐使用**。
 
@@ -951,7 +1064,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     --max-model-len 131072
 ```
 
-#### 3.4.4 FP8 dynamic quant
+#### 3.5.4 FP8 dynamic quant
 
 *dynamic quant*流程更简单不需要校准，而且精度更高。
 
@@ -977,7 +1090,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
 ```
 
-#### 3.4.5 PaddleOCR-VL 模型
+#### 3.5.5 PaddleOCR-VL 模型
 **启动服务**
 
 ```bash
@@ -1011,7 +1124,7 @@ paddleocr doc_parser \
     --save_path ./output
 ```
 
-#### 3.4.6 问题解答
+#### 3.5.6 问题解答
 
 - 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
 - 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。
