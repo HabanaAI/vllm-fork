@@ -28,6 +28,8 @@ from vllm.transformers_utils.configs.nemotron_h import NemotronHConfig
 from vllm.transformers_utils.configs.nvlm_d import NVLM_D_Config
 from vllm.transformers_utils.configs.ovis import OvisConfig
 from vllm.transformers_utils.configs.qwen3_next import Qwen3NextConfig
+from vllm.transformers_utils.configs.qwen3_5 import Qwen3_5Config, Qwen3_5TextConfig
+from vllm.transformers_utils.configs.qwen3_5_moe import Qwen3_5MoeConfig, Qwen3_5MoeTextConfig
 from vllm.transformers_utils.configs.skyworkr1v import SkyworkR1VChatConfig
 from vllm.transformers_utils.configs.solar import SolarConfig
 from vllm.transformers_utils.configs.telechat2 import Telechat2Config
@@ -62,4 +64,8 @@ __all__ = [
     "Telechat2Config",
     "UltravoxConfig",
     "Qwen3NextConfig",
+    "Qwen3_5Config",
+    "Qwen3_5TextConfig",
+    "Qwen3_5MoeConfig",
+    "Qwen3_5MoeTextConfig"
 ]

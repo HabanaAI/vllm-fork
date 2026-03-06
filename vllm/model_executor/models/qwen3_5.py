@@ -32,11 +32,11 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 from transformers.activations import ACT2FN
-from transformers.models.qwen3_5.configuration_qwen3_5 import (
+from vllm.transformers_utils.configs.qwen3_5 import (
     Qwen3_5Config,
     Qwen3_5TextConfig,
 )
-from transformers.models.qwen3_5_moe.configuration_qwen3_5_moe import (
+from vllm.transformers_utils.configs.qwen3_5_moe import (
     Qwen3_5MoeConfig,
     Qwen3_5MoeTextConfig,
 )
@@ -339,8 +339,9 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         attn_metadata: AttentionMetadata = forward_context.attn_metadata
         conv_state = self.conv_state
         ssm_state = self.ssm_state
-
-
+        # print(f"[in gdn forward] hidden_state.shape:{hidden_states.shape}")
+        if attn_metadata.is_prompt:
+            hidden_states = hidden_states.reshape((len(attn_metadata.context_lens_tensor)),-1,hidden_states.shape[-1])
         num_tokens = hidden_states.size(0)
 
         # ============================================================
@@ -373,15 +374,18 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
 
         if attn_metadata.is_prompt:
             bs, seq_len, qkv_dim = mixed_qkv.shape
+            # bs = len(attn_metadata.context_lens_tensor)
+            # seq_len = mixed_qkv.shape[1]//bs
+            # qkv_dim = mixed_qkv.shape[2]
             conv_state_indices = attn_metadata.conv_state_indices
             prefill_conv_state = torch.index_select(
                 mixed_qkv.reshape(-1, qkv_dim),
                 dim=0,
-                index=conv_state_indices).reshape(bs, -1, qkv_dim)
+                index=conv_state_indices).reshape(-1, self.conv_kernel_size - 1, qkv_dim)
             conv_state.index_copy_(dim=0,
                                    index=mamba_cache_prefill_indices,
                                    source=prefill_conv_state)
-
+            # mixed_qkv = mixed_qkv.reshape(bs, seq_len, qkv_dim)
             mixed_qkv_with_pad = F.pad(mixed_qkv,
                                        (0, 0, self.conv_kernel_size - 1, 0))
             for idx in range(self.conv_kernel_size):
@@ -393,9 +397,13 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                 else:
                     mixed_qkv_non_spec.add_(qkv_conv)
 
-            mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
+            mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)#.reshape(1, -1, qkv_dim)
+            # if attn_metadata.num_decode_tokens != 0:
+            #     import pdb;pdb.set_trace()
+            #     print("pdb here")
 
         else:
+            # print(f"[decoding]mixed_qkv.shape={mixed_qkv.shape}")
             mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
                 mixed_qkv,
                 conv_state,
@@ -486,7 +494,10 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                                               core_attn_out.shape[1], -1)
 
         output, _ = self.out_proj(core_attn_out)
-        return output
+        if attn_metadata.is_prompt:
+            return output.reshape((1,output.shape[0]*output.shape[1],output.shape[2]))
+        else:
+            return output
 
 
 class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
@@ -944,6 +955,10 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid)
 
         self.use_deepstack = False
         self.text_dim = config.text_config.hidden_size
+        self.mm_offset_image = 0
+        self.mm_offset_image_multiscale = 0
+        self.mm_offset_video = 0
+        self.mm_offset_video_multiscale = 0
 
     def embed_input_ids(
         self,
@@ -1007,7 +1022,10 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid)
 
         if intermediate_tensors is not None:
             inputs_embeds = None
-
+        input = input_ids if input_ids is not None else inputs_embeds
+        if input.shape[0]*input.shape[1] < positions.shape[-1]:
+            print(input.shape,positions.shape)
+            positions = positions.reshape(3,-1)
         hidden_states = self.language_model.model(
             input_ids=input_ids,
             positions=positions,
