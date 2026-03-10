@@ -21,10 +21,19 @@ from vllm.distributed import (
     get_tp_group,
 )
 from vllm.logger import init_logger
-from vllm.model_executor.layers.activation import SiluAndMul, SwigluStepAndMul
-from vllm.model_executor.layers.attention import Attention
+# from vllm.model_executor.layers.activation import SiluAndMul, SwigluStepAndMul
+
+from vllm.model_executor.layers.activation import SiluAndMul
+
+# from vllm.model_executor.layers.attention import Attention
+from vllm.attention import Attention
+
 from vllm.model_executor.layers.fused_moe import FusedMoE
+
 from vllm.model_executor.layers.fused_moe.shared_fused_moe import SharedFusedMoE
+
+from vllm.model_executor.sampling_metadata import SamplingMetadata
+
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm
 from vllm.model_executor.layers.linear import (
     ColumnParallelLinear,
@@ -42,7 +51,9 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 )
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.sequence import IntermediateTensors
-from vllm.v1.attention.backend import AttentionType
+
+# from vllm.v1.attention.backend import AttentionType
+from vllm.attention import AttentionType
 
 from .interfaces import MixtureOfExperts, SupportsPP
 from .utils import (
@@ -115,7 +126,8 @@ class Step3p5MLP(nn.Module):
             and config.swiglu_limits_shared[layer_idx] != 0
         ):
             self.limit = config.swiglu_limits_shared[layer_idx]
-            self.act_fn = SwigluStepAndMul(limit=self.limit)
+            # self.act_fn = SwigluStepAndMul(limit=self.limit)
+            self.act_fn = SiluAndMul()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         gate_up, _ = self.gate_up_proj(hidden_states)
@@ -221,7 +233,11 @@ class Step3p5Attention(nn.Module):
         self.rotary_emb = get_rope(
             head_size=self.head_dim,
             max_position=max_position,
-            rope_parameters=rope_parameters,
+            rotary_dim=self.head_dim,
+            # rope_parameters=rope_parameters,
+            base=self.rope_theta,
+            rope_scaling=rope_scaling,
+            partial_rotary_factor=partial_rotary_factor,
         )
 
         self.q_norm = GemmaRMSNorm(self.head_dim, rms_norm_eps)
@@ -305,10 +321,11 @@ class FusedMoEBlock(nn.Module):
         parallel_config = vllm_config.parallel_config
 
         self.hidden_size = config.hidden_size
-        self.enable_eplb = parallel_config.enable_eplb
+        # self.enable_eplb = parallel_config.enable_eplb
         self.n_routed_experts = config.moe_num_experts
         self.n_logical_experts = self.n_routed_experts
-        self.n_redundant_experts = parallel_config.eplb_config.num_redundant_experts
+        self.n_redundant_experts = 0
+        # self.n_redundant_experts = parallel_config.eplb_config.num_redundant_experts
         self.n_physical_experts = self.n_logical_experts + self.n_redundant_experts
         self.n_local_physical_experts = self.n_physical_experts // self.ep_size
 
@@ -387,13 +404,16 @@ class FusedMoEBlock(nn.Module):
             scoring_func=getattr(config, "moe_router_activation", "sigmoid"),
             e_score_correction_bias=self.router_bias,
             routed_scaling_factor=config.moe_router_scaling_factor,
-            enable_eplb=self.enable_eplb,
+            # enable_eplb=self.enable_eplb,
             num_redundant_experts=self.n_redundant_experts,
             router_logits_dtype=torch.float32,
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        num_tokens, hidden_dim = hidden_states.shape
+        # num_tokens, hidden_dim = hidden_states.shape
+        # hidden_states = hidden_states.view(-1, hidden_dim)
+        orig_shape = hidden_states.shape
+        hidden_dim = hidden_states.shape[-1]
         hidden_states = hidden_states.view(-1, hidden_dim)
 
         if self.experts.is_internal_router:
@@ -421,7 +441,8 @@ class FusedMoEBlock(nn.Module):
                 final_hidden_states
             )
 
-        return final_hidden_states.view(num_tokens, hidden_dim)
+        # return final_hidden_states.view(num_tokens, hidden_dim)
+        return final_hidden_states.view(orig_shape)
 
 
 class Step3p5DecoderLayer(nn.Module):
@@ -839,6 +860,7 @@ class Step3p5ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts):
     ):
         super().__init__()
         config = vllm_config.model_config.hf_config
+        self.config = config
         self.model = Step3p5Model(
             vllm_config=vllm_config, prefix=maybe_prefix(prefix, "model")
         )
@@ -890,9 +912,9 @@ class Step3p5ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts):
         )
         return hidden_states
 
-    def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def compute_logits(self, hidden_states: torch.Tensor, sampling_metadata: SamplingMetadata,) -> torch.Tensor:
         hidden_states = self.model.norm(hidden_states)
-        logits = self.logits_processor(self.lm_head, hidden_states)
+        logits = self.logits_processor(self.lm_head, hidden_states,sampling_metadata)
         return logits
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:

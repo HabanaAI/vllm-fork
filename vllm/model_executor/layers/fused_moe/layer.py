@@ -843,12 +843,19 @@ class FusedMoE(torch.nn.Module):
         prefix: str = "",
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
+        routed_scaling_factor: float = 1.0,
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        gate: torch.nn.Module | None = None,
+        num_redundant_experts: int = 0,
+        shared_experts: torch.nn.Module | None = None,
+        router_logits_dtype: torch.dtype | None = None,
     ):
         super().__init__()
 
+        self._gate = gate
+        self._shared_experts = shared_experts
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
         self.params_dtype = params_dtype
@@ -898,15 +905,16 @@ class FusedMoE(torch.nn.Module):
         self.custom_routing_function = custom_routing_function
 
         self.scoring_func = scoring_func
+        self.routed_scaling_factor = routed_scaling_factor
         self.e_score_correction_bias = e_score_correction_bias
         self.apply_router_weight_on_input = apply_router_weight_on_input
         self.activation = activation
         self.multicast_fn = self.hpu_multicast if is_hpu\
             else self.naive_multicast
 
-        if self.scoring_func != "softmax" and not self.use_grouped_topk:
-            raise ValueError("Only softmax scoring function is supported for "
-                             "non-grouped topk.")
+        # if self.scoring_func != "softmax" and not self.use_grouped_topk:
+        #     raise ValueError("Only softmax scoring function is supported for "
+        #                      "non-grouped topk.")
 
         moe = MoEConfig(
             num_experts=self.global_num_experts,
@@ -979,6 +987,15 @@ class FusedMoE(torch.nn.Module):
                     )
             self.moe_op = moe_op
         self.quant_method.create_weights(layer=self, **moe_quant_params)
+        # backend = self.moe_parallel_config.all2all_backend
+        # self.use_overlapped = (
+        #     not (
+        #         (self.enable_eplb and backend != "allgather_reducescatter")
+        #         or self.moe_parallel_config.use_fi_all2allv_kernels
+        #     )
+        #     and self._shared_experts is not None
+        # )
+        self.use_overlapped = False
 
         # Chunked all2all staging tensor
         self.batched_hidden_states: Optional[torch.Tensor] = None
@@ -995,6 +1012,10 @@ class FusedMoE(torch.nn.Module):
                 (MOE_DP_CHUNK_SIZE, self.global_num_experts),
                 dtype=act_dtype,
                 device=torch.cuda.current_device())
+
+    @property
+    def gate(self) -> torch.nn.Module | None:
+        return self._gate if self.use_overlapped else None
 
     @property
     def tp_size(self):
@@ -1023,6 +1044,11 @@ class FusedMoE(torch.nn.Module):
     @property
     def use_ep(self):
         return self.moe_parallel_config.use_ep
+
+    @property
+    def is_internal_router(self) -> bool:
+        # By default, router/gate is called before FusedMoE forward pass
+        return self.gate is not None
 
     @property
     def use_pplx_kernels(self):
@@ -1581,7 +1607,7 @@ class FusedMoE(torch.nn.Module):
 
     @classmethod
     def make_expert_params_mapping(
-            cls, ckpt_gate_proj_name: str, ckpt_down_proj_name: str,
+            cls, model: torch.nn.Module, ckpt_gate_proj_name: str, ckpt_down_proj_name: str,
             ckpt_up_proj_name: str,
             num_experts: int) -> list[tuple[str, str, int, str]]:
 
