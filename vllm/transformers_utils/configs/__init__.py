@@ -32,6 +32,7 @@ from vllm.transformers_utils.configs.skyworkr1v import SkyworkR1VChatConfig
 from vllm.transformers_utils.configs.solar import SolarConfig
 from vllm.transformers_utils.configs.telechat2 import Telechat2Config
 from vllm.transformers_utils.configs.ultravox import UltravoxConfig
+from vllm.transformers_utils.configs.step3p5 import Step3p5Config
 
 __all__ = [
     "ChatGLMConfig",
@@ -62,4 +63,5 @@ __all__ = [
     "Telechat2Config",
     "UltravoxConfig",
     "Qwen3NextConfig",
+    "Step3p5Config",
 ]
