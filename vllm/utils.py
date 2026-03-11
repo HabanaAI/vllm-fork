@@ -1030,10 +1030,13 @@ def make_mrope_positions_tensor_with_pad( \
                 positions = input_mrope_position[idx]
             else:
                 positions = input_positions[b_idx]
-            padding_size = max_prompt_len - len(positions)
-            assert padding_size >= 0
-            padded_positions = positions \
-                + (max_prompt_len - len(positions)) * [pad]
+
+            # robust for chunked prefill
+            if len(positions) >= max_prompt_len:
+                padded_positions = positions[:max_prompt_len]
+            else:
+                padding_size = max_prompt_len - len(positions)
+                padded_positions = positions + padding_size * [pad]
             mrope_input_positions[idx].extend(padded_positions)
     return torch.tensor(mrope_input_positions, dtype=torch.long, device='cpu')
 

@@ -436,7 +436,9 @@ def _merge_multimodal_embeddings(
     inputs_embeds: torch.Tensor,
     is_multimodal: torch.Tensor,
     multimodal_embeddings: NestedTensors,
-) -> torch.Tensor:
+    mm_offset: int = 0,
+    return_offset: bool = False,
+) -> Union[torch.Tensor, tuple[torch.Tensor, int]]:
     """
     Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
     positions in ``inputs_embeds`` corresponding to placeholder tokens in
@@ -453,13 +455,22 @@ def _merge_multimodal_embeddings(
         inputs_embeds = inputs_embeds.reshape(-1, hidden_size)
         if isinstance(multimodal_embeddings, torch.Tensor):
             flattened = multimodal_embeddings.reshape(-1, hidden_size)
-            inputs_embeds[is_multimodal] = flattened
+            num_mm = is_multimodal.sum()
+            start = mm_offset
+            end = start + num_mm
+            inputs_embeds[is_multimodal] = flattened[start:end]
+            mm_offset = end
+            if mm_offset >= flattened.shape[0]:
+                mm_offset = 0
         else:
             flattened = _flatten_embeddings(multimodal_embeddings)
             inputs_embeds[is_multimodal] = flattened
+
         inputs_embeds = inputs_embeds.reshape(batch_size, seq_length,
                                               hidden_size)
 
+        if return_offset:
+            return inputs_embeds, mm_offset
         return inputs_embeds
     num_expected_tokens = is_multimodal.sum().item()
     assert isinstance(num_expected_tokens, int)
@@ -516,7 +527,9 @@ def merge_multimodal_embeddings(
     inputs_embeds: torch.Tensor,
     multimodal_embeddings: NestedTensors,
     placeholder_token_id: Union[int, list[int]],
-) -> torch.Tensor:
+    mm_offset: int = 0,
+    return_offset: bool = False,
+) -> Union[torch.Tensor, tuple[torch.Tensor, int]]:
     """
     Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
     positions in ``inputs_embeds`` corresponding to placeholder tokens in
@@ -549,12 +562,16 @@ def merge_multimodal_embeddings(
             inputs_embeds,
             torch.isin(input_ids, placeholder_token_id),
             multimodal_embeddings,
+            mm_offset,
+            return_offset,
         )
 
     return _merge_multimodal_embeddings(
         inputs_embeds,
         (input_ids == placeholder_token_id),
         multimodal_embeddings,
+        mm_offset,
+        return_offset,
     )
 
 
