@@ -11,6 +11,7 @@ from .identity_reasoning_parser import IdentityReasoningParser
 from .minimax_m2_reasoning_parser import (MiniMaxM2AppendThinkReasoningParser,
                                           MiniMaxM2ReasoningParser)
 from .qwen3_reasoning_parser import Qwen3ReasoningParser
+from .step3p5_reasoning_parser import Step3p5ReasoningParser
 
 __all__ = [
     "ReasoningParser",
@@ -24,4 +25,5 @@ __all__ = [
     "IdentityReasoningParser",
     "MiniMaxM2ReasoningParser",
     "MiniMaxM2AppendThinkReasoningParser",
+    "Step3p5ReasoningParser",
 ]

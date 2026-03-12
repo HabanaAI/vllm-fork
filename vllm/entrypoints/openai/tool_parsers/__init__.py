@@ -19,6 +19,7 @@ from .phi4mini_tool_parser import Phi4MiniJsonToolParser
 from .pythonic_tool_parser import PythonicToolParser
 from .qwen3xml_tool_parser import Qwen3XMLToolParser
 from .seed_oss_tool_parser import SeedOssToolParser
+from .step3p5_tool_parser import Step3p5ToolParser
 
 __all__ = [
     "ToolParser",
@@ -40,4 +41,5 @@ __all__ = [
     "SeedOssToolParser",
     "Qwen3XMLToolParser",
     "MinimaxM2ToolParser",
+    "Step3p5ToolParser",
 ]
