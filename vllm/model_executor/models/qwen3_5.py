@@ -272,7 +272,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
 
         self.chunk_size = 64
         self.eye_constant = torch.eye(self.chunk_size,
-                                      dtype=torch.float32,
+                                      dtype=torch.bfloat16,
                                       device=self.conv1d.weight.device)
 
         # selective projection used to make dt, B and C input dependant

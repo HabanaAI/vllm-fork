@@ -117,19 +117,23 @@ def torch_chunk_gated_delta_rule(
     g_exp = g.exp()
     decay_mask = ((g.unsqueeze(-1) -
                    g.unsqueeze(-2)).tril().exp().float()).tril()
-    attn = -((torch.matmul(k_beta.contiguous(),
-                           key.transpose(-1, -2).contiguous())) *
-             decay_mask).masked_fill(mask, 0)
-    for i in range(1, chunk_size):
-        row = attn[..., i, :i].contiguous()
-        sub = attn[..., :i, :]
-        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)[..., :i]
-    attn = attn + eye_constant
+
+    attn = ((torch.matmul(k_beta,
+                          key.transpose(-1, -2).contiguous())) *
+            decay_mask).tril(-1).bfloat16() + eye_constant
+    inv_attn = torch.zeros_like(attn) + eye_constant
+    for k in range(1, chunk_size):
+        prod = torch.matmul(attn, inv_attn)
+        prod_k = prod.tril(-1)
+        inv_attn.sub_(prod_k)
+    attn = inv_attn.float()
+
     value = attn @ v_beta
     k_cumdecay = attn @ (k_beta * g_exp.unsqueeze(-1))
     last_recurrent_state = (torch.zeros(batch_size, num_heads, k_head_dim,
                                         v_head_dim).to(value) if initial_state
                             is None else initial_state.to(value))
+    last_recurrent_state = last_recurrent_state.bfloat16()
     core_attn_out = torch.zeros_like(value)
     mask = torch.tril(torch.ones(chunk_size,
                                  chunk_size,
@@ -137,20 +141,32 @@ def torch_chunk_gated_delta_rule(
                                  device=query.device),
                       diagonal=0)
     mask = mask.view(1, 1, 1, chunk_size, chunk_size)
-    attn = (query @ key.transpose(-1, -2)) * decay_mask * mask
+    attn = torch.matmul(query, key.transpose(-1, -2).contiguous()) * decay_mask * mask
     qg = query * g_exp[..., None]
     delta_g_exp = (g[:, :, :, -1, None] - g).exp()[..., None]
     k_term = (key * delta_g_exp)
 
+    num_chunks = tot_len // chunk_size
+    k_eye = torch.eye(k_head_dim, dtype=value.dtype, device=value.device)
+    k_eye = k_eye.view(1, 1, 1, k_head_dim, k_head_dim).bfloat16()
+
+    alpha = g_exp[:, :, :, -1, None, None].bfloat16()                     # [B,H,Nc,1,1]
+    B = k_term.transpose(-1, -2).contiguous().bfloat16()                 # [B,H,Nc,K,C]
+    K = k_cumdecay.bfloat16()                                             # [B,H,Nc,C,K]
+    V = value.bfloat16()                                                  # [B,H,Nc,C,V]
+    Q = qg.bfloat16()                                                     # [B,H,Nc,C,K]
+    A = attn.bfloat16()                                                   # [B,H,Nc,C,C]
+
+    # 预计算 chunk 级参数
+    M = alpha * k_eye - torch.matmul(B, K)                    # [B,H,Nc,K,K]
+    N = torch.matmul(B, V)                                    # [B,H,Nc,K,V]
+    C = Q - torch.matmul(A, K)                                # [B,H,Nc,C,K]
+    D = torch.matmul(A, V)                                    # [B,H,Nc,C,V]
+
     # for each chunk
-    for i in range(0, tot_len // chunk_size):
-        v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
-        v_new = value[:, :, i] - v_prime
-        attn_inter = qg[:, :, i] @ last_recurrent_state
-        core_attn_out[:, :, i] = attn_inter + attn[:, :, i] @ v_new
-        last_recurrent_state = (
-            last_recurrent_state * g_exp[:, :, i, -1, None, None] +
-            k_term[:, :, i].transpose(-1, -2) @ v_new)
+    for i in range(num_chunks):
+        core_attn_out[:, :, i] = torch.matmul(C[:, :, i], last_recurrent_state) + D[:, :, i]
+        last_recurrent_state = torch.matmul(M[:, :, i], last_recurrent_state) + N[:, :, i]
 
     if not output_final_state:
         last_recurrent_state = None
@@ -460,7 +476,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         self.chunk_size = 64
         self.eye_constant = torch.eye(self.chunk_size,
-                                      dtype=torch.float32,
+                                      dtype=torch.bloat16,
                                       device=self.conv1d.weight.device)
 
         # time step projection (discretization)
