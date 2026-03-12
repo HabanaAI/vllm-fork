@@ -106,11 +106,10 @@ def torch_chunk_gated_delta_rule(
         for x in (query, key, value, k_beta, v_beta)
     ]
     g = g.reshape(g.shape[0], g.shape[1], -1, chunk_size)
-    mask = torch.triu(torch.ones(chunk_size,
-                                 chunk_size,
-                                 dtype=torch.bool,
-                                 device=query.device),
-                      diagonal=0)
+    mask = torch.ones(chunk_size,
+                      chunk_size,
+                      dtype=torch.bfloat16,
+                      device=query.device).tril(-1)
 
     # chunk decay
     g = g.cumsum(dim=-1)
@@ -120,12 +119,11 @@ def torch_chunk_gated_delta_rule(
 
     attn = ((torch.matmul(k_beta,
                           key.transpose(-1, -2).contiguous())) *
-            decay_mask).tril(-1).bfloat16() + eye_constant
+            decay_mask).bfloat16() * mask + eye_constant
     inv_attn = torch.zeros_like(attn) + eye_constant
     for k in range(1, chunk_size):
         prod = torch.matmul(attn, inv_attn)
-        prod_k = prod.tril(-1)
-        inv_attn.sub_(prod_k)
+        inv_attn.sub_(prod * mask)
     attn = inv_attn.float()
 
     value = attn @ v_beta
