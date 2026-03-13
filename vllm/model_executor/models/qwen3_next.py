@@ -132,7 +132,6 @@ def torch_chunk_gated_delta_rule(
                                         v_head_dim).to(value) if initial_state
                             is None else initial_state.to(value))
     last_recurrent_state = last_recurrent_state.bfloat16()
-    core_attn_out = torch.zeros_like(value)
     mask = torch.tril(torch.ones(chunk_size,
                                  chunk_size,
                                  dtype=torch.bool,
@@ -149,7 +148,7 @@ def torch_chunk_gated_delta_rule(
     k_eye = k_eye.view(1, 1, 1, k_head_dim, k_head_dim).bfloat16()
 
     alpha = g_exp[:, :, :, -1, None, None].bfloat16()                     # [B,H,Nc,1,1]
-    B = k_term.transpose(-1, -2).contiguous().bfloat16()                 # [B,H,Nc,K,C]
+    B = k_term.transpose(-1, -2).contiguous().bfloat16()                  # [B,H,Nc,K,C]
     K = k_cumdecay.bfloat16()                                             # [B,H,Nc,C,K]
     V = value.bfloat16()                                                  # [B,H,Nc,C,V]
     Q = qg.bfloat16()                                                     # [B,H,Nc,C,K]
@@ -159,11 +158,11 @@ def torch_chunk_gated_delta_rule(
     M = alpha * k_eye - torch.matmul(B, K)                    # [B,H,Nc,K,K]
     N = torch.matmul(B, V)                                    # [B,H,Nc,K,V]
     C = Q - torch.matmul(A, K)                                # [B,H,Nc,C,K]
-    D = torch.matmul(A, V)                                    # [B,H,Nc,C,V]
+    core_attn_out = torch.matmul(A, V)                        # [B,H,Nc,C,V]
 
     # for each chunk
     for i in range(num_chunks):
-        core_attn_out[:, :, i] = torch.matmul(C[:, :, i], last_recurrent_state) + D[:, :, i]
+        core_attn_out[:, :, i].add_(torch.matmul(C[:, :, i], last_recurrent_state))
         last_recurrent_state = torch.matmul(M[:, :, i], last_recurrent_state) + N[:, :, i]
 
     if not output_final_state:
