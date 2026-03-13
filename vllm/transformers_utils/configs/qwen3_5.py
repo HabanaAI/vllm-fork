@@ -115,6 +115,14 @@ class Qwen3_5TextConfig(PretrainedConfig):
         self.eos_token_id = eos_token_id
         self.tie_word_embeddings = tie_word_embeddings
 
+    @property
+    def rope_scaling(self):
+        return self.rope_parameters
+
+    @rope_scaling.setter
+    def rope_scaling(self, value):
+        self.rope_parameters = value
+
 class Qwen3_5VisionConfig(PretrainedConfig):
     model_type = "qwen3_5"
     base_config_key = "vision_config"
