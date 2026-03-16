@@ -354,7 +354,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
 
         b = b.contiguous().float()
         a = a.contiguous().float()
-        z = z.float()
         mixed_qkv = mixed_qkv.float()
 
         # ============================================================
@@ -408,7 +407,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                                    cur_conv_state)
 
         query, key, value = torch.split(
-            mixed_qkv_non_spec,
+            mixed_qkv_non_spec.to(hidden_states.dtype),
             [
                 self.key_dim // self.tp_size,
                 self.key_dim // self.tp_size,
@@ -423,7 +422,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         value_non_spec = value.reshape(value.shape[0], value.shape[1], -1,
                                        self.head_v_dim)
 
-        beta = b.sigmoid()
+        beta = b.sigmoid().to(hidden_states.dtype)
         g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
 
         if self.num_v_heads // self.num_k_heads > 1:
