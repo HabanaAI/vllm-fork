@@ -1,6 +1,6 @@
 #set -x
 
-sleep 30
+sleep 20
 
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 

@@ -24,6 +24,14 @@ input_min=128
 input_max=16384
 output_max=16384
 
+# Validated config for 128k with chunked prefill enabled based on fp8_inc
+#model_len=131072
+#max_num_batched_tokens=131072
+#max_num_seqs=64
+#input_min=128
+#input_max=98304
+#output_max=49152
+
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX VLLM_PROMPT_BS_BUCKET_LIMIT
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX VLLM_PROMPT_SEQ_BUCKET_LIMIT
