@@ -79,6 +79,10 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
 )
 from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
     causal_conv1d_update)
+from vllm.model_executor.layers.mamba.ops.torch_gated_delta_relu import (
+    torch_chunk_gated_delta_rule_opt,
+    torch_recurrent_gated_delta_rule_opt,
+)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead,
@@ -111,8 +115,6 @@ from .qwen3_next import (
     Qwen3NextModel,
     Qwen3NextSparseMoeBlock,
     QwenNextMixtureOfExperts,
-    torch_chunk_gated_delta_rule,
-    torch_recurrent_gated_delta_rule,
 )
 from .qwen3_vl import (
     Qwen3_VisionTransformer,
@@ -444,7 +446,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
 
         if attn_metadata.is_prompt:
             core_attn_out, last_recurrent_state = (
-                torch_chunk_gated_delta_rule(
+                torch_chunk_gated_delta_rule_opt(
                     query_non_spec,
                     key_non_spec,
                     value_non_spec,
@@ -467,7 +469,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                 index=mamba_cache_decode_indices,
             )
             core_attn_out, last_recurrent_state = (
-                torch_recurrent_gated_delta_rule(
+                torch_recurrent_gated_delta_rule_opt(
                     query_non_spec,
                     key_non_spec,
                     value_non_spec,
