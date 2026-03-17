@@ -498,10 +498,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                                               core_attn_out.shape[1], -1)
 
         output, _ = self.out_proj(core_attn_out)
-        if attn_metadata.is_prompt:
-            return output.reshape((1,output.shape[0]*output.shape[1],output.shape[2]))
-        else:
-            return output
+        return output
 
 
 class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
