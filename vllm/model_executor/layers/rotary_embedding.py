@@ -1289,6 +1289,9 @@ class MRotaryEmbedding(RotaryEmbedding):
             offsets = offsets.view(positions.shape[0], -1)
         num_tokens = query.shape[0] * query.shape[1]
         positions = positions.view(-1, num_tokens)
+
+        # Check `positions.shape[0] == 3` to ensure this branch is
+        # only taken for the true 3D VL positional encoding case.
         if positions.ndim == 2 and positions.shape[0] == 3:
             cos_sin = (self.cos_sin_cache_mrope0[positions[0]] +
                        self.cos_sin_cache_mrope1[positions[1]] +

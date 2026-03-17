@@ -1031,7 +1031,9 @@ def make_mrope_positions_tensor_with_pad( \
             else:
                 positions = input_positions[b_idx]
 
-            # robust for chunked prefill
+            # With chunked prefill, positions may cover the full prompt
+            # while the current chunk only processes `max_prompt_len`
+            # tokens. Truncate if positions is longer than the chunk size.
             if len(positions) >= max_prompt_len:
                 padded_positions = positions[:max_prompt_len]
             else:

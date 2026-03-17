@@ -127,6 +127,28 @@ def run_single_image(model: str, local_image: Optional[str] = None) -> None:
     result = chat_completion_from_url.choices[0].message.content
     print("Chat completion output from image url:", result)
 
+    ## Use base64 encoded image in the payload
+    image_base64 = encode_base64_content_from_url(image_url)
+    chat_completion_from_base64 = client.chat.completions.create(
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's in this image?"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+                    },
+                ],
+            }
+        ],
+        model=model,
+        max_completion_tokens=64,
+    )
+
+    result = chat_completion_from_base64.choices[0].message.content
+    print("Chat completion output from base64 encoded image:", result)
+
 
 # Multi-image input inference
 def run_multi_image(model: str) -> None:

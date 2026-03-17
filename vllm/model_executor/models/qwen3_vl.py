@@ -1178,6 +1178,12 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             for _ in range(self.deepstack_num_level)
         ] if self.use_deepstack else None
 
+        # multimodal chunked prefill offsets
+        self.mm_offset_image = 0
+        self.mm_offset_image_multiscale = 0
+        self.mm_offset_video = 0
+        self.mm_offset_video_multiscale = 0
+
     def _get_deepstack_input_embeds(self) -> IntermediateTensors:
         # get deepstack_input_embeds from buffer, and clear the buffer
         return IntermediateTensors({
