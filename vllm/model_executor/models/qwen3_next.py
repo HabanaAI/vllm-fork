@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Inference-only Qwen3Next model."""
+import os
 from collections.abc import Iterable
 from typing import Optional
 
@@ -47,6 +48,7 @@ from vllm.model_executor.model_loader.weight_utils import (
 from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.utils import set_weight_attrs
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import Qwen3NextConfig
 
@@ -56,6 +58,12 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
+
+is_hpu = current_platform.is_hpu()
+
+if is_hpu:
+    import habana_frameworks.torch as htorch
+    import habana_frameworks.torch.core as htcore
 
 logger = init_logger(__name__)
 
@@ -70,6 +78,7 @@ def torch_chunk_gated_delta_rule(
     beta,
     eye_constant,
     chunk_size=64,
+    inv_loop=10,
     initial_state=None,
     output_final_state=True,
     use_qk_l2norm_in_kernel=True,
@@ -121,9 +130,13 @@ def torch_chunk_gated_delta_rule(
                         key.transpose(-1, -2).contiguous()) * \
            decay_mask * mask + eye_constant
     inv_attn = torch.zeros_like(attn) + eye_constant
-    for k in range(1, chunk_size):
+    htcore.mark_step()
+    for _ in range(inv_loop):
         prod = torch.matmul(attn, inv_attn)
-        inv_attn.sub_(prod * mask)
+        err = prod * mask
+        update = torch.matmul(inv_attn, err)
+        inv_attn.sub_(update)
+    htcore.mark_step()
     attn = inv_attn
 
     value = attn @ v_beta
@@ -159,9 +172,11 @@ def torch_chunk_gated_delta_rule(
     core_attn_out = torch.matmul(A, V)                        # [B,H,Nc,C,V]
 
     # for each chunk
+    htcore.mark_step()
     for i in range(num_chunks):
         core_attn_out[:, :, i].add_(torch.matmul(C[:, :, i], last_recurrent_state))
         last_recurrent_state = torch.matmul(M[:, :, i], last_recurrent_state) + N[:, :, i]
+    htcore.mark_step()
 
     if not output_final_state:
         last_recurrent_state = None
@@ -450,6 +465,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         self.eye_constant = torch.eye(self.chunk_size,
                                       dtype=torch.bfloat16,
                                       device=self.conv1d.weight.device)
+        self.inv_loop = int(os.environ.get("VLLM_GDN_INV_LOOP", 12))
 
         # time step projection (discretization)
         # instantiate once and copy inv_dt in init_weights of PretrainedModel
@@ -656,6 +672,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     beta=beta,
                     eye_constant=self.eye_constant,
                     chunk_size=self.chunk_size,
+                    inv_loop=self.inv_loop,
                     initial_state=None,
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
