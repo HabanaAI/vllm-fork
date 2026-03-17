@@ -24,6 +24,7 @@
 # limitations under the License.
 """Inference-only Qwen3.5 Series compatible with HuggingFace weights."""
 
+import os
 import typing
 from collections.abc import Callable, Iterable
 
@@ -274,6 +275,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         self.eye_constant = torch.eye(self.chunk_size,
                                       dtype=torch.bfloat16,
                                       device=self.conv1d.weight.device)
+        self.inv_loop = int(os.environ.get("VLLM_GDN_INV_LOOP", 12))
 
         # selective projection used to make dt, B and C input dependant
 
@@ -442,6 +444,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                     beta=beta,
                     eye_constant=self.eye_constant,
                     chunk_size=self.chunk_size,
+                    inv_loop=self.inv_loop,
                     initial_state=None,
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
