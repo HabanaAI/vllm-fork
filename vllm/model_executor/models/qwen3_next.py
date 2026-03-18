@@ -328,6 +328,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         self.ssm_state = torch.empty(temporal_state_shape,
                                      dtype=torch.float32,
                                      device=self.conv1d.weight.device)
+        self.kv_cache = [(torch.tensor([]),torch.tensor([]))]
 
         self.chunk_size = 64
         self.chunked_prefill_size = \

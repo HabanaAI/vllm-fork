@@ -7,6 +7,7 @@ import torch
 
 from vllm.attention import get_attn_backend
 from vllm.config import CacheConfig, DeviceConfig, ModelConfig, ParallelConfig
+from vllm.distributed import divide
 from vllm.logger import init_logger
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LayerBlockType,
                         get_dtype_size, is_pin_memory_available)
@@ -142,4 +143,26 @@ class CacheEngine:
             (key_cache_entry + value_cache_entry)
 
         dtype_size = get_dtype_size(dtype)
-        return dtype_size * total
+
+        # For mamba cache
+        total_mamba_size = 0
+        num_linear_attention_layers = model_config.get_num_layers_by_block_type(
+            parallel_config, LayerBlockType.mamba)
+        if num_linear_attention_layers > 0:
+            tp_size = parallel_config.tensor_parallel_size
+            conv_kernel_size = model_config.hf_text_config.linear_conv_kernel_dim
+            num_v_heads = model_config.hf_text_config.linear_num_value_heads
+            num_k_heads = model_config.hf_text_config.linear_num_key_heads
+            head_k_dim = model_config.hf_text_config.linear_key_head_dim
+            head_v_dim = model_config.hf_text_config.linear_value_head_dim
+            key_dim = head_k_dim * num_k_heads
+            value_dim = head_v_dim * num_v_heads
+            conv_dim = key_dim * 2 + value_dim
+
+            conv_size = (conv_kernel_size - 1) * divide(conv_dim, tp_size)
+            ssm_size = divide(num_v_heads, tp_size) * head_k_dim * head_v_dim
+            # mamba only needs cache one value for one block
+            total_mamba= (conv_size + ssm_size) * num_linear_attention_layers
+            total_mamba_size = get_dtype_size(torch.float32) * total_mamba
+
+        return dtype_size * total + total_mamba_size

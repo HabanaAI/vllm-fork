@@ -2749,22 +2749,34 @@ def bind_kv_cache(
     #    tensor
     from vllm.attention import AttentionType
     from vllm.model_executor.models.utils import extract_layer_index
+    def _bind_kv_cache(layer_need_kv_cache, offset):
+        layer_index_sorted = sorted(
+            set(
+                extract_layer_index(layer_name)
+                for layer_name in layer_need_kv_cache))
+        for layer_name in layer_need_kv_cache:
+            kv_cache_idx = layer_index_sorted.index(
+                extract_layer_index(layer_name))
+            forward_ctx = ctx[layer_name]
+            assert len(forward_ctx.kv_cache) == len(kv_cache)
+            for ve, ve_kv_cache in enumerate(kv_cache):
+                forward_ctx.kv_cache[ve] = ve_kv_cache[kv_cache_idx + offset]
+
     layer_need_kv_cache = [
         layer_name for layer_name in ctx
         if (hasattr(ctx[layer_name], 'attn_type') and ctx[layer_name].attn_type
             in (AttentionType.DECODER, AttentionType.ENCODER_DECODER))
     ]
-    layer_index_sorted = sorted(
-        set(
-            extract_layer_index(layer_name)
-            for layer_name in layer_need_kv_cache))
-    for layer_name in layer_need_kv_cache:
-        kv_cache_idx = layer_index_sorted.index(
-            extract_layer_index(layer_name))
-        forward_ctx = ctx[layer_name]
-        assert len(forward_ctx.kv_cache) == len(kv_cache)
-        for ve, ve_kv_cache in enumerate(kv_cache):
-            forward_ctx.kv_cache[ve] = ve_kv_cache[kv_cache_idx]
+    _bind_kv_cache(layer_need_kv_cache, 0)
+
+    # for mamba
+    offset = len(layer_need_kv_cache)
+    layer_need_kv_cache = [
+        layer_name for layer_name in ctx
+        if (hasattr(ctx[layer_name], 'mamba_type') and
+            ctx[layer_name].mamba_type == "linear_attention")
+    ]
+    _bind_kv_cache(layer_need_kv_cache, offset)
 
 
 def run_method(obj: Any, method: Union[str, bytes, Callable], args: tuple[Any],
