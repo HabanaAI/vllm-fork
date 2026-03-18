@@ -268,14 +268,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 ], self.tp_size, self.tp_rank)
             })
 
-        max_prefill_bs = vllm_config.scheduler_config.max_num_prefill_seqs
         max_decode_bs = vllm_config.scheduler_config.max_num_seqs
-
-        mamba_cache_bs = max_decode_bs + max(8, max_decode_bs)
-        if max_prefill_bs is not None:
-            mamba_cache_bs += max_prefill_bs
-        else:
-            mamba_cache_bs += max_decode_bs
+        mamba_cache_bs = max(8, max_decode_bs) + 2
 
         conv_state_shape = (
             mamba_cache_bs,
