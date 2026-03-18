@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Inference-only Qwen3Next model."""
+import os
 from collections.abc import Iterable
 from typing import Optional
 
@@ -27,6 +28,7 @@ from vllm.model_executor.layers.layernorm import (
 from vllm.model_executor.layers.layernorm import RMSNormGated
 # yapf: enable
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
+                                               MergedColumnParallelLinear,
                                                QKVParallelLinear,
                                                ReplicatedLinear,
                                                RowParallelLinear)
@@ -38,6 +40,8 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
     MambaStateDtypeCalculator, MambaStateShapeCalculator)
 from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
     causal_conv1d_update)
+from vllm.model_executor.layers.mamba.ops.torch_gated_delta_relu import (
+    torch_chunk_gated_delta_rule, torch_recurrent_gated_delta_rule)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -60,190 +64,6 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
 logger = init_logger(__name__)
 
 KVCache = tuple[torch.Tensor, torch.Tensor]
-
-
-def torch_chunk_gated_delta_rule(
-    query,
-    key,
-    value,
-    g,
-    beta,
-    eye_constant,
-    chunk_size=64,
-    initial_state=None,
-    output_final_state=True,
-    use_qk_l2norm_in_kernel=True,
-):
-    initial_dtype = query.dtype
-    if use_qk_l2norm_in_kernel:
-        head_dim = query.size(-1)
-        inv_scale = head_dim**-0.5
-        query = F.rms_norm(query, (head_dim, ), eps=1e-6) * inv_scale
-        key = F.rms_norm(key, (head_dim, ), eps=1e-6) * inv_scale
-    query, key, value, beta, g = [
-        x.transpose(1, 2).contiguous().to(torch.float32)
-        for x in (query, key, value, beta, g)
-    ]
-
-    batch_size, num_heads, sequence_length, k_head_dim = key.shape
-    v_head_dim = value.shape[-1]
-    pad_size = (chunk_size - sequence_length % chunk_size) % chunk_size
-    if pad_size > 0:
-        query = F.pad(query, (0, 0, 0, pad_size))
-        key = F.pad(key, (0, 0, 0, pad_size))
-        value = F.pad(value, (0, 0, 0, pad_size))
-        beta = F.pad(beta, (0, pad_size))
-        g = F.pad(g, (0, pad_size))
-    tot_len = sequence_length + pad_size
-    scale = 1 / (query.shape[-1]**0.5)
-    query = query * scale
-
-    v_beta = value * beta.unsqueeze(-1)
-    k_beta = key * beta.unsqueeze(-1)
-    # reshape to chunks
-    query, key, value, k_beta, v_beta = [
-        x.reshape(x.shape[0], x.shape[1], -1, chunk_size, x.shape[-1])
-        for x in (query, key, value, k_beta, v_beta)
-    ]
-    g = g.reshape(g.shape[0], g.shape[1], -1, chunk_size)
-    mask = torch.ones(chunk_size,
-                      chunk_size,
-                      dtype=torch.bfloat16,
-                      device=query.device).tril(-1)
-
-    # chunk decay
-    g = g.cumsum(dim=-1)
-    g_exp = g.exp()
-    decay_mask = ((g.unsqueeze(-1) -
-                   g.unsqueeze(-2)).tril().exp().float()).tril()
-
-    attn = ((torch.matmul(k_beta,
-                          key.transpose(-1, -2).contiguous())) *
-            decay_mask).bfloat16() * mask + eye_constant
-    inv_attn = torch.zeros_like(attn) + eye_constant
-    for k in range(1, chunk_size):
-        prod = torch.matmul(attn, inv_attn)
-        inv_attn.sub_(prod * mask)
-    attn = inv_attn.float()
-
-    value = attn @ v_beta
-    k_cumdecay = attn @ (k_beta * g_exp.unsqueeze(-1))
-    last_recurrent_state = (torch.zeros(batch_size, num_heads, k_head_dim,
-                                        v_head_dim).to(value) if initial_state
-                            is None else initial_state.to(value))
-    last_recurrent_state = last_recurrent_state.bfloat16()
-    mask = torch.tril(torch.ones(chunk_size,
-                                 chunk_size,
-                                 dtype=torch.bool,
-                                 device=query.device),
-                      diagonal=0)
-    mask = mask.view(1, 1, 1, chunk_size, chunk_size)
-    attn = torch.matmul(query, key.transpose(-1, -2).contiguous()) * decay_mask * mask
-    qg = query * g_exp[..., None]
-    delta_g_exp = (g[:, :, :, -1, None] - g).exp()[..., None]
-    k_term = (key * delta_g_exp)
-
-    num_chunks = tot_len // chunk_size
-    k_eye = torch.eye(k_head_dim, dtype=value.dtype, device=value.device)
-    k_eye = k_eye.view(1, 1, 1, k_head_dim, k_head_dim).bfloat16()
-
-    alpha = g_exp[:, :, :, -1, None, None].bfloat16()                     # [B,H,Nc,1,1]
-    B = k_term.transpose(-1, -2).contiguous().bfloat16()                  # [B,H,Nc,K,C]
-    K = k_cumdecay.bfloat16()                                             # [B,H,Nc,C,K]
-    V = value.bfloat16()                                                  # [B,H,Nc,C,V]
-    Q = qg.bfloat16()                                                     # [B,H,Nc,C,K]
-    A = attn.bfloat16()                                                   # [B,H,Nc,C,C]
-
-    # 预计算 chunk 级参数
-    M = alpha * k_eye - torch.matmul(B, K)                    # [B,H,Nc,K,K]
-    N = torch.matmul(B, V)                                    # [B,H,Nc,K,V]
-    C = Q - torch.matmul(A, K)                                # [B,H,Nc,C,K]
-    core_attn_out = torch.matmul(A, V)                        # [B,H,Nc,C,V]
-
-    # for each chunk
-    for i in range(num_chunks):
-        core_attn_out[:, :, i].add_(torch.matmul(C[:, :, i], last_recurrent_state))
-        last_recurrent_state = torch.matmul(M[:, :, i], last_recurrent_state) + N[:, :, i]
-
-    if not output_final_state:
-        last_recurrent_state = None
-    else:
-        last_recurrent_state = last_recurrent_state.to(initial_dtype)
-    core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
-                                          core_attn_out.shape[1], -1,
-                                          core_attn_out.shape[-1])
-    core_attn_out = core_attn_out[:, :, :sequence_length]
-    core_attn_out = core_attn_out.transpose(1,
-                                            2).contiguous().to(initial_dtype)
-    return core_attn_out, last_recurrent_state
-
-
-def torch_recurrent_gated_delta_rule(
-    query,
-    key,
-    value,
-    g,
-    beta,
-    recurrent_state,
-    output_final_state=True,
-    use_qk_l2norm_in_kernel=True,
-):
-    initial_dtype = query.dtype
-    if use_qk_l2norm_in_kernel:
-        head_dim = query.size(-1)
-        inv_scale = head_dim**-0.5
-        query = F.rms_norm(query, (head_dim, ), eps=1e-6) * inv_scale
-        key = F.rms_norm(key, (head_dim, ), eps=1e-6) * inv_scale
-    query, key, value, beta, g = [
-        x.transpose(1, 2).contiguous().to(torch.float32)
-        for x in (query, key, value, beta, g)
-    ]
-
-    batch_size, sequence_length, num_heads, k_head_dim = key.shape
-    v_head_dim = value.shape[-1]
-    scale = 1 / (query.shape[-1]**0.5)
-    query = query * scale
-
-    recurrent_state = recurrent_state.to(value)
-
-    if num_heads > 1:
-        core_attn_out = torch.zeros(batch_size, sequence_length, num_heads,
-                                    v_head_dim).to(value)
-        for i in range(num_heads):
-            q_t = query[:, :, i]
-            k_t = key[:, :, i]
-            v_t = value[:, :, i]
-            g_t = g[:, :, i].exp().unsqueeze(-1).unsqueeze(-1)
-            beta_t = beta[:, :, i].unsqueeze(-1)
-
-            recurrent_state = recurrent_state * g_t
-            kv_mem = (recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
-            delta = (v_t - kv_mem) * beta_t
-            recurrent_state = recurrent_state + k_t.unsqueeze(
-                -1) * delta.unsqueeze(-2)
-            core_attn_out[:, :, i] = (recurrent_state *
-                                      q_t.unsqueeze(-1)).sum(dim=-2)
-    else:
-        q_t = query.squeeze(-2)
-        k_t = key.squeeze(-2)
-        v_t = value.squeeze(-2)
-        g_t = g.squeeze(-1).exp().unsqueeze(-1).unsqueeze(-1)
-        beta_t = beta
-
-        recurrent_state = recurrent_state * g_t
-        kv_mem = (recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
-        delta = (v_t - kv_mem) * beta_t
-        recurrent_state.add_(k_t.unsqueeze(-1) * delta.unsqueeze(-2))
-        core_attn_out = (recurrent_state *
-                         q_t.unsqueeze(-1)).sum(dim=-2).unsqueeze(-2)
-
-    if not output_final_state:
-        recurrent_state = None
-    else:
-        recurrent_state = recurrent_state.to(initial_dtype)
-    core_attn_out = core_attn_out.transpose(1,
-                                            2).contiguous().to(initial_dtype)
-    return core_attn_out, recurrent_state
 
 
 class Qwen3NextSparseMoeBlock(nn.Module):
@@ -414,20 +234,22 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         self.conv1d_weight = None
 
         # projection of the input hidden states
-        self.projection_size_qkvz = self.key_dim * 2 + self.value_dim * 2
-        self.projection_size_ba = self.num_v_heads * 2
-        self.in_proj_qkvz = ColumnParallelLinear(
-            input_size=self.hidden_size,
-            output_size=self.projection_size_qkvz,
-            bias=False,
+        # Qwen3-Next and Qwen3.5 have a different qkv_proj layout,
+        # we need to create qkvz_proj adaptively here.
+        self.in_proj_qkvz = self.create_qkvz_proj(
+            hidden_size=self.hidden_size,
+            key_dim=self.key_dim,
+            value_dim=self.value_dim,
             quant_config=quant_config,
             prefix=f"{prefix}.in_proj_qkvz",
         )
+
         # ba_proj doesn't support blockwise fp8 quantization.
-        self.in_proj_ba = ColumnParallelLinear(
-            input_size=self.hidden_size,
-            output_size=self.projection_size_ba,
-            bias=False,
+        # Qwen3-Next and Qwen3.5 have different in_proj_ba checkpoint
+        # layouts, so we use a factory method to create the projection.
+        self.in_proj_ba = self.create_ba_proj(
+            hidden_size=self.hidden_size,
+            num_v_heads=self.num_v_heads,
             quant_config=None,
             prefix=f"{prefix}.in_proj_ba",
         )
@@ -473,7 +295,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         self.chunk_size = 64
         self.eye_constant = torch.eye(self.chunk_size,
-                                      dtype=torch.bloat16,
+                                      dtype=torch.float32,
                                       device=self.conv1d.weight.device)
 
         # time step projection (discretization)
@@ -511,10 +333,48 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             raise ValueError(f"Duplicate layer name: {prefix}")
         compilation_config.static_forward_context[prefix] = self
 
+    def create_qkvz_proj(
+        self,
+        hidden_size: int,
+        key_dim: int,
+        value_dim: int,
+        quant_config: QuantizationConfig | None,
+        prefix: str,
+    ) -> MergedColumnParallelLinear:
+        return MergedColumnParallelLinear(
+            input_size=hidden_size,
+            output_sizes=[sum((key_dim, key_dim, value_dim, value_dim))],
+            bias=False,
+            quant_config=quant_config,
+            prefix=prefix,
+        )
+
+    def create_ba_proj(
+        self,
+        hidden_size: int,
+        num_v_heads: int,
+        quant_config: QuantizationConfig | None,
+        prefix: str,
+    ) -> MergedColumnParallelLinear:
+        # Qwen3-Next stores in_proj_ba as a single fused weight with an
+        # interleaved GQA layout: [b_g0, a_g0, b_g1, a_g1, ...] where
+        # each group corresponds to a key-head group. We must use a single
+        # output shard so that ColumnParallel sharding preserves this
+        # interleaved structure across TP ranks.
+        # Qwen3.5 overrides this to use [num_v_heads, num_v_heads] since
+        # its checkpoint has separate in_proj_b and in_proj_a weights.
+        return MergedColumnParallelLinear(
+            input_size=hidden_size,
+            output_sizes=[num_v_heads * 2],
+            bias=False,
+            quant_config=quant_config,
+            prefix=prefix,
+        )
+
     def fix_query_key_value_ordering(
         self,
-        mixed_qkvz,
-        mixed_ba,
+        mixed_qkvz: torch.Tensor,
+        mixed_ba: torch.Tensor,
     ):
         """
         Derives `query`, `key` and `value` tensors from `mixed_qkvzba`.
