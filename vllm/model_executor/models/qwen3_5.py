@@ -188,10 +188,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         conv_state = self.conv_state
         ssm_state = self.ssm_state
 
-        if attn_metadata.is_prompt:
-            hidden_states = hidden_states.reshape(
-                (len(attn_metadata.context_lens_tensor)), -1,
-                hidden_states.shape[-1])
+        num_tokens = hidden_states.size(0)
 
         # ============================================================
         # Part 1: Input Projection
@@ -226,9 +223,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             prefill_conv_state = torch.index_select(
                 mixed_qkv.reshape(-1, qkv_dim),
                 dim=0,
-                index=conv_state_indices).reshape(-1,
-                                                  self.conv_kernel_size - 1,
-                                                  qkv_dim)
+                index=conv_state_indices).reshape(bs, -1, qkv_dim)
             conv_state.index_copy_(dim=0,
                                    index=mamba_cache_prefill_indices,
                                    source=prefill_conv_state)
@@ -798,10 +793,6 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration,
 
         self.use_deepstack = False
         self.text_dim = config.text_config.hidden_size
-        self.mm_offset_image = 0
-        self.mm_offset_image_multiscale = 0
-        self.mm_offset_video = 0
-        self.mm_offset_video_multiscale = 0
 
     def embed_input_ids(
         self,
@@ -865,9 +856,7 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration,
 
         if intermediate_tensors is not None:
             inputs_embeds = None
-        input = input_ids if input_ids is not None else inputs_embeds
-        if input.shape[0] * input.shape[1] < positions.shape[-1]:
-            positions = positions.reshape(3, -1)
+
         hidden_states = self.language_model.model(
             input_ids=input_ids,
             positions=positions,
