@@ -591,20 +591,18 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                         f"Shard id index {idx} should be between 0 and "
                         f"{len(self.output_sizes) - 1}. Got shard id {loaded_shard_id}."
                     )
-            if len(loaded_shard_id) > 1 and any(
-                b - a != 1 for a, b in zip(loaded_shard_id[:-1], loaded_shard_id[1:])
-            ):
+            if len(loaded_shard_id) > 1 and any(b - a != 1 for a, b in zip(
+                    loaded_shard_id[:-1], loaded_shard_id[1:])):
                 raise ValueError(
                     "Shard id with multiple indices should be consecutive. "
-                    f"Got shard id {loaded_shard_id}."
-                )
+                    f"Got shard id {loaded_shard_id}.")
             return
         elif isinstance(loaded_shard_id, int):
-            if loaded_shard_id < 0 or loaded_shard_id >= len(self.output_sizes):
+            if loaded_shard_id < 0 or loaded_shard_id >= len(
+                    self.output_sizes):
                 raise ValueError(
                     f"Shard id should be between 0 and {len(self.output_sizes) - 1}. "
-                    f"Got shard id {loaded_shard_id}."
-                )
+                    f"Got shard id {loaded_shard_id}.")
             return
         raise ValueError("This line should not be reached")
 
@@ -619,12 +617,10 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         # initialize GGUF param after we know the quantize type
         is_gguf_weight = getattr(param, "is_gguf_weight", False)
         is_gguf_weight_type = getattr(param, "is_gguf_weight_type", False)
-        if isinstance(loaded_shard_id, tuple) and (
-            is_gguf_weight or is_gguf_weight_type
-        ):
+        if isinstance(loaded_shard_id, tuple) and (is_gguf_weight
+                                                   or is_gguf_weight_type):
             raise NotImplementedError(
-                "Shard id with multiple indices is not supported for GGUF."
-            )
+                "Shard id with multiple indices is not supported for GGUF.")
         if is_gguf_weight_type:
             if loaded_shard_id is not None:
                 param.data[loaded_shard_id].copy_(loaded_weight)
@@ -672,10 +668,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 return
 
             output_sizes = (
-                self.output_sizes[loaded_shard_id[0] : loaded_shard_id[-1] + 1]
-                if loaded_shard_id is not None
-                else self.output_sizes
-            )
+                self.output_sizes[loaded_shard_id[0]:loaded_shard_id[-1] + 1]
+                if loaded_shard_id is not None else self.output_sizes)
             current_shard_offset = 0
             use_bitsandbytes_4bit = getattr(param, "use_bitsandbytes_4bit",
                                             False)
@@ -773,7 +767,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
-    def _load_fused_module_from_checkpoint(self,
+    def _load_fused_module_from_checkpoint(
+        self,
         param: BasevLLMParameter,
         loaded_weight: torch.Tensor,
         output_sizes: list[int] | None = None,
@@ -825,10 +820,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 param.load_merged_column_weight(loaded_weight=loaded_weight)
                 return
             output_sizes = (
-                [self.output_sizes[idx] for idx in loaded_shard_id]
-                if loaded_shard_id
-                else None
-            )
+                [self.output_sizes[idx]
+                 for idx in loaded_shard_id] if loaded_shard_id else None)
             if isinstance(param, BlockQuantScaleParameter):
                 weight_block_size = getattr(self, "weight_block_size", None)
                 output_sizes = [
@@ -837,9 +830,9 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 ]
 
             # TODO: @dsikka - move to parameter.py
-            self._load_fused_module_from_checkpoint(
-                param, loaded_weight, output_sizes=output_sizes
-            )
+            self._load_fused_module_from_checkpoint(param,
+                                                    loaded_weight,
+                                                    output_sizes=output_sizes)
             return
 
         assert loaded_shard_id < len(self.output_sizes)

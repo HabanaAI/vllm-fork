@@ -1457,10 +1457,7 @@ def run_qwen3_5(questions: list[str], modality: str) -> ModelRequestData:
         placeholder = "<|video_pad|>"
 
     prompts = [
-        (
-            f"<|vision_start|>{placeholder}<|vision_end|>"
-            f"{question}"
-        )
+        (f"<|vision_start|>{placeholder}<|vision_end|>""{question}")
         for question in questions
     ]
 
@@ -1496,10 +1493,7 @@ def run_qwen3_5_moe(questions: list[str], modality: str) -> ModelRequestData:
         placeholder = "<|video_pad|>"
 
     prompts = [
-        (
-            f"<|vision_start|>{placeholder}<|vision_end|>"
-            f"{question}"
-        )
+        (f"<|vision_start|>{placeholder}<|vision_end|>""{question}")
         for question in questions
     ]
 

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Inference-only Qwen3Next model."""
-import os
 from collections.abc import Iterable
 from typing import Optional
 
@@ -104,7 +103,8 @@ class Qwen3NextSparseMoeBlock(nn.Module):
                                 hidden_size=config.hidden_size,
                                 intermediate_size=config.moe_intermediate_size,
                                 reduce_results=False,
-                                renormalize=getattr(config, "norm_topk_prob", True),
+                                renormalize=getattr(config, "norm_topk_prob",
+                                                    True),
                                 quant_config=quant_config,
                                 prefix=f"{prefix}.experts")
 
@@ -1005,6 +1005,7 @@ class Qwen3NextModel(nn.Module):
 
 
 class QwenNextMixtureOfExperts(MixtureOfExperts):
+
     def update_physical_experts_metadata(
         self,
         num_physical_experts: int,
@@ -1029,8 +1030,7 @@ class QwenNextMixtureOfExperts(MixtureOfExperts):
         example_moe = None
         for layer in self.model.layers:
             if isinstance(layer, Qwen3NextDecoderLayer) and isinstance(
-                layer.mlp, Qwen3NextSparseMoeBlock
-            ):
+                    layer.mlp, Qwen3NextSparseMoeBlock):
                 example_moe = layer.mlp
                 self.moe_layers.append(layer.mlp.experts)
 

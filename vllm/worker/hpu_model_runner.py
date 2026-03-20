@@ -1056,8 +1056,7 @@ def FindMambaIndexForPrefill(
 
     raise RuntimeError(
         f"No available mamba index for seq_id={seq_id}, "
-        f"max_concurrency={max_concurrency}, mamba_dict={mamba_dict}"
-    )
+        f"max_concurrency={max_concurrency}, mamba_dict={mamba_dict}")
 
 
 def FindMambaIndexForDecode(
@@ -1065,8 +1064,9 @@ def FindMambaIndexForDecode(
     seq_list: List[int],
     running_queue_list: List[int],
 ):
-    invalid_keys = [key for key in list(mamba_dict.keys())
-                    if key not in running_queue_list]
+    invalid_keys = [
+        key for key in list(mamba_dict.keys()) if key not in running_queue_list
+    ]
     for key in invalid_keys:
         mamba_dict.pop(key)
     return list(mamba_dict.values())
@@ -1765,10 +1765,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     # fla is short for Flat Linear Attention
     def _is_fla_model(self):
-        return (hasattr(self.model_config.hf_config, "linear_conv_kernel_dim") or
-               (hasattr(self.model_config.hf_config, "text_config") and
-                hasattr(self.model_config.hf_config.text_config,
-                        "linear_conv_kernel_dim")))
+        return (hasattr(self.model_config.hf_config, "linear_conv_kernel_dim")
+                or (hasattr(self.model_config.hf_config, "text_config")
+                    and hasattr(self.model_config.hf_config.text_config,
+                                "linear_conv_kernel_dim")))
 
     def _use_graphs(self, batch_size, seq_len, ctx_blocks=0):
         if self.enforce_eager:
@@ -1917,9 +1917,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return PreparePromptMetadata.empty()
         is_enc_dec_model = self.model_config.is_encoder_decoder
 
-        if self._is_fla_model() and self.prev_running_queue != running_queue_list:
-            invalid_keys = [key for key in list(self.mamba_cache_table.keys())
-                            if key not in running_queue_list]
+        if self._is_fla_model(
+        ) and self.prev_running_queue != running_queue_list:
+            invalid_keys = [
+                key for key in list(self.mamba_cache_table.keys())
+                if key not in running_queue_list
+            ]
             for key in invalid_keys:
                 self.mamba_cache_table.pop(key)
             self.prev_running_queue = running_queue_list
@@ -1933,7 +1936,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self._is_fla_model():
                 mamba_cache_bs = max(8, self.max_num_seqs) + 2
                 mamba_prefill_index = FindMambaIndexForPrefill(
-                    self.mamba_cache_table, seq_id, mamba_cache_bs,
+                    self.mamba_cache_table,
+                    seq_id,
+                    mamba_cache_bs,
                 )
                 mamba_prefill_indices.append(mamba_prefill_index)
 
@@ -1998,7 +2003,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # TODO: if seq_len < conv_kernel_dim, padding token should be
             # masked in the prompt stage
             if self._is_fla_model():
-                if hasattr(self.model_config.hf_config, "linear_conv_kernel_dim"):
+                if hasattr(self.model_config.hf_config,
+                           "linear_conv_kernel_dim"):
                     linear_conv_kernel_dim = self.model_config.hf_config.linear_conv_kernel_dim
                 else:
                     linear_conv_kernel_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim
@@ -3357,8 +3363,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             embed_dim = 1176
             if any([
                     model_type in self.get_model().config.model_type
-                    for model_type in ['qwen3_vl', "qwen3_omni",
-                                       'qwen3_5', 'qwen3_5_moe']
+                    for model_type in
+                ['qwen3_vl', "qwen3_omni", 'qwen3_5', 'qwen3_5_moe']
             ]):
                 embed_dim = 1536
             elif 'ernie4_5_moe_vl' in self.get_model().config.model_type:
@@ -4477,8 +4483,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         return self.prepare_model_input_align_worker(seq_group_metadata_list,
                                                      virtual_engine,
                                                      finished_requests_ids,
-                                                     False,
-                                                     running_queue_list)
+                                                     False, running_queue_list)
 
     def finish_measurements(self):
         from neural_compressor.torch.quantization import finalize_calibration

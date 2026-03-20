@@ -1337,8 +1337,7 @@ class Scheduler:
             self.prev_prompt = True
 
         running_seq_ids = [
-            seq.seq_id
-            for seq_group in self.running
+            seq.seq_id for seq_group in self.running
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING)
         ]
 

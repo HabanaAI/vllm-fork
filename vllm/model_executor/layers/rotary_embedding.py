@@ -1449,7 +1449,9 @@ class MRotaryEmbedding(RotaryEmbedding):
                 context_len=context_len,
                 seq_len=seq_len,
             )
-        elif hf_config.model_type in ["qwen3_vl", "qwen3_vl_moe", "qwen3_5", "qwen3_5_moe"]:
+        elif hf_config.model_type in [
+                "qwen3_vl", "qwen3_vl_moe", "qwen3_5", "qwen3_5_moe"
+        ]:
             return cls._qwen3vl_get_input_positions_tensor(
                 input_tokens=input_tokens,
                 hf_config=hf_config,

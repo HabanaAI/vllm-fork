@@ -18,11 +18,11 @@ from huggingface_hub.utils import (EntryNotFoundError, HfHubHTTPError,
                                    RepositoryNotFoundError,
                                    RevisionNotFoundError)
 from torch import nn
+from transformers import GenerationConfig, PretrainedConfig
 from transformers.models.auto.image_processing_auto import (
     get_image_processor_config)
 from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES)
-from transformers import GenerationConfig, PretrainedConfig
 from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
 
 from vllm import envs
@@ -39,8 +39,8 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, Cohere2Config,
                                              MiniMaxVL01Config, MllamaConfig,
                                              MLPSpeculatorConfig, MPTConfig,
                                              NemotronConfig, NVLM_D_Config,
-                                             OvisConfig, Qwen3NextConfig,
-                                             Qwen3_5Config, Qwen3_5MoeConfig,
+                                             OvisConfig, Qwen3_5Config,
+                                             Qwen3_5MoeConfig, Qwen3NextConfig,
                                              RWConfig, SkyworkR1VChatConfig,
                                              SolarConfig, Telechat2Config,
                                              UltravoxConfig)

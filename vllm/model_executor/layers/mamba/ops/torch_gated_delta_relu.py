@@ -4,19 +4,15 @@
 # Copyright (c) 2024, Tri Dao.
 # Adapted from https://github.com/huggingface/transformers/blob/v4.57-release/src/transformers/models/qwen3_next/modeling_qwen3_next.py
 
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
 
-from vllm import _custom_ops as ops
 from vllm.platforms import current_platform
-
 
 is_hpu = current_platform.is_hpu()
 
 if is_hpu:
-    import habana_frameworks.torch as htorch
     import habana_frameworks.torch.core as htcore
 
 
@@ -40,8 +36,7 @@ def torch_chunk_gated_delta_rule_opt(
         query = F.rms_norm(query, (head_dim, ), eps=1e-6) * inv_scale
         key = F.rms_norm(key, (head_dim, ), eps=1e-6) * inv_scale
     query, key, value, beta, g = [
-        x.transpose(1, 2).contiguous()
-        for x in (query, key, value, beta, g)
+        x.transpose(1, 2).contiguous() for x in (query, key, value, beta, g)
     ]
 
     batch_size, num_heads, sequence_length, k_head_dim = key.shape
@@ -73,8 +68,8 @@ def torch_chunk_gated_delta_rule_opt(
     # chunk decay
     g = g.cumsum(dim=-1)
     g_exp = g.exp().to(value.dtype)
-    decay_mask = ((g.unsqueeze(-1) -
-                   g.unsqueeze(-2)).exp().to(value.dtype)).tril()
+    decay_mask = ((g.unsqueeze(-1) - g.unsqueeze(-2)).exp().to(
+        value.dtype)).tril()
 
     attn = torch.matmul(k_beta,
                         key.transpose(-1, -2).contiguous()) * \
@@ -99,7 +94,8 @@ def torch_chunk_gated_delta_rule_opt(
                                  dtype=value.dtype,
                                  device=value.device),
                       diagonal=0)
-    attn = torch.matmul(query, key.transpose(-1, -2).contiguous()) * decay_mask * mask
+    attn = torch.matmul(query,
+                        key.transpose(-1, -2).contiguous()) * decay_mask * mask
     qg = query * g_exp[..., None]
     delta_g_exp = (g[:, :, :, -1, None] - g).exp()[..., None].to(value.dtype)
     k_term = key * delta_g_exp
@@ -123,8 +119,10 @@ def torch_chunk_gated_delta_rule_opt(
     # for each chunk
     htcore.mark_step()
     for i in range(num_chunks):
-        core_attn_out[:, :, i].add_(torch.matmul(C[:, :, i], last_recurrent_state))
-        last_recurrent_state = torch.matmul(M[:, :, i], last_recurrent_state) + N[:, :, i]
+        core_attn_out[:, :,
+                      i].add_(torch.matmul(C[:, :, i], last_recurrent_state))
+        last_recurrent_state = torch.matmul(M[:, :, i],
+                                            last_recurrent_state) + N[:, :, i]
     htcore.mark_step()
 
     if not output_final_state:
@@ -156,8 +154,7 @@ def torch_recurrent_gated_delta_rule_opt(
         query = F.rms_norm(query, (head_dim, ), eps=1e-6) * inv_scale
         key = F.rms_norm(key, (head_dim, ), eps=1e-6) * inv_scale
     query, key, value, beta, g = [
-        x.transpose(1, 2).contiguous()
-        for x in (query, key, value, beta, g)
+        x.transpose(1, 2).contiguous() for x in (query, key, value, beta, g)
     ]
 
     v_head_dim = value.shape[-1]
