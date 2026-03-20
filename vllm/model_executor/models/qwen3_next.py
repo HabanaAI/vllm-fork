@@ -851,7 +851,6 @@ class Qwen3NextDecoderLayer(nn.Module):
         else:
             hidden_states, residual = self.input_layernorm(
                 hidden_states, residual)
-
         if self.layer_type == "linear_attention":
             self_attention_output = self.linear_attn(
                 hidden_states=hidden_states, )
@@ -863,7 +862,6 @@ class Qwen3NextDecoderLayer(nn.Module):
         else:
             raise ValueError("Invalid layer_type")
         hidden_states = self_attention_output
-
         if self.layer_scale:
             if len(hidden_states.shape) == 2:
                 hidden_states = hidden_states * (
