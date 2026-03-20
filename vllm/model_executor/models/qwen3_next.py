@@ -698,7 +698,7 @@ class Qwen3NextAttention(nn.Module):
 
         if self.attn_output_gate:
             gate = torch.sigmoid(gate)
-            attn_output = attn_output * gate
+            attn_output = attn_output.view(gate.shape) * gate
 
         output, _ = self.o_proj(attn_output)
 

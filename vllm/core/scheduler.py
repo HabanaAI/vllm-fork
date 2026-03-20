@@ -1165,6 +1165,7 @@ class Scheduler:
             return SchedulerPrefillOutputs(
                 seq_groups=[],
                 ignored_seq_groups=[],
+                running_seqs=[],
                 num_lookahead_slots=self._get_num_lookahead_slots(
                     is_prefill=True, enable_chunking=enable_chunking),
                 running_seqs=[],
@@ -1643,7 +1644,8 @@ class Scheduler:
             preempted = len(running_scheduled.preempted) + len(
                 running_scheduled.swapped_out)
             running_seq_ids = [
-                seq.seq_id for seq_group in self.running
+                seq.seq_id
+                for seq_group in self.running
                 for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING)
             ]
             return SchedulerOutputs(
@@ -1740,7 +1742,8 @@ class Scheduler:
                                 and not self.scheduler_config.is_multi_step)
                                else running_scheduled.num_lookahead_slots)
         running_seq_ids = [
-            seq.seq_id for seq_group in self.running
+            seq.seq_id
+            for seq_group in self.running
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING)
         ]
         return SchedulerOutputs(
