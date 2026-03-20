@@ -147,6 +147,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     conv_state_indices: Optional[torch.Tensor] = None
     mamba_cache_decode_indices: Optional[torch.Tensor] = None
     mamba_cache_prefill_indices: Optional[torch.Tensor] = None
+    mamba_block_list: Optional[torch.Tensor] = None
     decode_slot_mapping: Optional[torch.Tensor] = None
     decode_block_list: Optional[torch.Tensor] = None
     decode_attn_bias: Optional[torch.Tensor] = None
