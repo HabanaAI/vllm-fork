@@ -1048,7 +1048,7 @@ class ComputedBlocksTracker:
         self._seq_id_to_blocks_hashes[seq.seq_id] = block_hashes_recorded
 
     def get_num_cached_tokens(self, seq: Sequence) -> int:
-        if not self._enable_caching:
+        if not self._enable_caching or seq.multi_modal_data:
             return 0
 
         # We always try to update the sequence hashes on the fly.
@@ -1095,7 +1095,9 @@ class ComputedBlocksTracker:
 
     def remove_seq(self, seq_id: int) -> None:
         """Stop tracking the sequence."""
-        if not self._enable_caching:
+        # If seq has multi-modal data, we won't record its block hashes,
+        # so we won't have to remove it here.
+        if not self._enable_caching or seq_id not in self._seq_id_to_blocks_hashes:
             return
         assert seq_id in self._seq_id_to_blocks_hashes
         del self._seq_id_to_blocks_hashes[seq_id]

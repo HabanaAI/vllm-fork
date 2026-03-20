@@ -1562,13 +1562,6 @@ class EngineArgs:
 
         # if using prefix caching, we must set a hash algo
         if self.enable_prefix_caching:
-            # Disable prefix caching for multimodal models for VLLM_V0.
-            if model_config.is_multimodal_model:
-                logger.warning(
-                    "--enable-prefix-caching is not supported for multimodal "
-                    "models in V0 and has been disabled.")
-                self.enable_prefix_caching = False
-
             # VLLM_V0 only supports builtin hash algo for prefix caching.
             if self.prefix_caching_hash_algo == "sha256":
                 raise ValueError(
