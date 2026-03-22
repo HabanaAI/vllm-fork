@@ -233,7 +233,7 @@ class SchedulerOutputs:
     num_lookahead_slots: int
     # The number of requests in the running queue
     running_queue_size: int
-    running_queue_list: List[int]
+    running_queue_list: Optional[List[int]]
     preempted: int
 
     def __post_init__(self):
@@ -372,7 +372,7 @@ class SchedulerPrefillOutputs:
     # Ignored sequence groups.
     ignored_seq_groups: List[SequenceGroup]
     num_lookahead_slots: int
-    running_seqs: List[int]
+    running_seqs: Optional[List[int]]
 
     @classmethod
     def create_empty(cls) -> "SchedulerPrefillOutputs":

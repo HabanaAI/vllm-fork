@@ -203,6 +203,7 @@ class MambaStateShapeCalculator:
                                        tp_world_size), head_k_dim, head_v_dim)
         return conv_state_shape, temporal_state_shape
 
+
 @dataclass
 class MambaCopySpec:
     """
@@ -211,23 +212,28 @@ class MambaCopySpec:
 
     Attributes:
         start_addr (int): Starting address for the memory copy operation.
-        num_elements (int): Number of elements to copy from the starting address.
+        num_elements (int): Number of elements to copy from the starting
+        address.
     """
 
     start_addr: int
     num_elements: int
 
+
 MambaStateCopyFunc: TypeAlias = Callable[[torch.Tensor, list[int], int, int],
                                          MambaCopySpec]
 """
-Type alias for a function that computes a MambaCopySpec for copying state slices.
+Type alias for a function that computes a MambaCopySpec for copying
+state slices.
 Parameters:
   state: torch.Tensor - the Mamba state tensor (e.g., conv or temporal states).
   block_ids: list[int] - the list of block indices for the state to copy.
   cur_block_idx: int - current block index within `block_ids` to copy from.
-  num_accepted_tokens: int - number of accepted tokens used to compute the copy offset.
+  num_accepted_tokens: int - number of accepted tokens used to compute the copy
+  offset.
       Range: 1 .. 1 + num_speculative_tokens (inclusive).
 """
+
 
 def get_conv_copy_spec(
     state: torch.Tensor,
@@ -254,9 +260,12 @@ def get_temporal_copy_spec(
     return MambaCopySpec(start_addr=src_state.data_ptr(),
                          num_elements=src_state.numel())
 
+
 get_full_copy_spec = get_temporal_copy_spec
 
+
 class MambaStateCopyFuncCalculator:
+
     @classmethod
     def linear_attention_state_copy_func(cls):
         return (get_temporal_copy_spec, )

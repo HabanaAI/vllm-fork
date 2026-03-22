@@ -192,7 +192,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             hidden_states = hidden_states.reshape(
                 (len(attn_metadata.context_lens_tensor)), -1,
                 hidden_states.shape[-1])
-        num_tokens = hidden_states.size(0)
 
         # ============================================================
         # Part 1: Input Projection
@@ -212,8 +211,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         # ============================================================
         # Part 2: Core Attention (Custom Op)
         # ============================================================
-        # Note: we should not use torch.empty here like other attention backends,
-        # see discussions in https://github.com/vllm-project/vllm/pull/28182
         mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
         mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
 
@@ -441,10 +438,6 @@ class Qwen3_5Model(Qwen3NextModel):
 
         config: Qwen3_5TextConfig | Qwen3_5MoeTextConfig = (
             vllm_config.model_config.hf_text_config)
-        parallel_config = vllm_config.parallel_config
-
-        # eplb_config = parallel_config.eplb_config
-        # self.num_redundant_experts = eplb_config.num_redundant_experts
 
         self.config = config
 
@@ -464,8 +457,9 @@ class Qwen3_5Model(Qwen3NextModel):
 
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers, get_layer, prefix=f"{prefix}.layers")
-        self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(
-            ["hidden_states", "residual"], config.hidden_size)
+        self.make_empty_intermediate_tensors = \
+            make_empty_intermediate_tensors_factory(
+                ["hidden_states", "residual"], config.hidden_size)
 
         if get_pp_group().is_last_rank:
             self.norm = Qwen3_5RMSNorm(config.hidden_size,
@@ -535,7 +529,7 @@ class Qwen3_5Model(Qwen3NextModel):
                 continue
 
             for param_name, weight_name, shard_id in stacked_params_mapping:
-                if "experts.gate_up_proj" in name or "experts.down_proj" in name:
+                if "experts.gate_up_proj" in name or "experts.down_proj" in name: # noqa: E501
                     is_fused_expert = True
                     expert_params_mapping = fused_expert_params_mapping
 
@@ -616,7 +610,6 @@ class Qwen3_5Model(Qwen3NextModel):
                             name_mapped,
                             shard_id=shard_id,
                             expert_id=expert_id,
-                            #                            return_success=True,
                         )
                     if success:
                         name = name_mapped
@@ -634,7 +627,7 @@ class Qwen3_5Model(Qwen3NextModel):
                         continue
                     if name not in params_dict:
                         logger.warning_once(
-                            f"Parameter {name} not found in params_dict, skip loading"
+                            f"Parameter {name} not found in params_dict, skip loading" # noqa: E501
                         )
                         continue
                     param = params_dict[name]
@@ -667,7 +660,7 @@ class Qwen3_5ForCausalLMBase(
         config = vllm_config.model_config.hf_text_config
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
-        cache_config = vllm_config.cache_config
+        # cache_config = vllm_config.cache_config
 
         scheduler_config = vllm_config.scheduler_config
         # if cache_config.mamba_cache_mode == "all":
@@ -763,7 +756,7 @@ class Qwen3_5MoeForCausalLM(Qwen3_5ForCausalLMBase, QwenNextMixtureOfExperts):
 )
 class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration,
                                       IsHybrid):
-    packed_modules_mapping = Qwen3VLForConditionalGeneration.packed_modules_mapping | {
+    packed_modules_mapping = Qwen3VLForConditionalGeneration.packed_modules_mapping | { # noqa: E501
         "in_proj_qkvz": ["in_proj_qkv", "in_proj_z"],
         "in_proj_ba": ["in_proj_b", "in_proj_a"],
     }
@@ -772,12 +765,12 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration,
         # protocols have not __init__ method, so we need to use nn.Module.__init__
         nn.Module.__init__(self)
         config: Qwen3_5Config = vllm_config.model_config.hf_config
-        quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
 
         self.config = config
         self.multimodal_config = multimodal_config
-        # self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
+        # self.use_data_parallel = \
+        #     multimodal_config.mm_encoder_tp_mode == "data"
         # self.video_pruning_rate = multimodal_config.video_pruning_rate
         # self.is_multimodal_pruning_enabled = (
         #     multimodal_config.is_multimodal_pruning_enabled()
@@ -941,7 +934,8 @@ class Qwen3_5_MoeMixtureOfExperts(MixtureOfExperts):
         assert self.num_local_physical_experts == num_local_physical_experts
         self.num_physical_experts = num_physical_experts
         self.num_local_physical_experts = num_local_physical_experts
-        self.num_redundant_experts = num_physical_experts - self.num_logical_experts
+        self.num_redundant_experts = \
+            num_physical_experts - self.num_logical_experts
         for layer in self.language_model.model.layers:
             if isinstance(layer.mlp, Qwen3NextSparseMoeBlock):
                 moe = layer.mlp
@@ -988,12 +982,12 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5ForConditionalGeneration,
         # protocols have not __init__ method, so we need to use nn.Module.__init__
         nn.Module.__init__(self)
         config: Qwen3_5MoeConfig = vllm_config.model_config.hf_config
-        quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
 
         self.config = config
         self.multimodal_config = multimodal_config
-        # self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
+        # self.use_data_parallel = \
+        #     multimodal_config.mm_encoder_tp_mode == "data"
         # self.video_pruning_rate = multimodal_config.video_pruning_rate
         # self.is_multimodal_pruning_enabled = (
         #     multimodal_config.is_multimodal_pruning_enabled()

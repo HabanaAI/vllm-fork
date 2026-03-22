@@ -1889,8 +1889,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         align_worker=False,
-        running_queue_list: Optional[List[int]] = [],
+        running_queue_list: Optional[List[int]] = None,
     ) -> PreparePromptMetadata:
+        if running_queue_list is None:
+            running_queue_list = []
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
         conv_state_indices_list: List[List[int]] = []
@@ -2005,9 +2007,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self._is_fla_model():
                 if hasattr(self.model_config.hf_config,
                            "linear_conv_kernel_dim"):
-                    linear_conv_kernel_dim = self.model_config.hf_config.linear_conv_kernel_dim
+                    linear_conv_kernel_dim = \
+                        self.model_config.hf_config.linear_conv_kernel_dim
                 else:
-                    linear_conv_kernel_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim
+                    linear_conv_kernel_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim # noqa: E501
                 conv_state_indices_list.append(list(range(seq_len + 1 - \
                 linear_conv_kernel_dim, seq_len)))
 
@@ -2357,8 +2360,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         total_seq_ids=None,
         output=None,
         align_worker=False,
-        running_queue_list: Optional[List[int]] = [],
+        running_queue_list: Optional[List[int]] = None,
     ) -> PrepareDecodeMetadata:
+        if running_queue_list is None:
+            running_queue_list = []
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
         input_mrope_positions: List[List[int]] = [[] for _ in range(3)]
@@ -2826,8 +2831,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_group_metadata_list: List[SequenceGroupMetadata],
         finished_requests_ids: Optional[List[str]] = None,
         align_worker=False,
-        running_queue_list: Optional[List[int]] = [],
+        running_queue_list: Optional[List[int]] = None,
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
+        if running_queue_list is None:
+            running_queue_list = []
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -3139,7 +3146,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
         align_worker: bool = False,
-        running_queue_list: Optional[List[int]] = [],
+        running_queue_list: Optional[List[int]] = None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -3150,6 +3157,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         - input_tokens[num_prefill_tokens:] contains decode tokens.
         If cuda graph is required, this API automatically pads inputs.
         """
+        if running_queue_list is None:
+            running_queue_list = []
         with self.profiler.record_event('internal', 'prepare_input_tensors'):
             assert seq_group_metadata_list is not None
             self.profiler_counter_helper.capture_seq_group_metadata_stats(
@@ -3627,7 +3636,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if hasattr(self.model_config.hf_config, "linear_conv_kernel_dim"):
             conv_dim = self.model_config.hf_config.linear_conv_kernel_dim
         else:
-            conv_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim
+            conv_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim # noqa: E501
         bs, seq_len = inputs.input_tokens.shape
         mamba_cache_indices = list(range(bs))
         mamba_cache_indices = torch.tensor(mamba_cache_indices,
@@ -4469,7 +4478,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
-        running_queue_list: Optional[List[int]] = [],
+        running_queue_list: Optional[List[int]] = None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -4480,6 +4489,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         - input_tokens[num_prefill_tokens:] contains decode tokens.
         If cuda graph is required, this API automatically pads inputs.
         """
+        if running_queue_list is None:
+            running_queue_list = []
         return self.prepare_model_input_align_worker(seq_group_metadata_list,
                                                      virtual_engine,
                                                      finished_requests_ids,

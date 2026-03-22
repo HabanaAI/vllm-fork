@@ -121,7 +121,8 @@ class Qwen3_5MoeTextConfig(PretrainedConfig):
         super().__init__(**kwargs)
         # Set these AFTER super().__init__() because transformers v4's
         # PretrainedConfig.__init__ has these as explicit params with different
-        # defaults (e.g. tie_word_embeddings=True) that would overwrite our values.
+        # defaults (e.g. tie_word_embeddings=True) that would overwrite our
+        # values.
         self.pad_token_id = pad_token_id
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id

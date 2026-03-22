@@ -4,7 +4,6 @@
 # Copyright (c) 2024, Tri Dao.
 # Adapted from https://github.com/huggingface/transformers/blob/v4.57-release/src/transformers/models/qwen3_next/modeling_qwen3_next.py
 
-
 import torch
 import torch.nn.functional as F
 
@@ -63,7 +62,7 @@ def torch_chunk_gated_delta_rule_opt(
     mask = torch.ones(chunk_size,
                       chunk_size,
                       dtype=value.dtype,
-                      device=query.device).tril(-1)
+                      device=value.device).tril(-1)
 
     # chunk decay
     g = g.cumsum(dim=-1)
@@ -157,7 +156,6 @@ def torch_recurrent_gated_delta_rule_opt(
         x.transpose(1, 2).contiguous() for x in (query, key, value, beta, g)
     ]
 
-    v_head_dim = value.shape[-1]
     scale = 1 / (query.shape[-1]**0.5)
     query = query * scale
 
@@ -229,7 +227,7 @@ def torch_chunk_gated_delta_rule(
     mask = torch.triu(torch.ones(chunk_size,
                                  chunk_size,
                                  dtype=torch.bool,
-                                 device=query.device),
+                                 device=value.device),
                       diagonal=0)
 
     # chunk decay
@@ -254,7 +252,7 @@ def torch_chunk_gated_delta_rule(
     mask = torch.tril(torch.ones(chunk_size,
                                  chunk_size,
                                  dtype=torch.bool,
-                                 device=query.device),
+                                 device=value.device),
                       diagonal=0)
     mask = mask.view(1, 1, 1, chunk_size, chunk_size)
     attn = (query @ key.transpose(-1, -2)) * decay_mask * mask
@@ -305,7 +303,6 @@ def torch_recurrent_gated_delta_rule(
         for x in (query, key, value, beta, g)
     ]
 
-    v_head_dim = value.shape[-1]
     scale = 1 / (query.shape[-1]**0.5)
     query = query * scale
 
