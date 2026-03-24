@@ -449,11 +449,9 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         if attn_metadata.chunk_prefill_enabled:
             return self.forward_chunked_prefill(hidden_states, attn_metadata)
 
-        conv_state = self.conv_state
-        ssm_state = self.ssm_state
         kv_cache = self.kv_cache[forward_context.virtual_engine]
         block_size = self.cache_config.block_size
-        block_mapping = attn_metadata.slot_mapping // block_size
+        mamba_slot_mapping = attn_metadata.mamba_slot_mapping
         mamba_block_list = attn_metadata.mamba_block_list
         # ============================================================
         # Part 1: Input Projection
@@ -484,35 +482,18 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
 
         if attn_metadata.is_prompt:
             bs, seq_len, qkv_dim = mixed_qkv.shape
-            conv_state_indices = attn_metadata.conv_state_indices
-            prefill_conv_state = torch.index_select(
-                mixed_qkv.reshape(-1, qkv_dim),
-                dim=0,
-                index=conv_state_indices).reshape(bs, -1, qkv_dim)
-            mixed_qkv = _save_conv_state(mixed_qkv, prefill_conv_state,
-                                         conv_state,
-                                         mamba_cache_prefill_indices)
             pre_conv_state = None
-            # when enable prefix caching. Store conv state for each block.
-            if (self.cache_config.enable_prefix_caching
-                and kv_cache is not None
-                and isinstance(kv_cache, tuple)):
+            if (kv_cache is not None and
+                isinstance(kv_cache, tuple) and
+                self.cache_config.enable_prefix_caching and
+                mamba_block_list is not None):
                 conv_cache = kv_cache[0]
-                for block_i, token_i in enumerate(range(0, seq_len, block_size)):
-                    block_i_mapping = block_mapping[:, token_i]
-                    block_tail = (block_i + 1) * block_size
-                    conv_state_indices = list(range(block_tail + 1 - self.conv_kernel_size, block_tail))
-                    block_conv_state = mixed_qkv[:,conv_state_indices]
-                    conv_cache.index_copy_(
-                        dim=0,
-                        index=block_i_mapping,
-                        source=block_conv_state)
-                if mamba_block_list is not None:
-                    pre_conv_state = torch.index_select(
-                        conv_cache,
-                        dim=0,
-                        index=mamba_block_list,
-                    )
+                # when enable prefix caching. Store conv state for each block.
+                pre_conv_state = torch.index_select(
+                    conv_cache,
+                    dim=0,
+                    index=mamba_block_list,
+                )            
             if pre_conv_state is not None:
                 mixed_qkv_with_pad = torch.concat([pre_conv_state, mixed_qkv],
                                                   dim=1)
@@ -521,6 +502,16 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                     mixed_qkv,
                     (0, 0, self.conv_kernel_size - 1, 0),
                 )
+            if kv_cache is not None and isinstance(kv_cache, tuple):
+                conv_cache = kv_cache[0]
+                conv_state_indices = attn_metadata.conv_state_indices
+                prefill_conv_state = torch.index_select(
+                    mixed_qkv_with_pad.reshape(-1, qkv_dim),
+                    dim=0,
+                    index=conv_state_indices).reshape(-1, self.conv_kernel_size - 1, qkv_dim)
+                conv_cache.index_copy_(dim=0,
+                                      index=mamba_slot_mapping.flatten(),
+                                      source=prefill_conv_state)
             for idx in range(self.conv_kernel_size):
                 qkv_slice = mixed_qkv_with_pad[:, idx:(idx + seq_len), :]
                 conv1d_weight_slice = self.conv1d_weight[idx]
@@ -533,29 +524,22 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
 
         else:
+            assert kv_cache is not None and isinstance(kv_cache, tuple)
+            conv_cache = kv_cache[0]
             mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
                 mixed_qkv,
-                conv_state,
+                conv_cache,
                 self.conv1d_weight,
                 self.conv1d.bias,
                 self.activation,
-                conv_state_indices=mamba_cache_decode_indices,
+                conv_state_indices=mamba_block_list,
             )
             mixed_qkv_non_spec = _save_conv_state(
                 mixed_qkv_non_spec,
                 cur_conv_state,
-                conv_state,
-                mamba_cache_decode_indices,
+                conv_cache,
+                mamba_slot_mapping[:,0],
             )
-            if (self.cache_config.enable_prefix_caching
-                and kv_cache is not None
-                and isinstance(kv_cache, tuple)):
-                conv_cache = kv_cache[0]
-                conv_cache.index_copy_(
-                    dim=0,
-                    index=block_mapping[:,0],
-                    source=cur_conv_state
-                    )
 
         query, key, value = torch.split(
             mixed_qkv_non_spec.to(hidden_states.dtype),
@@ -607,7 +591,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                         use_qk_l2norm_in_kernel=True,
                         block_size=block_size,
                         ssm_cache=ssm_cache,
-                        block_mapping=block_mapping,
+                        mamba_slot_mapping=mamba_slot_mapping,
                     ))
             else:
                 core_attn_out, last_recurrent_state = (
@@ -623,14 +607,18 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                         output_final_state=True,
                         use_qk_l2norm_in_kernel=True,
                     ))
-            core_attn_out = _save_ssm_state(core_attn_out,
-                                            last_recurrent_state, ssm_state,
-                                            mamba_cache_prefill_indices)
+                if kv_cache is not None and isinstance(kv_cache, tuple):
+                    ssm_cache = kv_cache[1]
+                    ssm_cache.index_copy_(dim=0,
+                                          index=mamba_slot_mapping[:,0],
+                                          source=last_recurrent_state)
         else:
+            assert kv_cache is not None and isinstance(kv_cache, tuple)
+            ssm_cache = kv_cache[1]
             recurrent_state = torch.index_select(
-                ssm_state,
+                ssm_cache,
                 dim=0,
-                index=mamba_cache_decode_indices,
+                index=mamba_block_list,
             )
             core_attn_out, last_recurrent_state = (
                 torch_recurrent_gated_delta_rule_opt(
@@ -644,17 +632,9 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                     use_qk_l2norm_in_kernel=True,
                 ))
             core_attn_out = _save_ssm_state(core_attn_out,
-                                            last_recurrent_state, ssm_state,
-                                            mamba_cache_decode_indices)
-            if (self.cache_config.enable_prefix_caching
-                and kv_cache is not None
-                and isinstance(kv_cache, tuple)):
-                ssm_cache = kv_cache[1]
-                ssm_cache.index_copy_(
-                    dim=0,
-                    index=block_mapping[:,0],
-                    source=last_recurrent_state
-                    )
+                                            last_recurrent_state,
+                                            ssm_cache,
+                                            mamba_slot_mapping[:,0])
 
         # ============================================================
         # Part 3: Output Projection

@@ -322,12 +322,19 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                                 divide(self.num_v_heads, self.tp_size),
                                 self.head_k_dim, self.head_v_dim)
 
-        self.conv_state = torch.empty(conv_state_shape,
-                                      dtype=torch.float32,
-                                      device=self.conv1d.weight.device)
-        self.ssm_state = torch.empty(temporal_state_shape,
-                                     dtype=torch.float32,
-                                     device=self.conv1d.weight.device)
+        if config.model_type in ["qwen3_5_text", "qwen3_5_moe_text"]:
+            # Qwen3.5 uses self.kv_cache to store both conv_state and ssm_state
+            # so we don't need to allocate
+            self.conv_state = None
+            self.ssm_state = None
+        else:
+            self.conv_state = torch.empty(conv_state_shape,
+                                          dtype=torch.float32,
+                                          device=self.conv1d.weight.device)
+            self.ssm_state = torch.empty(temporal_state_shape,
+                                        dtype=torch.float32,
+                                        device=self.conv1d.weight.device)
+
         self.kv_cache = [(torch.tensor([]),torch.tensor([]))]
 
         self.chunk_size = 64

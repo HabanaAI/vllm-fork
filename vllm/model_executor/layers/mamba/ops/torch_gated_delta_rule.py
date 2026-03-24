@@ -23,12 +23,12 @@ def torch_chunk_gated_delta_rule_opt(
     output_final_state=True,
     use_qk_l2norm_in_kernel=True,
     ssm_cache=None,
-    block_mapping=None,
+    mamba_slot_mapping=None,
 ):
-    write_block_state_to_ssm_cache = ssm_cache is not None or block_mapping is not None
+    write_block_state_to_ssm_cache = ssm_cache is not None or mamba_slot_mapping is not None
     if write_block_state_to_ssm_cache:
         assert ssm_cache is not None, "ssm_cache must be specified when writing block state"
-        assert block_mapping is not None, "block_mapping must be specified when writing block state"
+        write_block_state_to_ssm_cache = ssm_cache is not None or mamba_slot_mapping is not None
         assert block_size is not None, "block_size must be specified when writing block state"
         assert block_size % chunk_size == 0, "block_size must be a multiple of chunk_size"
         num_chunk_per_block = block_size // chunk_size
@@ -162,8 +162,7 @@ def torch_chunk_gated_delta_rule_opt(
                                             last_recurrent_state) + N[:, :, i]
         if write_block_state_to_ssm_cache and (i + 1) % num_chunk_per_block == 0:
             block_idx = i // num_chunk_per_block
-            token_idx = block_idx * block_size
-            block_i_mapping = block_mapping[:, token_idx]
+            block_i_mapping = mamba_slot_mapping[:, block_idx]
             ssm_cache.index_copy_(
                 dim=0,
                 index=block_i_mapping,

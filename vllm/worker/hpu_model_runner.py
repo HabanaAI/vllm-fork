@@ -2071,8 +2071,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.model_config.hf_config.linear_conv_kernel_dim
                 else:
                     linear_conv_kernel_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim  # noqa: E501
-                conv_state_indices_list.append(list(range(seq_len + 1 - context_len - \
-                linear_conv_kernel_dim, seq_len - context_len)))
+                conv_state_indices_list.append(list(range(seq_len - context_len,
+                    seq_len - context_len + linear_conv_kernel_dim - 1)))
 
             token_types_ids = seq_group_metadata.token_type_ids
             token_types.append(token_types_ids) if token_types_ids else []
@@ -2278,8 +2278,48 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
+        mamba_slot_mapping = None
         if self._is_fla_model():
             input_stride = input_tokens_tensor.size(-1)
+            if self.use_prefix_caching:
+                # fill conv_state_indices
+                block_span = linear_conv_kernel_dim - 1
+                prefix_conv_state_indices: List[int] = []
+                for block_tail in range(self.block_size, input_stride + 1,
+                                        self.block_size):
+                    prefix_conv_state_indices.extend(
+                        range(block_tail, block_tail + block_span))
+
+                filled_conv_state_indices_list = []
+                for conv_state_indices in conv_state_indices_list:
+                    fill_end_index = (math.ceil((conv_state_indices[-1] - block_span + 1)
+                                                / self.block_size) * block_span)
+                    filled_conv_state_indices = prefix_conv_state_indices.copy()
+                    filled_conv_state_indices[fill_end_index - block_span:
+                                              fill_end_index] = \
+                        conv_state_indices
+                    filled_conv_state_indices_list.append(
+                        filled_conv_state_indices)
+                conv_state_indices_list = filled_conv_state_indices_list
+
+                # fill mamba_slot_mapping
+                mamba_slot_mapping = [[slot // self.block_size
+                                       for slot in seq_slot_mapping]
+                                      for seq_slot_mapping in slot_mapping]
+                mamba_slot_mapping = [seq_slot_mapping[::self.block_size]
+                                      for seq_slot_mapping in mamba_slot_mapping]
+                mamba_slot_mapping = make_cpu_tensor(mamba_slot_mapping,
+                            max_len=math.ceil(max_prompt_len / self.block_size),
+                            pad=_PAD_SLOT_ID,
+                            dtype=torch.long,
+                            flat=self.use_merged_prefill)
+            else:
+                mamba_slot_mapping = [[seq_slot_mapping[-1] // self.block_size]
+                                      for seq_slot_mapping in slot_mapping]
+                mamba_slot_mapping = torch.tensor(mamba_slot_mapping,
+                                                  dtype=torch.long,
+                                                  device='cpu')
+
             conv_state_indices = conv_state_indices_list[0]
             for idx in range(1, len(conv_state_indices_list)):
                 conv_state_indices = conv_state_indices + [i + \
@@ -2373,6 +2413,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 mamba_cache_prefill_indices)
         if mamba_block_list is not None:
             mamba_block_list = self.move_to_device(mamba_block_list)
+        if mamba_slot_mapping is not None:
+            mamba_slot_mapping = self.move_to_device(mamba_slot_mapping)
 
         token_types_tensor = self.move_to_device(token_types_tensor)
         attn_metadata = self.attn_backend.make_metadata(
@@ -2401,6 +2443,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             conv_state_indices=conv_state_indices,
             mamba_cache_prefill_indices=mamba_cache_prefill_indices,
             mamba_block_list=mamba_block_list,
+            mamba_slot_mapping=mamba_slot_mapping,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
@@ -2728,11 +2771,24 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         mamba_cache_decode_indices = None
         mamba_block_list = None
+        mamba_slot_mapping = None
         if self._is_fla_model():
-            mamba_block_list = [bt[-1] for bt in block_tables]
+            mamba_block_list = []
+            for i,bt in enumerate(block_tables):
+                if len(bt) == 0:
+                    mamba_block_list.append(_PAD_BLOCK_ID)
+                elif slot_mapping[i][-1] % self.block_size == 0:
+                    mamba_block_list.append(bt[-2])
+                else:
+                    mamba_block_list.append(bt[-1])
             mamba_block_list = torch.tensor(mamba_block_list,
                                              dtype=torch.long,
                                              device='cpu')
+            mamba_slot_mapping = [[seq_slot_mapping[0] // self.block_size]
+                                  for seq_slot_mapping in slot_mapping]
+            mamba_slot_mapping = torch.tensor(mamba_slot_mapping,
+                                              dtype=torch.long,
+                                              device='cpu')
             mamba_cache_bs = max(8, self.max_num_seqs) + 2
             if self.scheduler_config.enable_chunked_prefill:
                 decode_seq_ids = []
@@ -2780,6 +2836,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
         if mamba_block_list is not None:
             mamba_block_list = mamba_block_list.to(  # type: ignore
+                self.device, non_blocking=True)
+        if mamba_slot_mapping is not None:
+            mamba_slot_mapping = mamba_slot_mapping.to(  # type: ignore
                 self.device, non_blocking=True)
 
         if is_enc_dec_model:
@@ -2842,6 +2901,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_positions=input_positions,
             mamba_cache_decode_indices=mamba_cache_decode_indices,
             mamba_block_list=mamba_block_list,
+            mamba_slot_mapping=mamba_slot_mapping
         )
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
@@ -3443,6 +3503,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'mamba_cache_decode_indices',
             'mamba_cache_prefill_indices',
             'mamba_block_list',
+            'mamba_slot_mapping',
         ])
         return attention_metadata
 
