@@ -34,18 +34,23 @@
     - [3.3.2 安装和启动 vLLM](#332-安装和启动-vllm)
     - [3.3.3 Qwen3-235B-A22B-Instruct-2507-FP8（4 卡部署）](#333-qwen3-235b-a22b-instruct-2507-fp8-4-卡部署)
     - [3.3.4 Qwen3-Coder-480B-A35B-Instruct-FP8（8 卡部署）](#334-qwen3-coder-480b-a35b-instruct-fp8-8-卡部署)
-  - [3.4 MiniMax-M2.5](#34-minimax-m25)
+  - [3.4 Qwen3.5系列模型](#34-qwen35系列模型)
     - [3.4.1 启动容器和下载模型权重](#341-启动容器和下载模型权重)
     - [3.4.2 安装 vLLM](#342-安装-vllm)
-    - [3.4.3 模型权重转换](#343-模型权重转换)
-    - [3.4.4 启动 vLLM](#344-启动-vllm)
-  - [3.5 多模态模型](#35-多模态模型)
-    - [3.5.1 Qwen 系列多模态模型](#351-qwen-系列多模态模型)
-    - [3.5.2 client 端请求格式样例](#352-client-端请求格式样例)
-    - [3.5.3 FP8 static quant](#353-fp8-static-quant)
-    - [3.5.4 FP8 dynamic quant](#354-fp8-dynamic-quant)
-    - [3.5.5 PaddleOCR-VL 模型](#355-paddleocr-vl-模型)
-    - [3.5.6 问题解答](#356-问题解答)
+    - [3.4.3 BF16精度模型部署](#343-bf16精度模型部署)
+    - [3.4.4 FP8精度模型部署](#344-fp8精度模型部署)
+  - [3.5 MiniMax-M2.5](#35-minimax-m25)
+    - [3.5.1 启动容器和下载模型权重](#351-启动容器和下载模型权重)
+    - [3.5.2 安装 vLLM](#352-安装-vllm)
+    - [3.5.3 模型权重转换](#353-模型权重转换)
+    - [3.5.4 启动 vLLM](#354-启动-vllm)
+  - [3.6 多模态模型](#36-多模态模型)
+    - [3.6.1 Qwen 系列多模态模型](#361-qwen-系列多模态模型)
+    - [3.6.2 client 端请求格式样例](#362-client-端请求格式样例)
+    - [3.6.3 FP8 static quant](#363-fp8-static-quant)
+    - [3.6.4 FP8 dynamic quant](#364-fp8-dynamic-quant)
+    - [3.6.5 PaddleOCR-VL 模型](#365-paddleocr-vl-模型)
+    - [3.6.6 问题解答](#366-问题解答)
 
 ## 1.0 环境部署
 
@@ -822,9 +827,178 @@ bash start_gaudi_vllm_server.sh \
     -c /vllm_cache/Qwen3-Coder-480B-A35B-Instruct-FP8
 ```
 
-### 3.4 MiniMax-M2.5
+### 3.4 Qwen3.5系列模型
 
 #### 3.4.1 启动容器和下载模型权重
+
+请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。
+
+```bash
+docker run -it --name qwen35_server --runtime=habana \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+    -v /mnt/disk4:/data \
+    --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:1.23.0-695
+```
+
+下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
+
+```bash
+pip install modelscope
+modelscope download --model Qwen/Qwen3.5-27B --local_dir /data/hf_models/Qwen3.5-27B
+modelscope download --model Qwen/Qwen3.5-35B-A3B --local_dir /data/hf_models/Qwen3.5-35B-A3B
+modelscope download --model Qwen/Qwen3.5-122B-A10B --local_dir /data/hf_models/Qwen3.5-122B-A10B
+```
+
+#### 3.4.2 安装 vLLM
+
+为容器设置正确的网络设置，确保容器可以正常访问 github。
+使用如下命令在镜像环境安装 vLLM v1.22.0：
+
+```bash
+# install vllm
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+cd vllm-fork
+git config --add remote.origin.fetch "+refs/pull/*/head:refs/remotes/origin/pr/*"
+git fetch origin
+git checkout pr/2234
+cd ..
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install -r vllm-fork/requirements-hpu.txt
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# [optional] install vllm-hpu-extension to do calibration
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+cd vllm-hpu-extension
+git config --add remote.origin.fetch "+refs/pull/*/head:refs/remotes/origin/pr/*"
+git fetch origin
+git checkout pr/410
+cd ..
+pip install -e vllm-hpu-extension --no-build-isolation
+
+# 升级默认transformers库
+pip install --upgrade transformers==5.3.0
+```
+
+#### 3.4.3 BF16精度模型部署
+启动 vLLM，进入启动脚本目录，启动 vLLM。
+- 以下命令启动默认上下文长度16384。
+- 环境变量*VLLM_HPU_CONVERT_TO_FP8UZ=false VLLM_SUPPORT_MOE_CHUNK=true*有更好的性能，**推荐使用**。
+
+Qwen3.5-27B 模型2卡部署可使用如下命令启动:
+```bash
+cd vllm-fork/scripts
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_SUPPORT_MOE_CHUNK=true \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B/ \
+-t 2 \
+-m 0,1 \
+-a 127.0.0.1:30001 \
+-x 16384 \
+-p 8 \
+-b 128 \
+-e "--reasoning-parser qwen3" \
+-c /warmup_cache/Qwen3.5-27B/
+```
+
+Qwen3.5-35B-A3B 模型4卡部署可使用如下命令启动：
+```bash
+cd vllm-fork/scripts
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_SUPPORT_MOE_CHUNK=true \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-35B-A3B/ \
+-t 4 \
+-m 0,1,2,3 \
+-a 127.0.0.1:30001 \
+-x 16384 \
+-p 8 \
+-b 128 \
+-e "--reasoning-parser qwen3" \
+-c /warmup_cache/Qwen3.5-35B-A3B/
+```
+Qwen3.5-122B-A10B 模型8卡部署可使用如下命令启动：
+```bash
+cd vllm-fork/scripts
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_SUPPORT_MOE_CHUNK=true \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B/ \
+-t 8 \
+-a 127.0.0.1:30001 \
+-x 16384 \
+-p 8 \
+-b 128 \
+-e "--reasoning-parser qwen3" \
+-c /warmup_cache/Qwen3.5-122B-A10B/
+```
+
+#### 3.4.4 FP8精度模型部署
+##### 3.4.4.1 模型权重转换
+
+FP8的权重需要通过BF16的模型转换而来，解压复制文件并转换权重
+
+```bash
+cd vllm-fork/scripts/data
+tar -xvzf qwen3.5-input-scale.tar.gz
+cd vllm-hpu-extension/scripts
+```
+Qwen3.5-27B 转Unit Scale FP8权重：
+```bash
+cp vllm-fork/scripts/data/qwen3.5-input-scale/qwen3.5-27b-input-scale.safetensors ./
+python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s qwen3.5-27b-input-scale.safetensors
+```
+
+Qwen3.5-122B-A10B 转Unit Scale FP8权重：
+```bash
+cp vllm-fork/scripts/data/qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors ./
+python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s qwen3.5-122b-moe-input-scale.safetensors
+```
+
+##### 3.4.4.2 启动 vLLM
+
+启动 vLLM，进入启动脚本目录，启动 vLLM。
+- 以下命令启动默认上下文长度16384。
+- 请用按照3.4.4.1章节中转换出来的模型来启动vLLM。
+- 环境变量*VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
+
+Qwen3.5-27B-FP8-G2-Unit 模型1卡部署可使用如下命令启动：
+```bash
+cd vllm-fork/scripts
+VLLM_ENABLE_UNIT_MOE=true \
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2-Unit/ \
+-t 1 \
+-m 0 \
+-a 127.0.0.1:30001 \
+-x 16384 \
+-p 8 \
+-g 1024 \
+-b 64 \
+-e "--reasoning-parser qwen3" \
+-c /recipe_cache_Qwen3.5-27B-FP8/
+```
+
+Qwen3.5-122B-A10B-FP8-G2-Unit 模型4卡部署可使用如下命令启动：
+```bash
+cd vllm-fork/scripts
+VLLM_ENABLE_UNIT_MOE=true \
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit/ \
+-t 4 \
+-m 0,1,2,3 \
+-a 127.0.0.1:30001 \
+-x 16384 \
+-p 8 \
+-g 1024 \
+-u 0.8 \
+-b 64 \
+-e "--reasoning-parser qwen3" \
+-c /recipe_cache_Qwen3.5-122B-FP8/
+```
+
+### 3.5 MiniMax-M2.5
+
+#### 3.5.1 启动容器和下载模型权重
 
 请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。
 
@@ -844,7 +1018,7 @@ pip install modelscope
 modelscope download --model MiniMaxAI/MiniMax-M2.5 --local_dir /data/hf_models/MiniMax-M2.5
 ```
 
-#### 3.4.2 安装 vLLM
+#### 3.5.2 安装 vLLM
 
 为容器设置正确的网络设置，确保容器可以正常访问 github。
 使用如下命令在镜像环境安装 vLLM v1.22.0：
@@ -867,25 +1041,25 @@ cd ..
 pip install -e vllm-hpu-extension --no-build-isolation
 ```
 
-#### 3.4.3 模型权重转换
+#### 3.5.3 模型权重转换
 
 解压复制文件并转换权重
 
 ```bash
-cd vllm-fork/script/data
+cd vllm-fork/scripts/data
 tar -xvzf minimax-m2.5-input-scale.tar.gz
 cd ../
 cp data/minimax_m2.5_input_scale/minimax-m2.5-input-scale.safetensors ./
 python3 convert_for_minimax_unit_scale.py -i /data/hf_models/MiniMax-M2.5 -o /data/hf_models/MiniMax-M2.5-G2 -s minimax-m2.5-input-scale.safetensors -u
 ```
 
-#### 3.4.4 启动 vLLM
+#### 3.5.4 启动 vLLM
 
 启动 vLLM，进入启动脚本目录，启动 vLLM。
 MiniMax-M2.5 模型4卡部署可使用如下命令启动。
 - 以下命令启动默认上下文长度16384。
-- 请用按照3.4.3章节中转换出来的模型MiniMax-M2.5-G2来启动vLLM。
-- 环境变量*VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
+- 请用按照3.5.3章节中转换出来的模型MiniMax-M2.5-G2来启动vLLM。
+- 环境变量*VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
 
 ```bash
 cd vllm-fork/scripts
@@ -930,7 +1104,7 @@ bash start_gaudi_vllm_server.sh \
 -e "--enable-prefix-caching --tool-call-parser minimax_m2 --reasoning-parser deepseek_r1 --enable-auto-tool-choice"
 ```
 
-### 3.5 多模态模型
+### 3.6 多模态模型
 
 如果要做音频处理，需要安装音频相关的库。
 
@@ -938,7 +1112,7 @@ bash start_gaudi_vllm_server.sh \
 pip install vllm[audio]
 ```
 
-#### 3.5.1 Qwen 系列多模态模型
+#### 3.6.1 Qwen 系列多模态模型
 
 **启动服务**\
 **Qwen2-VL**: Support Image and Video inputs
@@ -1004,7 +1178,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
 - `--limit-mm-per-prompt` 设置每个 prompt 中每种多模态数据的最大个数
 - `--mm_processor_kwargs max_pixels=1003520` 限制输入图片最大尺寸。超过的图片会被保持宽高比例缩小。
 
-#### 3.5.2 client 端请求格式样例
+#### 3.6.2 client 端请求格式样例
 
 多模态 client 端请求格式可以参考脚本 [openai_chat_completion_client_for_multimodal.py](../examples/online_serving/openai_chat_completion_client_for_multimodal.py)
 
@@ -1019,7 +1193,7 @@ python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
     -c audio
 ```
 
-#### 3.5.3 FP8 static quant
+#### 3.6.3 FP8 static quant
 
 *static quant*有更好的性能。 **推荐使用**。
 
@@ -1064,7 +1238,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     --max-model-len 131072
 ```
 
-#### 3.5.4 FP8 dynamic quant
+#### 3.6.4 FP8 dynamic quant
 
 *dynamic quant*流程更简单不需要校准，而且精度更高。
 
@@ -1090,7 +1264,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
 ```
 
-#### 3.5.5 PaddleOCR-VL 模型
+#### 3.6.5 PaddleOCR-VL 模型
 **启动服务**
 
 ```bash
@@ -1124,7 +1298,8 @@ paddleocr doc_parser \
     --save_path ./output
 ```
 
-#### 3.5.6 问题解答
+#### 3.6.6 问题解答
 
 - 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
 - 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。
+
