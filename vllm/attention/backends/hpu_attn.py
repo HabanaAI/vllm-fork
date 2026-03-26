@@ -582,6 +582,11 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         decode_batch_size = 0
         decode_seq_len = 0
         decode_hidden_size = 0
+
+        query = query.reshape(-1, query.size(-1))
+        key = key.reshape(-1, key.size(-1))
+        value = value.reshape(-1, value.size(-1))
+
         if attn_metadata.num_prefills > 0:
             attn_data = self.preprocess_forward(
                 query[:attn_metadata.num_prefill_tokens],

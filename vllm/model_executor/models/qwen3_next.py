@@ -702,7 +702,7 @@ class Qwen3NextAttention(nn.Module):
 
         output, _ = self.o_proj(attn_output)
 
-        return output
+        return output.reshape(bs, seq, -1)
 
 
 class Qwen3NextDecoderLayer(nn.Module):

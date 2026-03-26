@@ -189,7 +189,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         a = a.contiguous().float()
         mixed_qkv = mixed_qkv.float()
 
-        beta = b.sigmoid()
+        beta = b.sigmoid().to(hidden_states.dtype)
         g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
 
         prefill_part = None
@@ -219,11 +219,8 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             # first chunk -> 0
             context_lens = attn_metadata.context_lens_tensor[:num_prefills]
             is_first_chunk = (context_lens == 0)
-            if torch.any(is_first_chunk):
-                prev_conv_state = prev_conv_state.clone()
-                prev_ssm_state = prev_ssm_state.clone()
-                prev_conv_state[is_first_chunk] = 0
-                prev_ssm_state[is_first_chunk] = 0
+            prev_conv_state.masked_fill_(is_first_chunk[:, None, None], 0)
+            prev_ssm_state.masked_fill_(is_first_chunk[:, None, None, None], 0)
 
             prefill_part = {
                 "mixed_qkv": prefill_mixed_qkv,
@@ -308,7 +305,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             prefill_mixed_qkv_non_spec = F.silu(prefill_mixed_qkv_non_spec)
 
             query, key, value = torch.split(
-                prefill_mixed_qkv_non_spec,
+                prefill_mixed_qkv_non_spec.to(hidden_states.dtype),
                 [
                     self.key_dim // self.tp_size,
                     self.key_dim // self.tp_size,
@@ -362,7 +359,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
 
 
             query, key, value = torch.split(
-                decode_mixed_qkv_non_spec,
+                decode_mixed_qkv_non_spec.to(hidden_states.dtype),
                 [
                     self.key_dim // self.tp_size,
                     self.key_dim // self.tp_size,
@@ -432,6 +429,9 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         """
         forward_context = get_forward_context()
         attn_metadata: AttentionMetadata = forward_context.attn_metadata
+
+        if len(hidden_states.shape) == 2:
+            hidden_states = hidden_states.unsqueeze(0)
 
         if attn_metadata.chunk_prefill_enabled:
             return self.forward_chunked_prefill(hidden_states, attn_metadata)

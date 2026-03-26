@@ -1065,6 +1065,7 @@ def FindMambaIndexForPrefill(
 def FindMambaIndexForDecode(
     mamba_dict: Dict[int, int],
     seq_list: List[int],
+    max_concurrency: int,
     running_queue_list: List[int],
 ):
     invalid_keys = [
@@ -1072,6 +1073,8 @@ def FindMambaIndexForDecode(
     ]
     for key in invalid_keys:
         mamba_dict.pop(key)
+    if -1 in seq_list:
+        mamba_dict[-1] = max_concurrency - 1
     return [mamba_dict[seq_id] for seq_id in seq_list]
 
 
@@ -2664,11 +2667,25 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         mamba_cache_decode_indices = None
         if self._is_fla_model():
-            mamba_decode_indices = FindMambaIndexForDecode(
-                self.mamba_cache_table,
-                total_seq_ids,
-                running_queue_list,
-            )
+            mamba_cache_bs = max(8, self.max_num_seqs) + 2
+            if self.scheduler_config.enable_chunked_prefill:
+                decode_seq_ids = []
+                for sg in seq_group_metadata_list:
+                    for seq_id in sg.seq_data:
+                        decode_seq_ids.append(seq_id)
+                mamba_decode_indices = FindMambaIndexForDecode(
+                    self.mamba_cache_table,
+                    decode_seq_ids,
+                    mamba_cache_bs,
+                    running_queue_list,
+                )
+            else:
+                mamba_decode_indices = FindMambaIndexForDecode(
+                    self.mamba_cache_table,
+                    total_seq_ids,
+                    mamba_cache_bs,
+                    running_queue_list,
+                )
             if len(mamba_decode_indices) > 0:
                 decode_bs = input_tokens.size(0)  # type: ignore
                 if len(mamba_decode_indices) < decode_bs:
@@ -3006,6 +3023,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             (input_tokens, decode_input_tokens), dim=0)
                         input_positions = torch.cat(
                             (input_positions, decode_input_positions), dim=0)
+                        prefill_attn_metadata.mamba_cache_decode_indices = \
+                            decode_attn_metadata.mamba_cache_decode_indices
 
                 else:
                     max_len = decode_input_tokens.size(1)
