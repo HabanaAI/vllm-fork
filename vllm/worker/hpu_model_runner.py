@@ -1068,9 +1068,11 @@ def FindMambaIndexForDecode(
     max_concurrency: int,
     running_queue_list: List[int],
 ):
-    invalid_keys = [
-        key for key in list(mamba_dict.keys()) if key not in running_queue_list
-    ]
+    # For decode warmup senario
+    if running_queue_list == []:
+        return seq_list
+    invalid_keys = [key for key in list(mamba_dict.keys())
+                if key not in running_queue_list]
     for key in invalid_keys:
         mamba_dict.pop(key)
     if -1 in seq_list:
@@ -3685,7 +3687,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             inputs.attn_metadata.mamba_cache_prefill_indices = \
                 mamba_cache_prefill_indices
         if inputs.attn_metadata.num_decode_tokens > 0:
-            mamba_cache_decode_indices = mamba_cache_indices[num_prefills:].to(
+            num_decodes = inputs.attn_metadata.num_decode_tokens
+            mamba_cache_decode_indices = mamba_cache_indices[:num_decodes].to(
                 self.device, non_blocking=True)
             inputs.attn_metadata.mamba_cache_decode_indices = \
                 mamba_cache_decode_indices
