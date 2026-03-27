@@ -3286,6 +3286,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         decode_attn_metadata.slot_mapping
                     attn_metadata.decode_block_list =\
                         decode_attn_metadata.block_list
+                    attn_metadata.mamba_decode_block_list =\
+                        decode_attn_metadata.mamba_block_list
+                    attn_metadata.mamba_decode_slot_mapping =\
+                        decode_attn_metadata.mamba_slot_mapping
                     attn_metadata.block_usage =\
                         decode_attn_metadata.block_usage
                     attn_metadata.block_groups =\
@@ -3296,6 +3300,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     decode_attn_metadata.slot_mapping
                 attn_metadata.decode_block_list =\
                     decode_attn_metadata.block_list
+                attn_metadata.mamba_decode_block_list =\
+                        decode_attn_metadata.mamba_block_list
+                attn_metadata.mamba_decode_slot_mapping =\
+                        decode_attn_metadata.mamba_slot_mapping
                 attn_metadata.block_list = None
                 attn_metadata.slot_mapping = None
             attn_metadata.chunk_prefill_enabled = True
@@ -3504,6 +3512,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'mamba_cache_prefill_indices',
             'mamba_block_list',
             'mamba_slot_mapping',
+            'mamba_decode_block_list',
+            'mamba_decode_slot_mapping',
         ])
         return attention_metadata
 
