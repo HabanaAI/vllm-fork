@@ -2010,7 +2010,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     linear_conv_kernel_dim = \
                         self.model_config.hf_config.linear_conv_kernel_dim
                 else:
-                    linear_conv_kernel_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim # noqa: E501
+                    linear_conv_kernel_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim  # noqa: E501
                 conv_state_indices_list.append(list(range(seq_len + 1 - \
                 linear_conv_kernel_dim, seq_len)))
 
@@ -3636,7 +3636,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if hasattr(self.model_config.hf_config, "linear_conv_kernel_dim"):
             conv_dim = self.model_config.hf_config.linear_conv_kernel_dim
         else:
-            conv_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim # noqa: E501
+            conv_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim  # noqa: E501
         bs, seq_len = inputs.input_tokens.shape
         mamba_cache_indices = list(range(bs))
         mamba_cache_indices = torch.tensor(mamba_cache_indices,

@@ -529,7 +529,7 @@ class Qwen3_5Model(Qwen3NextModel):
                 continue
 
             for param_name, weight_name, shard_id in stacked_params_mapping:
-                if "experts.gate_up_proj" in name or "experts.down_proj" in name: # noqa: E501
+                if "experts.gate_up_proj" in name or "experts.down_proj" in name:  # noqa: E501
                     is_fused_expert = True
                     expert_params_mapping = fused_expert_params_mapping
 
@@ -627,7 +627,7 @@ class Qwen3_5Model(Qwen3NextModel):
                         continue
                     if name not in params_dict:
                         logger.warning_once(
-                            f"Parameter {name} not found in params_dict, skip loading" # noqa: E501
+                            f"Parameter {name} not found in params_dict, skip loading"  # noqa: E501
                         )
                         continue
                     param = params_dict[name]
@@ -756,13 +756,13 @@ class Qwen3_5MoeForCausalLM(Qwen3_5ForCausalLMBase, QwenNextMixtureOfExperts):
 )
 class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration,
                                       IsHybrid):
-    packed_modules_mapping = Qwen3VLForConditionalGeneration.packed_modules_mapping | { # noqa: E501
-        "in_proj_qkvz": ["in_proj_qkv", "in_proj_z"],
-        "in_proj_ba": ["in_proj_b", "in_proj_a"],
-    }
+    packed_modules_mapping = \
+        Qwen3VLForConditionalGeneration.packed_modules_mapping | {
+            "in_proj_qkvz": ["in_proj_qkv", "in_proj_z"],
+            "in_proj_ba": ["in_proj_b", "in_proj_a"],
+        }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
-        # protocols have not __init__ method, so we need to use nn.Module.__init__
         nn.Module.__init__(self)
         config: Qwen3_5Config = vllm_config.model_config.hf_config
         multimodal_config = vllm_config.model_config.multimodal_config
@@ -979,7 +979,6 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5ForConditionalGeneration,
                                          Qwen3_5_MoeMixtureOfExperts):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
-        # protocols have not __init__ method, so we need to use nn.Module.__init__
         nn.Module.__init__(self)
         config: Qwen3_5MoeConfig = vllm_config.model_config.hf_config
         multimodal_config = vllm_config.model_config.multimodal_config

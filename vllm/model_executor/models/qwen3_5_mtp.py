@@ -52,7 +52,7 @@ class Qwen3_5MultiTokenPredictor(nn.Module):
         model_config = vllm_config.model_config
         quant_config = vllm_config.quant_config
 
-        config: Qwen3_5TextConfig | Qwen3_5MoeTextConfig = model_config.hf_text_config # noqa: E501
+        config: Qwen3_5TextConfig | Qwen3_5MoeTextConfig = model_config.hf_text_config  # noqa: E501
 
         self.config = config
 
@@ -83,7 +83,7 @@ class Qwen3_5MultiTokenPredictor(nn.Module):
                 prefix=f"{prefix}.layers.{idx}",
             ) for idx in range(self.num_mtp_layers))
 
-        self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory( # noqa: E501
+        self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(  # noqa: E501
             ["hidden_states", "residual"], config.hidden_size)
 
         self.norm = Qwen3_5RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -196,7 +196,7 @@ class Qwen3_5MultiTokenPredictor(nn.Module):
                 continue
 
             for param_name, weight_name, shard_id in stacked_params_mapping:
-                if "experts.gate_up_proj" in name or "experts.down_proj" in name: # noqa: E501
+                if "experts.gate_up_proj" in name or "experts.down_proj" in name:  # noqa: E501
                     is_fused_expert = True
                     expert_params_mapping = fused_expert_params_mapping
 
@@ -294,7 +294,7 @@ class Qwen3_5MultiTokenPredictor(nn.Module):
                         continue
                     if name not in params_dict:
                         logger.warning_once(
-                            f"Parameter {name} not found in params_dict, skip loading" # noqa: E501
+                            f"Parameter {name} not found in params_dict, skip loading"  # noqa: E501
                         )
                         continue
                     param = params_dict[name]
