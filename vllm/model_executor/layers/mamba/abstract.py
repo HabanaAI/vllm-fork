@@ -42,6 +42,10 @@ class MambaBase(AttentionLayerBase):
         pass
 
     @abstractmethod
+    def get_state_dtype(self) -> tuple[torch.dtype, ...]:
+        pass
+
+    @abstractmethod
     def get_attn_backend(self) -> type["AttentionBackend"]:
         """Get the attention backend class for this Mamba layer."""
         pass
