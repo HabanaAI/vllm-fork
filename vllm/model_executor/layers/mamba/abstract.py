@@ -42,20 +42,22 @@ class MambaBase(AttentionLayerBase):
         pass
 
     @abstractmethod
+    def get_state_dtype(self) -> tuple[torch.dtype, ...]:
+        pass
+
+    @abstractmethod
     def get_attn_backend(self) -> type["AttentionBackend"]:
         """Get the attention backend class for this Mamba layer."""
         pass
 
     def get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec | None:
-        if (
-            vllm_config.speculative_config is not None
-            and vllm_config.model_config.hf_config.model_type not in ["qwen3_next"]
-            and vllm_config.model_config.hf_config.model_type
-            not in ["qwen3_next", "qwen3_5", "qwen3_5_moe"]
-        ):
+        if (vllm_config.speculative_config is not None
+                and vllm_config.model_config.hf_config.model_type
+                not in ["qwen3_next"]
+                and vllm_config.model_config.hf_config.model_type
+                not in ["qwen3_next", "qwen3_5", "qwen3_5_moe"]):
             raise NotImplementedError(
-                "Mamba with speculative decoding is not supported yet."
-            )
+                "Mamba with speculative decoding is not supported yet.")
         mamba_block_size = vllm_config.cache_config.mamba_block_size
         page_size_padded = vllm_config.cache_config.mamba_page_size_padded
         return MambaSpec(
@@ -67,7 +69,5 @@ class MambaBase(AttentionLayerBase):
             mamba_cache_mode=vllm_config.cache_config.mamba_cache_mode,
             num_speculative_blocks=(
                 vllm_config.speculative_config.num_speculative_tokens
-                if vllm_config.speculative_config
-                else 0
-            ),
+                if vllm_config.speculative_config else 0),
         )

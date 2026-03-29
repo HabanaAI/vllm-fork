@@ -1300,7 +1300,8 @@ class ModelConfig:
                 return sum(t == 1 for t in attn_type_list[start:end])
 
             # Hybrid model Qwen3Next Qwen3.5 Series
-            layer_types_value = getattr(self.hf_text_config, "layer_types", None)
+            layer_types_value = getattr(self.hf_text_config, "layer_types",
+                                        None)
             if layer_types_value is not None:
                 if getattr(block_type, "value", block_type) == "attention":
                     return sum(t == "full_attention"
@@ -2579,12 +2580,11 @@ class SpeculativeConfig:
             is_moe = hf_config.model_type == "qwen3_5_moe"
             hf_config.model_type = "qwen3_5_mtp"
             n_predict = getattr(hf_config, "mtp_num_hidden_layers", None)
-            hf_config.update(
-                {
-                    "n_predict": n_predict,
-                    "architectures": ["Qwen3_5MoeMTP" if is_moe else "Qwen3_5MTP"],
-                }
-            )
+            hf_config.update({
+                "n_predict":
+                n_predict,
+                "architectures": ["Qwen3_5MoeMTP" if is_moe else "Qwen3_5MTP"],
+            })
 
         return hf_config
 

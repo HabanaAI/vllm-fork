@@ -1395,6 +1395,8 @@ class ExecuteModelRequest(
     # The number of requests in the running queue.
     running_queue_size: int = 0
     # Optional hidden states from prior step.
+    running_queue_list: Optional[list[int]] = []
+    # Optional running queue list.
     previous_hidden_states: Optional[HiddenStates] = None
     # The number of forward steps to run.
     num_steps: int = 1

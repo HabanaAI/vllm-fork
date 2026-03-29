@@ -1465,7 +1465,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                  dtype=inputs_embeds.dtype)
         if deepstack_input_embeds is not None:
             inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
-                                  dim=-1)
+                                      dim=-1)
         return inputs_embeds
 
     def get_input_embeddings_v0(

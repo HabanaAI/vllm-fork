@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Inference-only Qwen3Next model."""
-import os
 from collections.abc import Iterable
 from typing import Optional
 
@@ -104,7 +103,8 @@ class Qwen3NextSparseMoeBlock(nn.Module):
                                 hidden_size=config.hidden_size,
                                 intermediate_size=config.moe_intermediate_size,
                                 reduce_results=False,
-                                renormalize=getattr(config, "norm_topk_prob", True),
+                                renormalize=getattr(config, "norm_topk_prob",
+                                                    True),
                                 quant_config=quant_config,
                                 prefix=f"{prefix}.experts")
 
@@ -268,14 +268,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 ], self.tp_size, self.tp_rank)
             })
 
-        max_prefill_bs = vllm_config.scheduler_config.max_num_prefill_seqs
         max_decode_bs = vllm_config.scheduler_config.max_num_seqs
-
-        mamba_cache_bs = max_decode_bs + max(8, max_decode_bs)
-        if max_prefill_bs is not None:
-            mamba_cache_bs += max_prefill_bs
-        else:
-            mamba_cache_bs += max_decode_bs
+        mamba_cache_bs = max(8, max_decode_bs) + 2
 
         conv_state_shape = (
             mamba_cache_bs,
@@ -1011,6 +1005,7 @@ class Qwen3NextModel(nn.Module):
 
 
 class QwenNextMixtureOfExperts(MixtureOfExperts):
+
     def update_physical_experts_metadata(
         self,
         num_physical_experts: int,
@@ -1019,7 +1014,8 @@ class QwenNextMixtureOfExperts(MixtureOfExperts):
         assert self.num_local_physical_experts == num_local_physical_experts
         self.num_physical_experts = num_physical_experts
         self.num_local_physical_experts = num_local_physical_experts
-        self.num_redundant_experts = num_physical_experts - self.num_logical_experts
+        self.num_redundant_experts = \
+            num_physical_experts - self.num_logical_experts
         for layer in self.model.layers:
             if isinstance(layer.mlp, Qwen3NextSparseMoeBlock):
                 moe = layer.mlp
@@ -1035,8 +1031,7 @@ class QwenNextMixtureOfExperts(MixtureOfExperts):
         example_moe = None
         for layer in self.model.layers:
             if isinstance(layer, Qwen3NextDecoderLayer) and isinstance(
-                layer.mlp, Qwen3NextSparseMoeBlock
-            ):
+                    layer.mlp, Qwen3NextSparseMoeBlock):
                 example_moe = layer.mlp
                 self.moe_layers.append(layer.mlp.experts)
 

@@ -16,7 +16,8 @@
 # limitations under the License.
 """Qwen3.5-MoE model configuration"""
 
-from transformers.configuration_utils import PretrainedConfig, layer_type_validation
+from transformers.configuration_utils import (PretrainedConfig,
+                                              layer_type_validation)
 
 
 class Qwen3_5MoeTextConfig(PretrainedConfig):
@@ -99,9 +100,8 @@ class Qwen3_5MoeTextConfig(PretrainedConfig):
         if self.layer_types is None:
             interval_pattern = kwargs.get("full_attention_interval", 4)
             self.layer_types = [
-                "linear_attention"
-                if bool((i + 1) % interval_pattern)
-                else "full_attention"
+                "linear_attention" if bool(
+                    (i + 1) % interval_pattern) else "full_attention"
                 for i in range(self.num_hidden_layers)
             ]
         layer_type_validation(self.layer_types, self.num_hidden_layers)
@@ -121,7 +121,8 @@ class Qwen3_5MoeTextConfig(PretrainedConfig):
         super().__init__(**kwargs)
         # Set these AFTER super().__init__() because transformers v4's
         # PretrainedConfig.__init__ has these as explicit params with different
-        # defaults (e.g. tie_word_embeddings=True) that would overwrite our values.
+        # defaults (e.g. tie_word_embeddings=True) that would overwrite our
+        # values.
         self.pad_token_id = pad_token_id
         self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
@@ -134,6 +135,7 @@ class Qwen3_5MoeTextConfig(PretrainedConfig):
     @rope_scaling.setter
     def rope_scaling(self, value):
         self.rope_parameters = value
+
 
 class Qwen3_5MoeVisionConfig(PretrainedConfig):
     model_type = "qwen3_5_moe"
@@ -191,14 +193,15 @@ class Qwen3_5MoeConfig(PretrainedConfig):
         **kwargs,
     ):
         if isinstance(vision_config, dict):
-            self.vision_config = self.sub_configs["vision_config"](**vision_config)
+            self.vision_config = self.sub_configs["vision_config"](
+                **vision_config)
         elif vision_config is None:
             self.vision_config = self.sub_configs["vision_config"]()
 
         if isinstance(text_config, dict):
             self.text_config = self.sub_configs["text_config"](**text_config)
         elif text_config is None:
-            self.text_config = self.sub_configs["text_config"]() 
+            self.text_config = self.sub_configs["text_config"]()
 
         self.image_token_id = image_token_id
         self.video_token_id = video_token_id
@@ -207,5 +210,6 @@ class Qwen3_5MoeConfig(PretrainedConfig):
         super().__init__(**kwargs)
         # Set after super().__init__() to avoid v4 PretrainedConfig overwrite
         self.tie_word_embeddings = tie_word_embeddings
+
 
 __all__ = ["Qwen3_5MoeConfig", "Qwen3_5MoeTextConfig"]

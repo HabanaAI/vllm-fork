@@ -358,7 +358,8 @@ class RMSNormGated(CustomOp):
         hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
         hidden_states = self.weight.to(hidden_states.dtype) * hidden_states
         if gate is not None:
-            hidden_states = hidden_states * F.silu(gate.to(hidden_states.dtype))
+            hidden_states = hidden_states * F.silu(gate.to(
+                hidden_states.dtype))
 
         return hidden_states
 
@@ -366,11 +367,11 @@ class RMSNormGated(CustomOp):
         from vllm_hpu_extension.kernels import rms_norm
         HPUFusedRMSNorm = rms_norm()
 
-        hidden_states = HPUFusedRMSNorm.apply(hidden_states,
-                                              self.weight.to(hidden_states.dtype),
-                                              self.eps)
+        hidden_states = HPUFusedRMSNorm.apply(
+            hidden_states, self.weight.to(hidden_states.dtype), self.eps)
         if gate is not None:
-            hidden_states = hidden_states * F.silu(gate.to(hidden_states.dtype))
+            hidden_states = hidden_states * F.silu(gate.to(
+                hidden_states.dtype))
         return hidden_states
 
 

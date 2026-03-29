@@ -6,7 +6,7 @@ import os
 
 os.environ["PT_HPU_LAZY_MODE"] = "1"
 
-from vllm import LLM, EngineArgs, SamplingParams
+from vllm import LLM, SamplingParams
 
 # Parse the command-line arguments.
 parser = argparse.ArgumentParser()
@@ -26,7 +26,9 @@ parser.add_argument(
 parser.add_argument("--enable-ep", action="store_true", help="Enable EP for MOE models")
 parser.add_argument("--temperature", type=float, default=0.8)
 parser.add_argument("--top-p", type=float, default=0.95)
-parser.add_argument("--enable-thinking", action="store_true", help="Enable think mode for inference")
+parser.add_argument(
+    "--enable-thinking", action="store_true", help="Enable think mode for inference"
+)
 # Add example params
 parser.add_argument("--chat-template-path", type=str)
 args = parser.parse_args()
@@ -48,14 +50,8 @@ if __name__ == "__main__":
     messages = []
     for idx in range(len(prompts)):
         conversation = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant"
-            },
-            {
-                "role": "user",
-                "content": prompts[idx]
-            },
+            {"role": "system", "content": "You are a helpful assistant"},
+            {"role": "user", "content": prompts[idx]},
         ]
         messages.append(conversation)
     # Create a sampling params object.
@@ -114,6 +110,6 @@ if __name__ == "__main__":
         outputs = llm.chat(
             messages,
             sampling_params,
-            chat_template_kwargs={"enable_thinking": args.enable_thinking}
+            chat_template_kwargs={"enable_thinking": args.enable_thinking},
         )
     print_outputs(outputs)

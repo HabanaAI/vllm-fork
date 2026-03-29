@@ -39,11 +39,9 @@ def _require_is_multimodal(is_multimodal: Tensor | None) -> Tensor:
     to provide a better error message.
     """
     if is_multimodal is None:
-        raise ValueError(
-            "`embed_input_ids` now requires `is_multimodal` arg, "
-            "please update your model runner according to "
-            "https://github.com/vllm-project/vllm/pull/16229."
-        )
+        raise ValueError("`embed_input_ids` now requires `is_multimodal` arg, "
+                         "please update your model runner according to "
+                         "https://github.com/vllm-project/vllm/pull/16229.")
 
     return is_multimodal
 

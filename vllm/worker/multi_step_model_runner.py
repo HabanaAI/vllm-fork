@@ -359,7 +359,8 @@ class MultiStepModelRunner(GPUModelRunnerBase[StatefulModelInput]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
+        running_queue_list: Optional[List[int]] = None,
     ) -> StatefulModelInput:
         frozen_model_input: ModelInputForGPUWithSamplingMetadata = \
               self._base_model_runner.prepare_model_input(
