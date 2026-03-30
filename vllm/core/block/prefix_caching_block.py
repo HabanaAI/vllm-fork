@@ -228,6 +228,17 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         assert device is None
         assert_prefix_caching_block_or_none(prev_block)
 
+        if (prev_block is not None and
+            prev_block.content_hash in self._cached_blocks and
+            prev_block.block_id != self._cached_blocks[prev_block.content_hash]):
+            # Reuse the cached content hash
+            self._decr_refcount_hashless_block(prev_block)
+            prev_block.block_id = self._cached_blocks[prev_block.content_hash]
+            # Increment refcount of the cached block and (possibly) restore
+            # it from the evictor.
+            # Note that in this case, the block is marked as computed
+            self._incr_refcount_cached_block(prev_block)
+
         block_id = self._allocate_block_id()
         block = self._block_pool.init_block(prev_block=prev_block,
                                             token_ids=[],
@@ -357,7 +368,8 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         block_id = block.block_id
         assert block_id is not None, "Freeing unallocated block is undefined"
 
-        if block.content_hash is not None:
+        if (block.content_hash is not None and
+            self.block_is_computed(block.block_id)):
             # Immutable: This type of block is always cached, and we want to
             # keep it in the evictor for future reuse
             self._decr_refcount_cached_block(block)
@@ -516,15 +528,6 @@ class PrefixCachingBlockAllocator(BlockAllocator):
             # computed after the entire batch of sequences are scheduled.
             self._touched_blocks.add(block.block_id)
             return block.block_id
-
-        # Reuse the cached content hash
-        self._decr_refcount_hashless_block(block)
-        block.block_id = self._cached_blocks[block.content_hash]
-
-        # Increment refcount of the cached block and (possibly) restore
-        # it from the evictor.
-        # Note that in this case, the block is marked as computed
-        self._incr_refcount_cached_block(block)
 
         return block.block_id
 
