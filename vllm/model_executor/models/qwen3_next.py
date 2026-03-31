@@ -40,7 +40,7 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
 from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
     causal_conv1d_update)
 from vllm.model_executor.layers.mamba.ops.torch_gated_delta_relu import (
-    torch_chunk_gated_delta_rule, torch_recurrent_gated_delta_rule)
+    torch_chunk_gated_delta_rule_opt, torch_recurrent_gated_delta_rule_opt)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -63,6 +63,40 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
 logger = init_logger(__name__)
 
 KVCache = tuple[torch.Tensor, torch.Tensor]
+
+
+@torch._dynamo.disable
+def _save_conv_state(mixed_qkv, cur_conv_state, conv_state, state_indices):
+    """Persist GDN final_state into ssm_state cache for chunked prefill.
+
+    Must be @torch._dynamo.disable because HPU torch.compile silently
+    drops in-place index_copy_ to aliased state tensors.  Returns
+    core_attn_out as a pass-through so the compiled graph consumes
+    the call - HPU drops dynamo-disabled calls whose results are unused.
+    """
+    conv_state.index_copy_(
+        dim=0,
+        index=state_indices,
+        source=cur_conv_state,
+    )
+    return mixed_qkv
+
+
+@torch._dynamo.disable
+def _save_ssm_state(core_attn_out, last_recurrent_state, ssm_state, state_indices):
+    """Persist GDN final_state into ssm_state cache for chunked prefill.
+
+    Must be @torch._dynamo.disable because HPU torch.compile silently
+    drops in-place index_copy_ to aliased state tensors.  Returns
+    core_attn_out as a pass-through so the compiled graph consumes
+    the call - HPU drops dynamo-disabled calls whose results are unused.
+    """
+    ssm_state.index_copy_(
+        dim=0,
+        index=state_indices,
+        source=last_recurrent_state,
+    )
+    return core_attn_out
 
 
 class Qwen3NextSparseMoeBlock(nn.Module):
@@ -288,9 +322,13 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                                      device=self.conv1d.weight.device)
 
         self.chunk_size = 64
+        self.chunked_prefill_size = \
+            vllm_config.scheduler_config.max_num_batched_tokens
         self.eye_constant = torch.eye(self.chunk_size,
-                                      dtype=torch.float32,
+                                      dtype=torch.bfloat16,
                                       device=self.conv1d.weight.device)
+
+        self.inv_loop = int(os.environ.get("VLLM_GDN_INV_LOOP", 12))
 
         # time step projection (discretization)
         # instantiate once and copy inv_dt in init_weights of PretrainedModel
@@ -471,9 +509,10 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 mixed_qkv.reshape(-1, qkv_dim),
                 dim=0,
                 index=conv_state_indices).reshape(bs, -1, qkv_dim)
-            conv_state.index_copy_(dim=0,
-                                   index=mamba_cache_prefill_indices,
-                                   source=prefill_conv_state)
+            mixed_qkv = _save_conv_state(mixed_qkv,
+                                         prefill_conv_state,
+                                         conv_state,
+                                         mamba_cache_prefill_indices)
 
             mixed_qkv_with_pad = F.pad(mixed_qkv,
                                        (0, 0, self.conv_kernel_size - 1, 0))
@@ -497,8 +536,12 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
             )
-            conv_state.index_copy_(0, mamba_cache_decode_indices,
-                                   cur_conv_state)
+            mixed_qkv_non_spec = _save_conv_state(
+                mixed_qkv_non_spec,
+                cur_conv_state,
+                conv_state,
+                mamba_cache_decode_indices,
+            )
 
         query, key, value = torch.split(
             mixed_qkv_non_spec,
@@ -528,21 +571,24 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         if attn_metadata.is_prompt:
             core_attn_out, last_recurrent_state = (
-                torch_chunk_gated_delta_rule(
+                torch_chunk_gated_delta_rule_opt(
                     query_non_spec,
                     key_non_spec,
                     value_non_spec,
                     g=g,
                     beta=beta,
                     eye_constant=self.eye_constant,
+                    valid_seq_len=attn_metadata.seq_lens_tensor,
                     chunk_size=self.chunk_size,
+                    inv_loop=self.inv_loop,
                     initial_state=None,
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            ssm_state.index_copy_(dim=0,
-                                  index=mamba_cache_prefill_indices,
-                                  source=last_recurrent_state)
+            core_attn_out = _save_ssm_state(core_attn_out,
+                                            last_recurrent_state,
+                                            ssm_state,
+                                            mamba_cache_prefill_indices)
         else:
             recurrent_state = torch.index_select(
                 ssm_state,
@@ -550,7 +596,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 index=mamba_cache_decode_indices,
             )
             core_attn_out, last_recurrent_state = (
-                torch_recurrent_gated_delta_rule(
+                torch_recurrent_gated_delta_rule_opt(
                     query_non_spec,
                     key_non_spec,
                     value_non_spec,
@@ -560,11 +606,10 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            ssm_state.index_copy_(
-                dim=0,
-                index=mamba_cache_decode_indices,
-                source=last_recurrent_state,
-            )
+            core_attn_out = _save_ssm_state(core_attn_out,
+                                            last_recurrent_state,
+                                            ssm_state,
+                                            mamba_cache_decode_indices)
 
         z_shape_og = z.shape
         # reshape input data into 2D tensor
