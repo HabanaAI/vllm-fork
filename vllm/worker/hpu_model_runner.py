@@ -1949,6 +1949,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.mamba_cache_table,
                     seq_id,
                     mamba_cache_bs,
+                    self.scheduler_config.chunked_prefill_enabled
                 )
                 mamba_prefill_indices.append(mamba_prefill_index)
 

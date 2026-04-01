@@ -1168,7 +1168,6 @@ class Scheduler:
                 running_seqs=[],
                 num_lookahead_slots=self._get_num_lookahead_slots(
                     is_prefill=True, enable_chunking=enable_chunking),
-                running_seqs=[],
             )
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[ScheduledSequenceGroup] = []

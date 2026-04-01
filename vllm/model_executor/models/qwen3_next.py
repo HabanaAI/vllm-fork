@@ -3,7 +3,7 @@
 """Inference-only Qwen3Next model."""
 from collections.abc import Iterable
 from typing import Optional
-
+import os
 import torch
 import torch.nn.functional as F
 from einops import rearrange
