@@ -484,12 +484,12 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         projected_states_qkvz, _ = self.in_proj_qkvz(hidden_states)
         projected_states_ba, _ = self.in_proj_ba(hidden_states)
 
-        projected_states_qkvz = projected_states_qkvz.float()
+        projected_states_qkvz = projected_states_qkvz
         projected_states_ba = projected_states_ba.float()
 
         query, key, value, z, b, a = self.fix_query_key_value_ordering(
             projected_states_qkvz, projected_states_ba)
-        query, key, value = (x.reshape(x.shape[0], x.shape[1], -1) \
+        query, key, value = (x.reshape(x.shape[0], x.shape[1], -1).float() \
             for x in (query, key, value))
         mixed_qkv = torch.cat((query, key, value), dim=-1)
 
@@ -544,7 +544,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             )
 
         query, key, value = torch.split(
-            mixed_qkv_non_spec,
+            mixed_qkv_non_spec.to(hidden_states.dtype),
             [
                 self.key_dim // self.tp_size,
                 self.key_dim // self.tp_size,
@@ -559,7 +559,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         value_non_spec = value.reshape(value.shape[0], value.shape[1], -1,
                                        self.head_v_dim)
 
-        beta = b.sigmoid()
+        beta = b.sigmoid().to(hidden_states.dtype)
         g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
 
         if self.num_v_heads // self.num_k_heads > 1:
