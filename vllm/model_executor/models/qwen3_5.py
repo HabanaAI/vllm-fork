@@ -374,8 +374,11 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                     self.num_v_heads // self.num_k_heads, dim=2)
                 key_non_spec = key_non_spec.repeat_interleave(
                     self.num_v_heads // self.num_k_heads, dim=2)
-            ssm_indices = torch.remainder(attn_metadata.seq_lens_tensor - 1,
-                                          self.chunked_prefill_size) + 1
+            valid_seq_len = attn_metadata.seq_lens_tensor
+            if (valid_seq_len is not None
+                    and attn_metadata.context_lens_tensor is not None):
+                valid_seq_len = attn_metadata.seq_lens_tensor - \
+                                attn_metadata.context_lens_tensor
             if (self.cache_config.enable_prefix_caching and
                 ssm_cache is not None):
                 prefill_core_attn_out, last_recurrent_state = (
@@ -393,6 +396,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                         block_size=block_size,
                         ssm_cache=ssm_cache,
                         mamba_slot_mapping=mamba_slot_mapping,
+                        valid_seq_len=valid_seq_len,
                     )
                 )
             else:
@@ -408,6 +412,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                         initial_state=prefill_part["prev_ssm_state"],
                         output_final_state=True,
                         use_qk_l2norm_in_kernel=True,
+                        valid_seq_len=valid_seq_len,
                     ))
                 if ssm_cache is not None:
                     ssm_cache.index_copy_(dim=0,
@@ -634,6 +639,11 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                                                           dim=2)
 
         if attn_metadata.is_prompt:
+            valid_seq_len = attn_metadata.seq_lens_tensor
+            if (valid_seq_len is not None
+                    and attn_metadata.context_lens_tensor is not None):
+                valid_seq_len = attn_metadata.seq_lens_tensor - \
+                                attn_metadata.context_lens_tensor
             if (self.cache_config.enable_prefix_caching
                 and kv_cache is not None
                 and isinstance(kv_cache, tuple)):
@@ -658,7 +668,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                         block_size=block_size,
                         ssm_cache=ssm_cache,
                         mamba_slot_mapping=mamba_slot_mapping,
-                    ))
+                        valid_seq_len=valid_seq_len))
             else:
                 core_attn_out, last_recurrent_state = (
                     torch_chunk_gated_delta_rule_opt(
@@ -672,7 +682,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                         initial_state=None,
                         output_final_state=True,
                         use_qk_l2norm_in_kernel=True,
-                    ))
+                        valid_seq_len=valid_seq_len))
                 if kv_cache is not None and isinstance(kv_cache, tuple):
                     ssm_cache = kv_cache[1]
                     ssm_cache.index_copy_(dim=0,
