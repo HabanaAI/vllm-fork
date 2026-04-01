@@ -51,6 +51,8 @@ from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.sequence import IntermediateTensors
+from vllm.platforms import current_platform
+
 from vllm.transformers_utils.configs import Qwen3NextConfig
 
 from .interfaces import (HasInnerState, IsHybrid, MixtureOfExperts,
@@ -63,6 +65,12 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
 logger = init_logger(__name__)
 
 KVCache = tuple[torch.Tensor, torch.Tensor]
+
+is_hpu = current_platform.is_hpu()
+
+if is_hpu:
+    import habana_frameworks.torch as htorch
+    import habana_frameworks.torch.core as htcore
 
 
 @torch._dynamo.disable
@@ -829,6 +837,9 @@ class Qwen3NextDecoderLayer(nn.Module):
                     dtype=config.torch_dtype,
                 ), )
 
+        self.graph_break = os.environ.get("VLLM_MOE_GRAPH_BREAK",
+                                          "false").lower() == "true"
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -862,6 +873,9 @@ class Qwen3NextDecoderLayer(nn.Module):
             else:
                 hidden_states = hidden_states * (
                     self.attn_layer_scale.to(hidden_states.dtype) + 1)
+
+        if not htorch.utils.internal.is_lazy() and self.graph_break:
+            torch._dynamo.graph_break()
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
@@ -942,7 +956,7 @@ class Qwen3NextModel(nn.Module):
                 hidden_states = inputs_embeds
             else:
                 hidden_states = self.get_input_embeddings(input_ids)
-            residual = None
+            residual = torch.zeros_like(hidden_states)
         else:
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]

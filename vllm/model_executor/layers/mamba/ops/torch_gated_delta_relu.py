@@ -7,12 +7,7 @@
 import torch
 import torch.nn.functional as F
 
-from vllm.platforms import current_platform
-
-is_hpu = current_platform.is_hpu()
-
-if is_hpu:
-    import habana_frameworks.torch.core as htcore
+from vllm import _custom_ops as ops
 
 
 def torch_chunk_gated_delta_rule_opt(
@@ -107,13 +102,11 @@ def torch_chunk_gated_delta_rule_opt(
                         key.transpose(-1, -2).contiguous()) * \
            decay_mask * mask + eye_constant
     inv_attn = torch.zeros_like(attn) + eye_constant
-    htcore.mark_step()
     for _ in range(inv_loop):
         prod = torch.matmul(attn, inv_attn)
         err = prod * mask
         update = torch.matmul(inv_attn, err)
         inv_attn.sub_(update)
-    htcore.mark_step()
     attn = inv_attn
 
     value = attn @ v_beta
@@ -154,13 +147,11 @@ def torch_chunk_gated_delta_rule_opt(
     core_attn_out = core_attn_out * valid_mask.unsqueeze(-1)
 
     # for each chunk
-    htcore.mark_step()
     for i in range(num_chunks):
         core_attn_out[:, :,
                       i].add_(torch.matmul(C[:, :, i], last_recurrent_state))
         last_recurrent_state = torch.matmul(M[:, :, i],
                                             last_recurrent_state) + N[:, :, i]
-    htcore.mark_step()
 
     if not output_final_state:
         last_recurrent_state = None
