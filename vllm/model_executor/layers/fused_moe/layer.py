@@ -685,8 +685,21 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 scoring_func=scoring_func,
                 e_score_correction_bias=e_score_correction_bias)
         else:
-            import torch.nn.functional as F
-            topk_weights = F.softmax(router_logits, dim=1, dtype=torch.float32)
+            if scoring_func == "softmax":
+                import torch.nn.functional as F
+                topk_weights = F.softmax(router_logits,
+                                         dim=1,
+                                         dtype=torch.float32)
+            elif scoring_func == "sigmoid":
+                ori_dtype = router_logits.dtype
+                topk_weights = router_logits.float().sigmoid().to(ori_dtype)
+            else:
+                raise ValueError(
+                    f"Unsupported scoring functions: {scoring_func}")
+
+            if e_score_correction_bias is not None:
+                topk_weights = topk_weights + e_score_correction_bias
+
             topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
             if renormalize:
                 topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
