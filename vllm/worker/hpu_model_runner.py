@@ -2025,10 +2025,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 # Prefix is not supported with sliding_window
                 context_len = len(computed_block_nums) * self.block_size
-                if context_len == seq_len \
-                and self.use_prefix_caching:
+                if context_len == seq_len and self.use_prefix_caching:
                     # Fully cached prompt - compute only last token
-                    context_len = context_len - 1
+                    if self._is_fla_model():
+                        context_len = context_len - self.block_size
+                        computed_block_nums = computed_block_nums[:-1]
+                    else:
+                        context_len = context_len - 1
                 prompt_tokens = prompt_tokens[context_len:]
                 prefix_block_tables.append(computed_block_nums)
             elif self.scheduler_config.chunked_prefill_enabled:
