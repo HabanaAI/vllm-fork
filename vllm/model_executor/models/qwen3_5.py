@@ -220,6 +220,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             prefill_beta = beta[:, :num_prefill_tokens, :].reshape(num_prefills, prefill_seq_len, -1)
             prefill_g = g[:, :num_prefill_tokens, :].reshape(num_prefills, prefill_seq_len, -1)
 
+
             prev_conv_state = torch.index_select(self.conv_state, 0, prefill_idx)
             prev_ssm_state = torch.index_select(self.ssm_state, 0, prefill_idx)
 
@@ -291,10 +292,10 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                 prefill_part["mixed_qkv"].reshape(-1, qkv_dim),
                 dim=0,
                 index=conv_state_indices).reshape(-1, self.conv_kernel_size - 1, qkv_dim)
-            mixed_qkv_with_pad = F.pad(prefill_part["mixed_qkv"],
-                                    (0, 0, self.conv_kernel_size - 1, 0))
-
-            mixed_qkv_with_pad[:,:self.conv_kernel_size - 1,:] = prefill_part["prev_conv_state"]
+            mixed_qkv_with_pad = torch.cat(
+                [prefill_part["prev_conv_state"], prefill_part["mixed_qkv"]],
+                dim=1
+            )
 
             # update conv_state
             mixed_qkv_with_pad = _save_conv_state(mixed_qkv_with_pad,

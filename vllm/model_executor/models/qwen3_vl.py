@@ -1479,9 +1479,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         image_input: Optional[Qwen2_5_VLImageInputs] = None,
         video_input: Optional[Qwen2_5_VLVideoInputs] = None,
     ) -> torch.Tensor:
-        unsqueezed_input = False
         if input_ids.ndim == 1:
-            unsqueezed_input = True
             input_ids = input_ids.unsqueeze(0)
         inputs_embeds = self.get_input_embeddings(
             input_ids)[:, :, :self.text_dim]
@@ -1557,7 +1555,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         if self.use_deepstack and deepstack_input_embeds is not None:
             inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
                                       dim=-1)
-        return inputs_embeds #if not unsqueezed_input else inputs_embeds.squeeze(0)
+        return inputs_embeds
 
     def forward(
         self,
