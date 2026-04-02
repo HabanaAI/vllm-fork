@@ -3035,8 +3035,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     # Ensure tensor type for static checking.
                     assert isinstance(decode_input_tokens, torch.Tensor)
                     assert isinstance(decode_input_positions, torch.Tensor)
-                    input_tokens = decode_input_tokens  #.flatten()
-                    input_positions = decode_input_positions  #.flatten()
+                    input_tokens = decode_input_tokens.flatten()
+                    input_positions = decode_input_positions.flatten()
                 # FIXME: We need to adjust selected_token_indices to accommodate
                 # for padding
                 paddings = []

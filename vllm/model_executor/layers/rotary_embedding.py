@@ -1287,9 +1287,14 @@ class MRotaryEmbedding(RotaryEmbedding):
 
         if offsets is not None:
             offsets = offsets.view(positions.shape[0], -1)
-        num_tokens = positions.shape[-1]
-        if positions.ndim == 2:
-            assert positions.shape[0] == 3
+        if positions.ndim == 1:
+            num_tokens = query.shape[0] * query.shape[
+                1] if query.ndim == 3 else query.shape[0]
+            if positions.shape[0] != num_tokens:
+                positions = positions.view(-1, num_tokens)
+        else:
+            num_tokens = positions.shape[-1]
+        if positions.ndim == 2 and positions.shape[0] == 3:
             cos_sin = (self.cos_sin_cache_mrope0[positions[0]] +
                        self.cos_sin_cache_mrope1[positions[1]] +
                        self.cos_sin_cache_mrope2[positions[2]])
