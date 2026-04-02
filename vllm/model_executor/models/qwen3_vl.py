@@ -1504,7 +1504,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 (
                     deepstack_input_embeds,
                     new_offset_multiscale,
-                )  = merge_multimodal_embeddings(
+                ) = merge_multimodal_embeddings(
                     input_ids,
                     deepstack_input_embeds,
                     image_embeds_multiscale,
@@ -1513,7 +1513,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     return_offset=True,
                 )
                 self.mm_offset_image_multiscale = new_offset_multiscale
-            inputs_embeds, new_offset  = merge_multimodal_embeddings(
+            inputs_embeds, new_offset = merge_multimodal_embeddings(
                 input_ids,
                 inputs_embeds,
                 image_embeds,

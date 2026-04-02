@@ -7,8 +7,6 @@
 import torch
 import torch.nn.functional as F
 
-from vllm import _custom_ops as ops
-
 
 def torch_chunk_gated_delta_rule_opt(
     query,
@@ -55,8 +53,8 @@ def torch_chunk_gated_delta_rule_opt(
     tot_len = sequence_length + pad_size
 
     token_idx = torch.arange(tot_len, device=key.device).view(1, 1, tot_len)
-    valid_mask = (token_idx < valid_seq_len.view(batch_size,
-                                                 1, 1)).to(value.dtype)
+    valid_mask = (token_idx < valid_seq_len.view(batch_size, 1,
+                                                 1)).to(value.dtype)
 
     query = query * valid_mask.unsqueeze(-1)
     key = key * valid_mask.unsqueeze(-1)
@@ -83,8 +81,8 @@ def torch_chunk_gated_delta_rule_opt(
 
     chunk_idx = torch.arange(tot_len // chunk_size,
                              device=key.device).view(1, 1, -1)
-    chunk_valid = (chunk_idx < valid_chunk_cnt.view(batch_size,
-                                                    1, 1)).to(value.dtype)
+    chunk_valid = (chunk_idx < valid_chunk_cnt.view(batch_size, 1,
+                                                    1)).to(value.dtype)
     chunk_valid_state = chunk_valid.unsqueeze(-1).unsqueeze(-1)
 
     mask = torch.ones(chunk_size,

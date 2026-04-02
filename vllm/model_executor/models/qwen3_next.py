@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Inference-only Qwen3Next model."""
+import os
 from collections.abc import Iterable
 from typing import Optional
-import os
+
 import torch
 import torch.nn.functional as F
 from einops import rearrange
@@ -50,9 +51,8 @@ from vllm.model_executor.model_loader.weight_utils import (
 from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.utils import set_weight_attrs
-from vllm.sequence import IntermediateTensors
 from vllm.platforms import current_platform
-
+from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import Qwen3NextConfig
 
 from .interfaces import (HasInnerState, IsHybrid, MixtureOfExperts,
@@ -70,7 +70,6 @@ is_hpu = current_platform.is_hpu()
 
 if is_hpu:
     import habana_frameworks.torch as htorch
-    import habana_frameworks.torch.core as htcore
 
 
 @torch._dynamo.disable
@@ -91,7 +90,8 @@ def _save_conv_state(mixed_qkv, cur_conv_state, conv_state, state_indices):
 
 
 @torch._dynamo.disable
-def _save_ssm_state(core_attn_out, last_recurrent_state, ssm_state, state_indices):
+def _save_ssm_state(core_attn_out, last_recurrent_state, ssm_state,
+                    state_indices):
     """Persist GDN final_state into ssm_state cache for chunked prefill.
 
     Must be @torch._dynamo.disable because HPU torch.compile silently
@@ -517,8 +517,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 mixed_qkv.reshape(-1, qkv_dim),
                 dim=0,
                 index=conv_state_indices).reshape(bs, -1, qkv_dim)
-            mixed_qkv = _save_conv_state(mixed_qkv,
-                                         prefill_conv_state,
+            mixed_qkv = _save_conv_state(mixed_qkv, prefill_conv_state,
                                          conv_state,
                                          mamba_cache_prefill_indices)
 
@@ -594,8 +593,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     use_qk_l2norm_in_kernel=True,
                 ))
             core_attn_out = _save_ssm_state(core_attn_out,
-                                            last_recurrent_state,
-                                            ssm_state,
+                                            last_recurrent_state, ssm_state,
                                             mamba_cache_prefill_indices)
         else:
             recurrent_state = torch.index_select(
@@ -615,8 +613,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     use_qk_l2norm_in_kernel=True,
                 ))
             core_attn_out = _save_ssm_state(core_attn_out,
-                                            last_recurrent_state,
-                                            ssm_state,
+                                            last_recurrent_state, ssm_state,
                                             mamba_cache_decode_indices)
 
         z_shape_og = z.shape

@@ -1050,7 +1050,7 @@ def FindMambaIndexForPrefill(
     chunked_prefill_enabled: bool,
 ):
     used_values = set(mamba_dict.values())
-    if chunked_prefill_enabled and seq_id in mamba_dict.keys():
+    if chunked_prefill_enabled and seq_id in mamba_dict:
         return mamba_dict[seq_id]
     for idx in range(max_concurrency):
         if idx not in used_values:
@@ -1068,11 +1068,12 @@ def FindMambaIndexForDecode(
     max_concurrency: int,
     running_queue_list: List[int],
 ):
-    # For decode warmup senario
+    # For decode warmup scenario
     if running_queue_list == []:
         return seq_list
-    invalid_keys = [key for key in list(mamba_dict.keys())
-                if key not in running_queue_list]
+    invalid_keys = [
+        key for key in list(mamba_dict.keys()) if key not in running_queue_list
+    ]
     for key in invalid_keys:
         mamba_dict.pop(key)
     if -1 in seq_list:
@@ -1946,11 +1947,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self._is_fla_model():
                 mamba_cache_bs = max(8, self.max_num_seqs) + 2
                 mamba_prefill_index = FindMambaIndexForPrefill(
-                    self.mamba_cache_table,
-                    seq_id,
-                    mamba_cache_bs,
-                    self.scheduler_config.chunked_prefill_enabled
-                )
+                    self.mamba_cache_table, seq_id, mamba_cache_bs,
+                    self.scheduler_config.chunked_prefill_enabled)
                 mamba_prefill_indices.append(mamba_prefill_index)
 
             computed_block_nums = seq_group_metadata.computed_block_nums
@@ -3017,10 +3015,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         assert isinstance(decode_input_positions, torch.Tensor)
                         decode_input_tokens = decode_input_tokens.flatten()
                         if input_tokens.shape == input_positions.shape:
-                            if decode_input_tokens.shape != decode_input_positions.shape:
-                                decode_input_positions = decode_input_positions[0].flatten()
+                            if decode_input_tokens.shape != \
+                                    decode_input_positions.shape:
+                                decode_input_positions = decode_input_positions[
+                                    0].flatten()
                             else:
-                                decode_input_positions = decode_input_positions.flatten()
+                                decode_input_positions = \
+                                    decode_input_positions.flatten()
 
                         input_tokens = torch.cat(
                             (input_tokens, decode_input_tokens), dim=0)
@@ -3034,8 +3035,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     # Ensure tensor type for static checking.
                     assert isinstance(decode_input_tokens, torch.Tensor)
                     assert isinstance(decode_input_positions, torch.Tensor)
-                    input_tokens = decode_input_tokens #.flatten()
-                    input_positions = decode_input_positions #.flatten()
+                    input_tokens = decode_input_tokens  #.flatten()
+                    input_positions = decode_input_positions  #.flatten()
                 # FIXME: We need to adjust selected_token_indices to accommodate
                 # for padding
                 paddings = []
@@ -3665,12 +3666,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if hasattr(self.model_config.hf_config, "linear_conv_kernel_dim"):
             conv_dim = self.model_config.hf_config.linear_conv_kernel_dim
         else:
-            conv_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim
+            conv_dim = \
+                self.model_config.hf_config.text_config.linear_conv_kernel_dim
         mamba_cache_indices = list(range(inputs.batch_size_padded))
         mamba_cache_indices = torch.tensor(mamba_cache_indices,
                                            dtype=torch.long,
                                            device='cpu')
-        assert inputs.attn_metadata.num_prefills > 0 or inputs.attn_metadata.num_decode_tokens > 0
+        assert inputs.attn_metadata.num_prefills > 0 or \
+            inputs.attn_metadata.num_decode_tokens > 0
         if inputs.attn_metadata.num_prefills > 0:
             num_prefills = inputs.attn_metadata.num_prefills
             seq_len = inputs.attn_metadata.num_prefill_tokens
