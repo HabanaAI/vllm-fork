@@ -3014,7 +3014,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         assert isinstance(decode_input_tokens, torch.Tensor)
                         assert isinstance(decode_input_positions, torch.Tensor)
                         decode_input_tokens = decode_input_tokens.flatten()
-                        if input_tokens.shape == input_positions.shape:
+                        if input_tokens.shape == input_positions.shape:  # type: ignore[union-attr]
                             if decode_input_tokens.shape != \
                                     decode_input_positions.shape:
                                 decode_input_positions = decode_input_positions[
@@ -3027,8 +3027,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             (input_tokens, decode_input_tokens), dim=0)
                         input_positions = torch.cat(
                             (input_positions, decode_input_positions), dim=0)
-                        prefill_attn_metadata.mamba_cache_decode_indices = \
-                            decode_attn_metadata.mamba_cache_decode_indices
+                        if prefill_attn_metadata is not None and hasattr(
+                                prefill_attn_metadata,
+                                "mamba_cache_decode_indices"):
+                            prefill_attn_metadata.mamba_cache_decode_indices = \
+                                getattr(
+                                    decode_attn_metadata,
+                                    "mamba_cache_decode_indices",
+                                    None,
+                                )
 
                 else:
                     max_len = decode_input_tokens.size(1)
@@ -3668,8 +3675,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             conv_dim = \
                 self.model_config.hf_config.text_config.linear_conv_kernel_dim
-        mamba_cache_indices = list(range(inputs.batch_size_padded))
-        mamba_cache_indices = torch.tensor(mamba_cache_indices,
+        mamba_cache_indices_list = list(range(inputs.batch_size_padded))
+        mamba_cache_indices = torch.tensor(mamba_cache_indices_list,
                                            dtype=torch.long,
                                            device='cpu')
         assert inputs.attn_metadata.num_prefills > 0 or \
