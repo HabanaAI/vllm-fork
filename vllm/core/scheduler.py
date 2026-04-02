@@ -1606,6 +1606,20 @@ class Scheduler:
             # Restore original queues & update state:
             # Put back original running (decodes + prefills),
             # then add newly created prefills.
+            # Remove any sequences that were preempted or swapped
+            # out by _schedule_running from the original running
+            # queue, otherwise on the next iteration scheduler will
+            # break immediately, starving all remaining decode sequences.
+            removed_from_running = {
+                sg.request_id
+                for sg in running_scheduled.preempted
+            }
+            removed_from_running.update(
+                sg.request_id for sg in running_scheduled.swapped_out)
+            if removed_from_running:
+                original_running = deque(
+                    sg for sg in original_running
+                    if sg.request_id not in removed_from_running)
             self.running = original_running
             # Add new prefills' seq_groups to running queue.
             self.running.extend([s.seq_group for s in prefills.seq_groups])
