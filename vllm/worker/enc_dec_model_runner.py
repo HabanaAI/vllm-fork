@@ -238,7 +238,8 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
+        running_queue_list: Optional[List[int]] = None,
     ) -> EncoderDecoderModelInput:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.

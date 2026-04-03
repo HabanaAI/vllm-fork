@@ -75,6 +75,18 @@ def adjust_marlin_shard(param, shard_size, shard_offset):
     return shard_size * marlin_tile_size, shard_offset * marlin_tile_size
 
 
+def adjust_block_scale_shard(
+    weight_block_size: tuple[int, ...] | None,
+    shard_size: int,
+    shard_offset: int,
+) -> tuple[int, int]:
+    assert weight_block_size is not None
+    block_n = weight_block_size[0]
+    shard_offset = (shard_offset + block_n - 1) // block_n
+    shard_size = (shard_size + block_n - 1) // block_n
+    return shard_size, shard_offset
+
+
 def adjust_bitsandbytes_4bit_shard(param: Parameter,
                                    shard_offsets: dict[str, tuple[int, int]],
                                    loaded_shard_id: str) -> tuple[int, int]:
@@ -569,15 +581,46 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                          prefix=prefix,
                          return_bias=return_bias)
 
-    def weight_loader(self,
-                      param: Parameter,
-                      loaded_weight: torch.Tensor,
-                      loaded_shard_id: Optional[int] = None):
+    def validate_shard_id(self, loaded_shard_id: int | tuple[int, ...] | None):
+        if loaded_shard_id is None:
+            return
+        if isinstance(loaded_shard_id, tuple):
+            for idx in loaded_shard_id:
+                if not (0 <= idx < len(self.output_sizes)):
+                    raise ValueError(
+                        f"Shard id index {idx} should be between 0 and "
+                        f"{len(self.output_sizes) - 1}. Got shard id {loaded_shard_id}."  # noqa: E501
+                    )
+            if len(loaded_shard_id) > 1 and any(b - a != 1 for a, b in zip(
+                    loaded_shard_id[:-1], loaded_shard_id[1:])):
+                raise ValueError(
+                    "Shard id with multiple indices should be consecutive. "
+                    f"Got shard id {loaded_shard_id}.")
+            return
+        elif isinstance(loaded_shard_id, int):
+            if loaded_shard_id < 0 or loaded_shard_id >= len(
+                    self.output_sizes):
+                raise ValueError(
+                    f"Shard id should be between 0 and {len(self.output_sizes) - 1}. "  # noqa: E501
+                    f"Got shard id {loaded_shard_id}.")
+            return
+        raise ValueError("This line should not be reached")
 
+    def weight_loader(
+        self,
+        param: Parameter,
+        loaded_weight: torch.Tensor,
+        loaded_shard_id: tuple[int, ...] | int | None = None,
+    ):
+        self.validate_shard_id(loaded_shard_id)
         # Special case for GGUF
         # initialize GGUF param after we know the quantize type
         is_gguf_weight = getattr(param, "is_gguf_weight", False)
         is_gguf_weight_type = getattr(param, "is_gguf_weight_type", False)
+        if isinstance(loaded_shard_id, tuple) and (is_gguf_weight
+                                                   or is_gguf_weight_type):
+            raise NotImplementedError(
+                "Shard id with multiple indices is not supported for GGUF.")
         if is_gguf_weight_type:
             if loaded_shard_id is not None:
                 param.data[loaded_shard_id].copy_(loaded_weight)
@@ -612,7 +655,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         # Special case for per-tensor scale to load scalar into fused array.
         needs_scalar_to_array = getattr(param, "needs_scalar_to_array", False)
 
-        if loaded_shard_id is None:
+        if loaded_shard_id is None or isinstance(loaded_shard_id, tuple):
             # Loaded weight is already fused on disk (mlp).
             # (e.g., Phi-3's gate_up_proj).
             if output_dim is None:
@@ -623,11 +666,15 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 assert param_data.shape == loaded_weight.shape
                 param_data.copy_(loaded_weight)
                 return
+
+            output_sizes = (
+                self.output_sizes[loaded_shard_id[0]:loaded_shard_id[-1] + 1]
+                if loaded_shard_id is not None else self.output_sizes)
             current_shard_offset = 0
             use_bitsandbytes_4bit = getattr(param, "use_bitsandbytes_4bit",
                                             False)
             shard_offsets: list[tuple[int, int, int]] = []
-            for i, output_size in enumerate(self.output_sizes):
+            for i, output_size in enumerate(output_sizes):
                 shard_offsets.append((i, current_shard_offset, output_size))
                 current_shard_offset += output_size
             packed_dim = getattr(param, "packed_dim", None)
@@ -720,8 +767,12 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
-    def _load_fused_module_from_checkpoint(self, param: BasevLLMParameter,
-                                           loaded_weight: torch.Tensor):
+    def _load_fused_module_from_checkpoint(
+        self,
+        param: BasevLLMParameter,
+        loaded_weight: torch.Tensor,
+        output_sizes: list[int] | None = None,
+    ):
         """
         Handle special case for models where MLP layers are already
         fused on disk. In this case, we have no shard id. This function
@@ -734,7 +785,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
 
         current_shard_offset = 0
         shard_offsets: list[tuple[int, int, int]] = []
-        for i, output_size in enumerate(self.output_sizes):
+        output_sizes = output_sizes or self.output_sizes
+        for i, output_size in enumerate(output_sizes):
             shard_offsets.append((i, current_shard_offset, output_size))
             current_shard_offset += output_size
 
@@ -753,11 +805,13 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                                                        shard_size)
             self.weight_loader_v2(param, loaded_weight_shard, shard_id)
 
-    def weight_loader_v2(self,
-                         param: BasevLLMParameter,
-                         loaded_weight: torch.Tensor,
-                         loaded_shard_id: Optional[int] = None):
-        if loaded_shard_id is None:
+    def weight_loader_v2(
+        self,
+        param: BasevLLMParameter,
+        loaded_weight: torch.Tensor,
+        loaded_shard_id: tuple[int, ...] | int | None = None,
+    ):
+        if loaded_shard_id is None or isinstance(loaded_shard_id, tuple):
             if isinstance(param, PerTensorScaleParameter):
                 param.load_merged_column_weight(loaded_weight=loaded_weight,
                                                 shard_id=0)
@@ -765,8 +819,20 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             elif type(param) in (RowvLLMParameter, BasevLLMParameter):
                 param.load_merged_column_weight(loaded_weight=loaded_weight)
                 return
+            output_sizes = (
+                [self.output_sizes[idx]
+                 for idx in loaded_shard_id] if loaded_shard_id else None)
+            if isinstance(param, BlockQuantScaleParameter):
+                weight_block_size = getattr(self, "weight_block_size", None)
+                output_sizes = [
+                    adjust_block_scale_shard(weight_block_size, size, 0)[0]
+                    for size in (output_sizes or self.output_sizes)
+                ]
+
             # TODO: @dsikka - move to parameter.py
-            self._load_fused_module_from_checkpoint(param, loaded_weight)
+            self._load_fused_module_from_checkpoint(param,
+                                                    loaded_weight,
+                                                    output_sizes=output_sizes)
             return
 
         assert loaded_shard_id < len(self.output_sizes)

@@ -39,7 +39,8 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, Cohere2Config,
                                              MiniMaxVL01Config, MllamaConfig,
                                              MLPSpeculatorConfig, MPTConfig,
                                              NemotronConfig, NVLM_D_Config,
-                                             OvisConfig, Qwen3NextConfig,
+                                             OvisConfig, Qwen3_5Config,
+                                             Qwen3_5MoeConfig, Qwen3NextConfig,
                                              RWConfig, SkyworkR1VChatConfig,
                                              SolarConfig, Telechat2Config,
                                              UltravoxConfig)
@@ -86,6 +87,8 @@ _CONFIG_REGISTRY: dict[str, type[PretrainedConfig]] = {
     "telechat": Telechat2Config,
     "ultravox": UltravoxConfig,
     "qwen3_next": Qwen3NextConfig,
+    "qwen3_5": Qwen3_5Config,
+    "qwen3_5_moe": Qwen3_5MoeConfig,
     **_CONFIG_REGISTRY_OVERRIDE_HF
 }
 

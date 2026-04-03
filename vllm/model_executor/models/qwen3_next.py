@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Inference-only Qwen3Next model."""
+import os
 from collections.abc import Iterable
 from typing import Optional
 
@@ -27,6 +28,7 @@ from vllm.model_executor.layers.layernorm import (
 from vllm.model_executor.layers.layernorm import RMSNormGated
 # yapf: enable
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
+                                               MergedColumnParallelLinear,
                                                QKVParallelLinear,
                                                ReplicatedLinear,
                                                RowParallelLinear)
@@ -38,6 +40,8 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
     MambaStateDtypeCalculator, MambaStateShapeCalculator)
 from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
     causal_conv1d_update)
+from vllm.model_executor.layers.mamba.ops.torch_gated_delta_relu import (
+    torch_chunk_gated_delta_rule_opt, torch_recurrent_gated_delta_rule_opt)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -47,6 +51,7 @@ from vllm.model_executor.model_loader.weight_utils import (
 from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.utils import set_weight_attrs
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import Qwen3NextConfig
 
@@ -61,176 +66,45 @@ logger = init_logger(__name__)
 
 KVCache = tuple[torch.Tensor, torch.Tensor]
 
+is_hpu = current_platform.is_hpu()
 
-def torch_chunk_gated_delta_rule(
-    query,
-    key,
-    value,
-    g,
-    beta,
-    eye_constant,
-    chunk_size=64,
-    initial_state=None,
-    output_final_state=True,
-    use_qk_l2norm_in_kernel=True,
-):
-    initial_dtype = query.dtype
-    if use_qk_l2norm_in_kernel:
-        head_dim = query.size(-1)
-        inv_scale = head_dim**-0.5
-        query = F.rms_norm(query, (head_dim, ), eps=1e-6) * inv_scale
-        key = F.rms_norm(key, (head_dim, ), eps=1e-6) * inv_scale
-    query, key, value, beta, g = [
-        x.transpose(1, 2).contiguous().to(torch.float32)
-        for x in (query, key, value, beta, g)
-    ]
-
-    batch_size, num_heads, sequence_length, k_head_dim = key.shape
-    v_head_dim = value.shape[-1]
-    pad_size = (chunk_size - sequence_length % chunk_size) % chunk_size
-    if pad_size > 0:
-        query = F.pad(query, (0, 0, 0, pad_size))
-        key = F.pad(key, (0, 0, 0, pad_size))
-        value = F.pad(value, (0, 0, 0, pad_size))
-        beta = F.pad(beta, (0, pad_size))
-        g = F.pad(g, (0, pad_size))
-    tot_len = sequence_length + pad_size
-    scale = 1 / (query.shape[-1]**0.5)
-    query = query * scale
-
-    v_beta = value * beta.unsqueeze(-1)
-    k_beta = key * beta.unsqueeze(-1)
-    # reshape to chunks
-    query, key, value, k_beta, v_beta = [
-        x.reshape(x.shape[0], x.shape[1], -1, chunk_size, x.shape[-1])
-        for x in (query, key, value, k_beta, v_beta)
-    ]
-    g = g.reshape(g.shape[0], g.shape[1], -1, chunk_size)
-    mask = torch.triu(torch.ones(chunk_size,
-                                 chunk_size,
-                                 dtype=torch.bool,
-                                 device=query.device),
-                      diagonal=0)
-
-    # chunk decay
-    g = g.cumsum(dim=-1)
-    g_exp = g.exp()
-    decay_mask = ((g.unsqueeze(-1) -
-                   g.unsqueeze(-2)).tril().exp().float()).tril()
-    attn = -((torch.matmul(k_beta.contiguous(),
-                           key.transpose(-1, -2).contiguous())) *
-             decay_mask).masked_fill(mask, 0)
-    for i in range(1, chunk_size):
-        row = attn[..., i, :i].contiguous()
-        sub = attn[..., :i, :]
-        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)[..., :i]
-    attn = attn + eye_constant
-    value = attn @ v_beta
-    k_cumdecay = attn @ (k_beta * g_exp.unsqueeze(-1))
-    last_recurrent_state = (torch.zeros(batch_size, num_heads, k_head_dim,
-                                        v_head_dim).to(value) if initial_state
-                            is None else initial_state.to(value))
-    core_attn_out = torch.zeros_like(value)
-    mask = torch.tril(torch.ones(chunk_size,
-                                 chunk_size,
-                                 dtype=torch.bool,
-                                 device=query.device),
-                      diagonal=0)
-    mask = mask.view(1, 1, 1, chunk_size, chunk_size)
-    attn = (query @ key.transpose(-1, -2)) * decay_mask * mask
-    qg = query * g_exp[..., None]
-    delta_g_exp = (g[:, :, :, -1, None] - g).exp()[..., None]
-    k_term = (key * delta_g_exp)
-
-    # for each chunk
-    for i in range(0, tot_len // chunk_size):
-        v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
-        v_new = value[:, :, i] - v_prime
-        attn_inter = qg[:, :, i] @ last_recurrent_state
-        core_attn_out[:, :, i] = attn_inter + attn[:, :, i] @ v_new
-        last_recurrent_state = (
-            last_recurrent_state * g_exp[:, :, i, -1, None, None] +
-            k_term[:, :, i].transpose(-1, -2) @ v_new)
-
-    if not output_final_state:
-        last_recurrent_state = None
-    else:
-        last_recurrent_state = last_recurrent_state.to(initial_dtype)
-    core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
-                                          core_attn_out.shape[1], -1,
-                                          core_attn_out.shape[-1])
-    core_attn_out = core_attn_out[:, :, :sequence_length]
-    core_attn_out = core_attn_out.transpose(1,
-                                            2).contiguous().to(initial_dtype)
-    return core_attn_out, last_recurrent_state
+if is_hpu:
+    import habana_frameworks.torch as htorch
 
 
-def torch_recurrent_gated_delta_rule(
-    query,
-    key,
-    value,
-    g,
-    beta,
-    recurrent_state,
-    output_final_state=True,
-    use_qk_l2norm_in_kernel=True,
-):
-    initial_dtype = query.dtype
-    if use_qk_l2norm_in_kernel:
-        head_dim = query.size(-1)
-        inv_scale = head_dim**-0.5
-        query = F.rms_norm(query, (head_dim, ), eps=1e-6) * inv_scale
-        key = F.rms_norm(key, (head_dim, ), eps=1e-6) * inv_scale
-    query, key, value, beta, g = [
-        x.transpose(1, 2).contiguous().to(torch.float32)
-        for x in (query, key, value, beta, g)
-    ]
+@torch._dynamo.disable
+def _save_conv_state(mixed_qkv, cur_conv_state, conv_state, state_indices):
+    """Persist GDN final_state into ssm_state cache for chunked prefill.
 
-    batch_size, sequence_length, num_heads, k_head_dim = key.shape
-    v_head_dim = value.shape[-1]
-    scale = 1 / (query.shape[-1]**0.5)
-    query = query * scale
+    Must be @torch._dynamo.disable because HPU torch.compile silently
+    drops in-place index_copy_ to aliased state tensors.  Returns
+    core_attn_out as a pass-through so the compiled graph consumes
+    the call - HPU drops dynamo-disabled calls whose results are unused.
+    """
+    conv_state.index_copy_(
+        dim=0,
+        index=state_indices,
+        source=cur_conv_state,
+    )
+    return mixed_qkv
 
-    recurrent_state = recurrent_state.to(value)
 
-    if num_heads > 1:
-        core_attn_out = torch.zeros(batch_size, sequence_length, num_heads,
-                                    v_head_dim).to(value)
-        for i in range(num_heads):
-            q_t = query[:, :, i]
-            k_t = key[:, :, i]
-            v_t = value[:, :, i]
-            g_t = g[:, :, i].exp().unsqueeze(-1).unsqueeze(-1)
-            beta_t = beta[:, :, i].unsqueeze(-1)
+@torch._dynamo.disable
+def _save_ssm_state(core_attn_out, last_recurrent_state, ssm_state,
+                    state_indices):
+    """Persist GDN final_state into ssm_state cache for chunked prefill.
 
-            recurrent_state = recurrent_state * g_t
-            kv_mem = (recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
-            delta = (v_t - kv_mem) * beta_t
-            recurrent_state = recurrent_state + k_t.unsqueeze(
-                -1) * delta.unsqueeze(-2)
-            core_attn_out[:, :, i] = (recurrent_state *
-                                      q_t.unsqueeze(-1)).sum(dim=-2)
-    else:
-        q_t = query.squeeze(-2)
-        k_t = key.squeeze(-2)
-        v_t = value.squeeze(-2)
-        g_t = g.squeeze(-1).exp().unsqueeze(-1).unsqueeze(-1)
-        beta_t = beta
-
-        recurrent_state = recurrent_state * g_t
-        kv_mem = (recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
-        delta = (v_t - kv_mem) * beta_t
-        recurrent_state.add_(k_t.unsqueeze(-1) * delta.unsqueeze(-2))
-        core_attn_out = (recurrent_state *
-                         q_t.unsqueeze(-1)).sum(dim=-2).unsqueeze(-2)
-
-    if not output_final_state:
-        recurrent_state = None
-    else:
-        recurrent_state = recurrent_state.to(initial_dtype)
-    core_attn_out = core_attn_out.transpose(1,
-                                            2).contiguous().to(initial_dtype)
-    return core_attn_out, recurrent_state
+    Must be @torch._dynamo.disable because HPU torch.compile silently
+    drops in-place index_copy_ to aliased state tensors.  Returns
+    core_attn_out as a pass-through so the compiled graph consumes
+    the call - HPU drops dynamo-disabled calls whose results are unused.
+    """
+    ssm_state.index_copy_(
+        dim=0,
+        index=state_indices,
+        source=last_recurrent_state,
+    )
+    return core_attn_out
 
 
 class Qwen3NextSparseMoeBlock(nn.Module):
@@ -271,7 +145,8 @@ class Qwen3NextSparseMoeBlock(nn.Module):
                                 hidden_size=config.hidden_size,
                                 intermediate_size=config.moe_intermediate_size,
                                 reduce_results=False,
-                                renormalize=config.norm_topk_prob,
+                                renormalize=getattr(config, "norm_topk_prob",
+                                                    True),
                                 quant_config=quant_config,
                                 prefix=f"{prefix}.experts")
 
@@ -401,20 +276,22 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         self.conv1d_weight = None
 
         # projection of the input hidden states
-        self.projection_size_qkvz = self.key_dim * 2 + self.value_dim * 2
-        self.projection_size_ba = self.num_v_heads * 2
-        self.in_proj_qkvz = ColumnParallelLinear(
-            input_size=self.hidden_size,
-            output_size=self.projection_size_qkvz,
-            bias=False,
+        # Qwen3-Next and Qwen3.5 have a different qkv_proj layout,
+        # we need to create qkvz_proj adaptively here.
+        self.in_proj_qkvz = self.create_qkvz_proj(
+            hidden_size=self.hidden_size,
+            key_dim=self.key_dim,
+            value_dim=self.value_dim,
             quant_config=quant_config,
             prefix=f"{prefix}.in_proj_qkvz",
         )
+
         # ba_proj doesn't support blockwise fp8 quantization.
-        self.in_proj_ba = ColumnParallelLinear(
-            input_size=self.hidden_size,
-            output_size=self.projection_size_ba,
-            bias=False,
+        # Qwen3-Next and Qwen3.5 have different in_proj_ba checkpoint
+        # layouts, so we use a factory method to create the projection.
+        self.in_proj_ba = self.create_ba_proj(
+            hidden_size=self.hidden_size,
+            num_v_heads=self.num_v_heads,
             quant_config=None,
             prefix=f"{prefix}.in_proj_ba",
         )
@@ -433,14 +310,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 ], self.tp_size, self.tp_rank)
             })
 
-        max_prefill_bs = vllm_config.scheduler_config.max_num_prefill_seqs
         max_decode_bs = vllm_config.scheduler_config.max_num_seqs
-
-        mamba_cache_bs = max_decode_bs + max(8, max_decode_bs)
-        if max_prefill_bs is not None:
-            mamba_cache_bs += max_prefill_bs
-        else:
-            mamba_cache_bs += max_decode_bs
+        mamba_cache_bs = max(8, max_decode_bs) + 2
 
         conv_state_shape = (
             mamba_cache_bs,
@@ -459,9 +330,13 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                                      device=self.conv1d.weight.device)
 
         self.chunk_size = 64
+        self.chunked_prefill_size = \
+            vllm_config.scheduler_config.max_num_batched_tokens
         self.eye_constant = torch.eye(self.chunk_size,
-                                      dtype=torch.float32,
+                                      dtype=torch.bfloat16,
                                       device=self.conv1d.weight.device)
+
+        self.inv_loop = int(os.environ.get("VLLM_GDN_INV_LOOP", 12))
 
         # time step projection (discretization)
         # instantiate once and copy inv_dt in init_weights of PretrainedModel
@@ -498,10 +373,48 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             raise ValueError(f"Duplicate layer name: {prefix}")
         compilation_config.static_forward_context[prefix] = self
 
+    def create_qkvz_proj(
+        self,
+        hidden_size: int,
+        key_dim: int,
+        value_dim: int,
+        quant_config: QuantizationConfig | None,
+        prefix: str,
+    ) -> MergedColumnParallelLinear:
+        return MergedColumnParallelLinear(
+            input_size=hidden_size,
+            output_sizes=[sum((key_dim, key_dim, value_dim, value_dim))],
+            bias=False,
+            quant_config=quant_config,
+            prefix=prefix,
+        )
+
+    def create_ba_proj(
+        self,
+        hidden_size: int,
+        num_v_heads: int,
+        quant_config: QuantizationConfig | None,
+        prefix: str,
+    ) -> MergedColumnParallelLinear:
+        # Qwen3-Next stores in_proj_ba as a single fused weight with an
+        # interleaved GQA layout: [b_g0, a_g0, b_g1, a_g1, ...] where
+        # each group corresponds to a key-head group. We must use a single
+        # output shard so that ColumnParallel sharding preserves this
+        # interleaved structure across TP ranks.
+        # Qwen3.5 overrides this to use [num_v_heads, num_v_heads] since
+        # its checkpoint has separate in_proj_b and in_proj_a weights.
+        return MergedColumnParallelLinear(
+            input_size=hidden_size,
+            output_sizes=[num_v_heads * 2],
+            bias=False,
+            quant_config=quant_config,
+            prefix=prefix,
+        )
+
     def fix_query_key_value_ordering(
         self,
-        mixed_qkvz,
-        mixed_ba,
+        mixed_qkvz: torch.Tensor,
+        mixed_ba: torch.Tensor,
     ):
         """
         Derives `query`, `key` and `value` tensors from `mixed_qkvzba`.
@@ -579,12 +492,12 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         projected_states_qkvz, _ = self.in_proj_qkvz(hidden_states)
         projected_states_ba, _ = self.in_proj_ba(hidden_states)
 
-        projected_states_qkvz = projected_states_qkvz.float()
+        projected_states_qkvz = projected_states_qkvz
         projected_states_ba = projected_states_ba.float()
 
         query, key, value, z, b, a = self.fix_query_key_value_ordering(
             projected_states_qkvz, projected_states_ba)
-        query, key, value = (x.reshape(x.shape[0], x.shape[1], -1) \
+        query, key, value = (x.reshape(x.shape[0], x.shape[1], -1).float() \
             for x in (query, key, value))
         mixed_qkv = torch.cat((query, key, value), dim=-1)
 
@@ -604,9 +517,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 mixed_qkv.reshape(-1, qkv_dim),
                 dim=0,
                 index=conv_state_indices).reshape(bs, -1, qkv_dim)
-            conv_state.index_copy_(dim=0,
-                                   index=mamba_cache_prefill_indices,
-                                   source=prefill_conv_state)
+            mixed_qkv = _save_conv_state(mixed_qkv, prefill_conv_state,
+                                         conv_state,
+                                         mamba_cache_prefill_indices)
 
             mixed_qkv_with_pad = F.pad(mixed_qkv,
                                        (0, 0, self.conv_kernel_size - 1, 0))
@@ -630,11 +543,15 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
             )
-            conv_state.index_copy_(0, mamba_cache_decode_indices,
-                                   cur_conv_state)
+            mixed_qkv_non_spec = _save_conv_state(
+                mixed_qkv_non_spec,
+                cur_conv_state,
+                conv_state,
+                mamba_cache_decode_indices,
+            )
 
         query, key, value = torch.split(
-            mixed_qkv_non_spec,
+            mixed_qkv_non_spec.to(hidden_states.dtype),
             [
                 self.key_dim // self.tp_size,
                 self.key_dim // self.tp_size,
@@ -649,7 +566,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         value_non_spec = value.reshape(value.shape[0], value.shape[1], -1,
                                        self.head_v_dim)
 
-        beta = b.sigmoid()
+        beta = b.sigmoid().to(hidden_states.dtype)
         g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
 
         if self.num_v_heads // self.num_k_heads > 1:
@@ -661,21 +578,23 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         if attn_metadata.is_prompt:
             core_attn_out, last_recurrent_state = (
-                torch_chunk_gated_delta_rule(
+                torch_chunk_gated_delta_rule_opt(
                     query_non_spec,
                     key_non_spec,
                     value_non_spec,
                     g=g,
                     beta=beta,
                     eye_constant=self.eye_constant,
+                    valid_seq_len=attn_metadata.seq_lens_tensor,
                     chunk_size=self.chunk_size,
+                    inv_loop=self.inv_loop,
                     initial_state=None,
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            ssm_state.index_copy_(dim=0,
-                                  index=mamba_cache_prefill_indices,
-                                  source=last_recurrent_state)
+            core_attn_out = _save_ssm_state(core_attn_out,
+                                            last_recurrent_state, ssm_state,
+                                            mamba_cache_prefill_indices)
         else:
             recurrent_state = torch.index_select(
                 ssm_state,
@@ -683,7 +602,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 index=mamba_cache_decode_indices,
             )
             core_attn_out, last_recurrent_state = (
-                torch_recurrent_gated_delta_rule(
+                torch_recurrent_gated_delta_rule_opt(
                     query_non_spec,
                     key_non_spec,
                     value_non_spec,
@@ -693,11 +612,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            ssm_state.index_copy_(
-                dim=0,
-                index=mamba_cache_decode_indices,
-                source=last_recurrent_state,
-            )
+            core_attn_out = _save_ssm_state(core_attn_out,
+                                            last_recurrent_state, ssm_state,
+                                            mamba_cache_decode_indices)
 
         z_shape_og = z.shape
         # reshape input data into 2D tensor
@@ -765,11 +682,15 @@ class Qwen3NextAttention(nn.Module):
             prefix=f"{prefix}.o_proj",
         )
 
+        if hasattr(config, "rope_theta"):
+            rope_theta = config.rope_theta
+        else:
+            rope_theta = config.rope_parameters.get("rope_theta", 10000)
         self.rotary_emb = get_rope(
             head_size=self.head_dim,
             rotary_dim=self.head_dim,
             max_position=config.max_position_embeddings,
-            base=config.rope_theta,
+            base=rope_theta,
             rope_scaling=config.rope_scaling,
             partial_rotary_factor=config.partial_rotary_factor,
             dual_chunk_attention_config=self.dual_chunk_attention_config,
@@ -827,11 +748,11 @@ class Qwen3NextAttention(nn.Module):
 
         if self.attn_output_gate:
             gate = torch.sigmoid(gate)
-            attn_output = attn_output * gate
+            attn_output = attn_output.view(gate.shape) * gate
 
         output, _ = self.o_proj(attn_output)
 
-        return output
+        return output.reshape(bs, seq, -1)
 
 
 class Qwen3NextDecoderLayer(nn.Module):
@@ -913,6 +834,9 @@ class Qwen3NextDecoderLayer(nn.Module):
                     dtype=config.torch_dtype,
                 ), )
 
+        self.graph_break = os.environ.get("VLLM_MOE_GRAPH_BREAK",
+                                          "false").lower() == "true"
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -947,6 +871,9 @@ class Qwen3NextDecoderLayer(nn.Module):
                 hidden_states = hidden_states * (
                     self.attn_layer_scale.to(hidden_states.dtype) + 1)
 
+        if not htorch.utils.internal.is_lazy() and self.graph_break:
+            torch._dynamo.graph_break()
+
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
@@ -972,7 +899,7 @@ class Qwen3NextModel(nn.Module):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
 
-        config: Qwen3NextConfig = vllm_config.model_config.hf_config
+        config: Qwen3NextConfig = vllm_config.model_config.hf_text_config
         model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
@@ -1026,7 +953,7 @@ class Qwen3NextModel(nn.Module):
                 hidden_states = inputs_embeds
             else:
                 hidden_states = self.get_input_embeddings(input_ids)
-            residual = None
+            residual = torch.zeros_like(hidden_states)
         else:
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
@@ -1054,7 +981,7 @@ class Qwen3NextModel(nn.Module):
             ckpt_gate_proj_name="gate_proj",
             ckpt_down_proj_name="down_proj",
             ckpt_up_proj_name="up_proj",
-            num_experts=self.config.num_experts)
+            num_experts=getattr(self.config, "num_experts", 0))
 
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
@@ -1133,8 +1060,53 @@ class Qwen3NextModel(nn.Module):
         return loaded_params
 
 
+class QwenNextMixtureOfExperts(MixtureOfExperts):
+
+    def update_physical_experts_metadata(
+        self,
+        num_physical_experts: int,
+        num_local_physical_experts: int,
+    ) -> None:
+        assert self.num_local_physical_experts == num_local_physical_experts
+        self.num_physical_experts = num_physical_experts
+        self.num_local_physical_experts = num_local_physical_experts
+        self.num_redundant_experts = \
+            num_physical_experts - self.num_logical_experts
+        for layer in self.model.layers:
+            if isinstance(layer.mlp, Qwen3NextSparseMoeBlock):
+                moe = layer.mlp
+                moe.n_local_physical_experts = num_local_physical_experts
+                moe.n_physical_experts = num_physical_experts
+                moe.n_redundant_experts = self.num_redundant_experts
+                moe.experts.update_expert_map()
+
+    def set_moe_parameters(self):
+        self.expert_weights = []
+
+        self.moe_layers = []
+        example_moe = None
+        for layer in self.model.layers:
+            if isinstance(layer, Qwen3NextDecoderLayer) and isinstance(
+                    layer.mlp, Qwen3NextSparseMoeBlock):
+                example_moe = layer.mlp
+                self.moe_layers.append(layer.mlp.experts)
+
+        if example_moe is None:
+            raise RuntimeError("No Qwen3Next layer found in the model.layers.")
+
+        # Set MoE hyperparameters
+        self.num_moe_layers = len(self.moe_layers)
+        self.num_expert_groups = 1
+        self.num_shared_experts = 0
+        self.num_logical_experts = example_moe.n_logical_experts
+        self.num_physical_experts = example_moe.n_physical_experts
+        self.num_local_physical_experts = example_moe.n_local_physical_experts
+        self.num_routed_experts = example_moe.n_routed_experts
+        self.num_redundant_experts = example_moe.n_redundant_experts
+
+
 class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
-                           MixtureOfExperts, IsHybrid):
+                           QwenNextMixtureOfExperts, IsHybrid):
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -1145,7 +1117,7 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
-        config = vllm_config.model_config.hf_config
+        config = vllm_config.model_config.hf_text_config
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         cache_config = vllm_config.cache_config
@@ -1283,7 +1255,7 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
             cls, vllm_config: "VllmConfig"
     ) -> tuple[tuple[int, int], tuple[int, int]]:
         parallel_config = vllm_config.parallel_config
-        hf_config = vllm_config.model_config.hf_config
+        hf_config = vllm_config.model_config.hf_text_config
         tp_size = parallel_config.tensor_parallel_size
         num_spec = (vllm_config.speculative_config.num_speculative_tokens
                     if vllm_config.speculative_config else 0)

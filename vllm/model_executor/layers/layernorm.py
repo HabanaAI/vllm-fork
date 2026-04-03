@@ -321,7 +321,8 @@ class GemmaRMSNorm(CustomOp):
         return self.forward_native(x, residual)
 
 
-class RMSNormGated(nn.Module):
+@CustomOp.register("rms_normgated")
+class RMSNormGated(CustomOp):
 
     def __init__(
         self,
@@ -347,20 +348,31 @@ class RMSNormGated(nn.Module):
     def reset_parameters(self):
         torch.nn.init.ones_(self.weight)
 
-    def forward(self, hidden_states, gate=None):
+    def forward_native(self, hidden_states, gate=None):
         """
         If z is not None, we do norm(x) * silu(z)
         if norm_before_gate, else norm(x * silu(z))
         """
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
         # Norm before gate
         hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
-        hidden_states = self.weight * hidden_states.to(input_dtype)
-        hidden_states = hidden_states * F.silu(gate.to(torch.float32))
+        hidden_states = self.weight.to(hidden_states.dtype) * hidden_states
+        if gate is not None:
+            hidden_states = hidden_states * F.silu(gate.to(
+                hidden_states.dtype))
 
-        return hidden_states.to(input_dtype)
+        return hidden_states
+
+    def forward_hpu(self, hidden_states, gate=None):
+        from vllm_hpu_extension.kernels import rms_norm
+        HPUFusedRMSNorm = rms_norm()
+
+        hidden_states = HPUFusedRMSNorm.apply(
+            hidden_states, self.weight.to(hidden_states.dtype), self.eps)
+        if gate is not None:
+            hidden_states = hidden_states * F.silu(gate.to(
+                hidden_states.dtype))
+        return hidden_states
 
 
 class MiniMaxText01RMSNormTP(CustomOp):

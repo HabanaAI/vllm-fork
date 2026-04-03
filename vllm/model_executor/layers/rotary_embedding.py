@@ -1287,12 +1287,19 @@ class MRotaryEmbedding(RotaryEmbedding):
 
         if offsets is not None:
             offsets = offsets.view(positions.shape[0], -1)
-        num_tokens = positions.shape[-1]
-        if positions.ndim == 2:
+        if positions.ndim == 1:
+            num_tokens = query.shape[0] * query.shape[
+                1] if query.ndim == 3 else query.shape[0]
+            if positions.shape[0] != num_tokens:
+                positions = positions.view(-1, num_tokens)
+        else:
+            num_tokens = positions.shape[-1]
+        if positions.ndim == 2 and positions.shape[0] == 3:
             cos_sin = (self.cos_sin_cache_mrope0[positions[0]] +
                        self.cos_sin_cache_mrope1[positions[1]] +
                        self.cos_sin_cache_mrope2[positions[2]])
         else:
+            assert positions.ndim == 1
             cos_sin = self.cos_sin_cache[positions]
 
         cos, sin = cos_sin.chunk(2, dim=-1)
@@ -1449,7 +1456,9 @@ class MRotaryEmbedding(RotaryEmbedding):
                 context_len=context_len,
                 seq_len=seq_len,
             )
-        elif hf_config.model_type in ["qwen3_vl", "qwen3_vl_moe"]:
+        elif hf_config.model_type in [
+                "qwen3_vl", "qwen3_vl_moe", "qwen3_5", "qwen3_5_moe"
+        ]:
             return cls._qwen3vl_get_input_positions_tensor(
                 input_tokens=input_tokens,
                 hf_config=hf_config,

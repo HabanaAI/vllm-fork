@@ -1,79 +1,97 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from vllm import LLM, EngineArgs
-from vllm.utils import FlexibleArgumentParser
+import argparse
+import os
+
+os.environ["PT_HPU_LAZY_MODE"] = "1"
+
+from vllm import LLM, SamplingParams
+
+# Parse the command-line arguments.
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--model",
+    type=str,
+    default="facebook/opt-125m",
+    help="The model path.",
+)
+parser.add_argument("--tp-size", type=int, default=2, help="The number of threads.")
+parser.add_argument(
+    "--output-tokens", type=int, default=512, help="The number of output tokens."
+)
+parser.add_argument(
+    "--max-model-length", type=int, default=16384, help="Max model length."
+)
+parser.add_argument("--enable-ep", action="store_true", help="Enable EP for MOE models")
+parser.add_argument("--temperature", type=float, default=0.8)
+parser.add_argument("--top-p", type=float, default=0.95)
+parser.add_argument(
+    "--enable-thinking", action="store_true", help="Enable think mode for inference"
+)
+# Add example params
+parser.add_argument("--chat-template-path", type=str)
+args = parser.parse_args()
+
+os.environ["VLLM_SKIP_WARMUP"] = "true"
+os.environ["HABANA_VISIBLE_DEVICES"] = "ALL"
+os.environ["PT_HPU_ENABLE_LAZY_COLLECTIVES"] = "true"
+os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
 
 
-def create_parser():
-    parser = FlexibleArgumentParser()
-    # Add engine args
-    EngineArgs.add_cli_args(parser)
-    parser.set_defaults(model="meta-llama/Llama-3.2-1B-Instruct")
-    # Add sampling params
-    sampling_group = parser.add_argument_group("Sampling parameters")
-    sampling_group.add_argument("--max-tokens", type=int)
-    sampling_group.add_argument("--temperature", type=float)
-    sampling_group.add_argument("--top-p", type=float)
-    sampling_group.add_argument("--top-k", type=int)
-    # Add example params
-    parser.add_argument("--chat-template-path", type=str)
-
-    return parser
-
-
-def main(args: dict):
-    # Pop arguments not used by LLM
-    max_tokens = args.pop("max_tokens")
-    temperature = args.pop("temperature")
-    top_p = args.pop("top_p")
-    top_k = args.pop("top_k")
-    chat_template_path = args.pop("chat_template_path")
-
-    # Create an LLM
-    llm = LLM(**args)
-
-    # Create sampling params object
-    sampling_params = llm.get_default_sampling_params()
-    if max_tokens is not None:
-        sampling_params.max_tokens = max_tokens
-    if temperature is not None:
-        sampling_params.temperature = temperature
-    if top_p is not None:
-        sampling_params.top_p = top_p
-    if top_k is not None:
-        sampling_params.top_k = top_k
+if __name__ == "__main__":
+    # Sample prompts.
+    prompts = [
+        "Hello, my name is",
+        "The president of the United States is",
+        "The capital of France is",
+        "The future of AI is",
+    ]
+    messages = []
+    for idx in range(len(prompts)):
+        conversation = [
+            {"role": "system", "content": "You are a helpful assistant"},
+            {"role": "user", "content": prompts[idx]},
+        ]
+        messages.append(conversation)
+    # Create a sampling params object.
+    sampling_params = SamplingParams(
+        temperature=args.temperature,
+        top_p=args.top_p,
+        max_tokens=args.output_tokens,
+    )
+    chat_template_path = args.chat_template_path
+    model = args.model
+    if args.tp_size == 1:
+        llm = LLM(
+            model=model,
+            tokenizer=model,
+            trust_remote_code=True,
+            dtype="bfloat16",
+            max_model_len=args.max_model_length,
+        )
+    else:
+        llm = LLM(
+            model=model,
+            tokenizer=model,
+            tensor_parallel_size=args.tp_size,
+            distributed_executor_backend="mp",
+            trust_remote_code=True,
+            max_model_len=args.max_model_length,
+            enable_expert_parallel=args.enable_ep,
+            dtype="bfloat16",
+        )
 
     def print_outputs(outputs):
         print("\nGenerated Outputs:\n" + "-" * 80)
-        for output in outputs:
-            prompt = output.prompt
-            generated_text = output.outputs[0].text
+        for idx in range(len(outputs)):
+            prompt = prompts[idx]
+            generated_text = outputs[idx].outputs[0].text
             print(f"Prompt: {prompt!r}\n")
             print(f"Generated text: {generated_text!r}")
             print("-" * 80)
 
     print("=" * 80)
-
-    # In this script, we demonstrate how to pass input to the chat method:
-    conversation = [
-        {"role": "system", "content": "You are a helpful assistant"},
-        {"role": "user", "content": "Hello"},
-        {"role": "assistant", "content": "Hello! How can I assist you today?"},
-        {
-            "role": "user",
-            "content": "Write an essay about the importance of higher education.",
-        },
-    ]
-    outputs = llm.chat(conversation, sampling_params, use_tqdm=False)
-    print_outputs(outputs)
-
-    # You can run batch inference with llm.chat API
-    conversations = [conversation for _ in range(10)]
-
-    # We turn on tqdm progress bar to verify it's indeed running batch inference
-    outputs = llm.chat(conversations, sampling_params, use_tqdm=True)
-    print_outputs(outputs)
 
     # A chat template can be optionally supplied.
     # If not, the model will use its default chat template.
@@ -82,14 +100,16 @@ def main(args: dict):
             chat_template = f.read()
 
         outputs = llm.chat(
-            conversations,
+            messages,
             sampling_params,
             use_tqdm=False,
             chat_template=chat_template,
+            chat_template_kwargs={"enable_thinking": args.enable_thinking},
         )
-
-
-if __name__ == "__main__":
-    parser = create_parser()
-    args: dict = vars(parser.parse_args())
-    main(args)
+    else:
+        outputs = llm.chat(
+            messages,
+            sampling_params,
+            chat_template_kwargs={"enable_thinking": args.enable_thinking},
+        )
+    print_outputs(outputs)

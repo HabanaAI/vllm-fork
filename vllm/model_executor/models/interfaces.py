@@ -32,6 +32,20 @@ The output embeddings must be one of the following formats:
 """
 
 
+def _require_is_multimodal(is_multimodal: Tensor | None) -> Tensor:
+    """
+    A helper function to be used in the context of
+    [vllm.model_executor.models.interfaces.SupportsMultiModal.embed_input_ids][]
+    to provide a better error message.
+    """
+    if is_multimodal is None:
+        raise ValueError("`embed_input_ids` now requires `is_multimodal` arg, "
+                         "please update your model runner according to "
+                         "https://github.com/vllm-project/vllm/pull/16229.")
+
+    return is_multimodal
+
+
 @runtime_checkable
 class SupportsMultiModal(Protocol):
     """The interface required for all multi-modal models."""

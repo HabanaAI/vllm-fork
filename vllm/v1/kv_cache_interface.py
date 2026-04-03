@@ -3,6 +3,7 @@
 
 import copy
 from dataclasses import dataclass
+from math import prod
 from typing import Optional
 
 import torch
@@ -152,6 +153,35 @@ class SlidingWindowSpec(AttentionSpec):
         # is 4, we need two blocks [XXCD] [EF] to store the sliding
         # window [CDEF] of 6 tokens.
         return (cdiv(num_tokens, self.block_size) + 1) * self.page_size_bytes
+
+
+@dataclass
+class MambaSpec(KVCacheSpec):
+    shapes: tuple[tuple[int, ...], ...]
+    dtypes: tuple[torch.dtype]
+    page_size_padded: int | None = None
+    mamba_type: str = "mamba2"
+    mamba_cache_mode: str = "none"
+    num_speculative_blocks: int = 0
+
+    @property
+    def page_size_bytes(self) -> int:
+        page_size = sum(
+            prod(shape) * get_dtype_size(dtype)
+            for (shape, dtype) in zip(self.shapes, self.dtypes))
+        if self.page_size_padded is not None:
+            assert self.page_size_padded >= page_size
+            return self.page_size_padded
+        return page_size
+
+    def max_memory_usage_bytes(self, vllm_config: VllmConfig) -> int:
+        if vllm_config.cache_config.mamba_cache_mode == "all":
+            max_model_len = vllm_config.model_config.max_model_len
+            return cdiv(max_model_len, self.block_size) * self.page_size_bytes
+        elif vllm_config.cache_config.mamba_cache_mode == "align":
+            return self.page_size_bytes * (2 + self.num_speculative_blocks)
+        else:
+            return self.page_size_bytes * (1 + self.num_speculative_blocks)
 
 
 @dataclass

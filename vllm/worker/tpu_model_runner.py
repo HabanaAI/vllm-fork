@@ -562,6 +562,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
+        running_queue_list: Optional[List[int]] = None,
     ) -> ModelInputForTPU:
         del finished_requests_ids  # Unused.
         assert virtual_engine == 0
