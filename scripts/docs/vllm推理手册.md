@@ -874,6 +874,7 @@ pip install -e vllm-hpu-extension --no-build-isolation
 - 环境变量*PT_HPU_LAZY_MODE=0*有更好的性能，**推荐使用**。
 
 Qwen3.5-27B 模型2卡部署可使用如下命令启动:
+
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
@@ -889,6 +890,7 @@ bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B/ \
 ```
 
 Qwen3.5-35B-A3B 模型4卡部署可使用如下命令启动：
+
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
@@ -902,7 +904,9 @@ bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-35B-A3B/ \
 -e "--reasoning-parser qwen3" \
 -c /warmup_cache/Qwen3.5-35B-A3B/
 ```
+
 Qwen3.5-122B-A10B 模型8卡部署可使用如下命令启动：
+
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
@@ -925,13 +929,16 @@ FP8的权重需要通过BF16的模型转换而来，解压复制文件并转换�
 cd vllm-fork/scripts/data
 tar -xvzf qwen3.5-input-scale.tar.gz
 ```
+
 Qwen3.5-27B 转Unit Scale FP8权重：
+
 ```bash
 cp qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors ./
 python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s qwen3.5-27b-dense-input-scale.safetensors
 ```
 
 Qwen3.5-122B-A10B 转Unit Scale FP8权重：
+
 ```bash
 cp qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors ./
 python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s qwen3.5-122b-moe-input-scale.safetensors
@@ -945,6 +952,7 @@ python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data
 - 环境变量*PT_HPU_LAZY_MODE=0 VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
 
 Qwen3.5-27B-FP8-G2-Unit 模型1卡部署可使用如下命令启动：
+
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
@@ -963,6 +971,7 @@ bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2-Unit/ \
 ```
 
 Qwen3.5-122B-A10B-FP8-G2-Unit 模型4卡部署可使用如下命令启动：
+
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
@@ -1286,4 +1295,3 @@ paddleocr doc_parser \
 
 - 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
 - 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。
-

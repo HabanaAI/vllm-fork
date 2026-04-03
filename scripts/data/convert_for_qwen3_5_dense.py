@@ -1,13 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+import argparse
+import json
+import os
+from glob import glob
+
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
-from glob import glob
-import os
-import json
 
-import argparse
-
-FP8_MAX = 240.0 #torch.finfo(torch.float8_e4m3fn).max
+FP8_MAX = 240.0  #torch.finfo(torch.float8_e4m3fn).max
 
 
 def calc_maxabs_scale(xmaxabs, fullscale, backoff=1):
@@ -53,7 +55,7 @@ def copy_other_files(input_path, output_path):
 
 def add_quant_config(output_path):
     json_file = output_path + "/config.json"
-    with open(json_file, 'r') as f:
+    with open(json_file) as f:
         config = json.load(f)
 
     config["quantization_config"] = {
@@ -71,27 +73,43 @@ def convert_files(input_path, output_path, input_scale_path, use_unit_quant):
     all_safetensors = glob(f"{input_path}/*.safetensors")
     # sort by file name
     all_safetensors.sort()
-    model_list={}
+    model_list = {}
 
-    with safe_open(input_scale_path, framework="pt", device="cpu") as input_scale:
+    with safe_open(input_scale_path, framework="pt",
+                   device="cpu") as input_scale:
         for safetensors_path in all_safetensors:
             print(f"processing {safetensors_path}")
             tensors = {}
-            with safe_open(safetensors_path, framework="pt", device="cpu") as tensor_file:
+            with safe_open(safetensors_path, framework="pt",
+                           device="cpu") as tensor_file:
                 for k in tensor_file.keys():
                     tensor = tensor_file.get_tensor(k)
-                    if ("down_proj" in k or "gate_proj" in k or "up_proj" in k or "q_proj" in k or "k_proj" in k or "v_proj" in k or "o_proj" in k or "out_proj" in k or "in_proj_qkv" in k or "in_proj_z" in k) and "language_model" in k:
+                    if ("down_proj" in k or "gate_proj" in k or "up_proj" in k
+                            or "q_proj" in k or "k_proj" in k or "v_proj" in k
+                            or "o_proj" in k or "out_proj" in k
+                            or "in_proj_qkv" in k
+                            or "in_proj_z" in k) and "language_model" in k:
                         weight_name = k
                         weight_scale_name = weight_name + "_scale"
-                        weight_fp8, scale = dynamic_quant(tensor, use_unit_quant=use_unit_quant)
-                        input_scale_name = weight_name.rstrip("weight") + "input_scale"
-                        input_scale_tensor = input_scale.get_tensor(input_scale_name).float() * 448.0 / 240.0
+                        weight_fp8, scale = dynamic_quant(
+                            tensor, use_unit_quant=use_unit_quant)
+                        input_scale_name = weight_name.rstrip(
+                            "weight") + "input_scale"
+                        input_scale_tensor = input_scale.get_tensor(
+                            input_scale_name).float() * 448.0 / 240.0
                         tensors.update({input_scale_name: input_scale_tensor})
                         tensors.update({weight_scale_name: scale})
                         tensors.update({weight_name: weight_fp8})
-                        model_list.update({input_scale_name: safetensors_path.split("/")[-1]})
-                        model_list.update({weight_scale_name: safetensors_path.split("/")[-1]})
-                        model_list.update({weight_name: safetensors_path.split("/")[-1]})
+                        model_list.update({
+                            input_scale_name:
+                            safetensors_path.split("/")[-1]
+                        })
+                        model_list.update({
+                            weight_scale_name:
+                            safetensors_path.split("/")[-1]
+                        })
+                        model_list.update(
+                            {weight_name: safetensors_path.split("/")[-1]})
                     else:
                         print(f"skip {k}.")
                         tensors.update({k: tensor})
@@ -100,7 +118,7 @@ def convert_files(input_path, output_path, input_scale_path, use_unit_quant):
             save_file(tensors, new_tensor_path)
             print(f"saving to {new_tensor_path}")
 
-    result = {"weight_map" : model_list, "metadata" : {}}
+    result = {"weight_map": model_list, "metadata": {}}
     out_json_path = output_path + "/model.safetensors.index.json"
     with open(out_json_path, "w") as f:
         json.dump(result, f, indent=2)
@@ -109,8 +127,7 @@ def convert_files(input_path, output_path, input_scale_path, use_unit_quant):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Convert tensors to float8 format."
-    )
+        description="Convert tensors to float8 format.")
     parser.add_argument(
         "-i",
         "--input_path",
@@ -129,12 +146,10 @@ if __name__ == "__main__":
         default="qwen3.5-4b-dense-input-scale.safetensors",
         help="Path to the output directory.",
     )
-    parser.add_argument(
-        "-u",
-        "--unit_quant",
-        action="store_true",
-        help="Enable Unit FP8 Quant for the entire model"
-    )
+    parser.add_argument("-u",
+                        "--unit_quant",
+                        action="store_true",
+                        help="Enable Unit FP8 Quant for the entire model")
     args = parser.parse_args()
     input_path = args.input_path
     output_path = args.output_path
