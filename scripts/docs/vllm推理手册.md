@@ -905,7 +905,7 @@ bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-35B-A3B/ \
 -c /warmup_cache/Qwen3.5-35B-A3B/
 ```
 
-Qwen3.5-122B-A10B 模型8卡部署可使用如下命令启动：
+Qwen3.5-122B-A10B 模型8卡部署可使用如下命令启动（8 卡需先完成 libfabric 通信配置，详见 [1.2.1 节](#121-基础镜像及网络配置)）：
 
 ```bash
 cd vllm-fork/scripts
@@ -933,15 +933,13 @@ tar -xvzf qwen3.5-input-scale.tar.gz
 Qwen3.5-27B 转Unit Scale FP8权重：
 
 ```bash
-cp qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors ./
-python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s qwen3.5-27b-dense-input-scale.safetensors
+python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors
 ```
 
 Qwen3.5-122B-A10B 转Unit Scale FP8权重：
 
 ```bash
-cp qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors ./
-python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s qwen3.5-122b-moe-input-scale.safetensors
+python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors
 ```
 
 ##### 3.4.4.2 启动 vLLM
@@ -1042,8 +1040,7 @@ pip install -e vllm-hpu-extension --no-build-isolation
 ```bash
 cd vllm-fork/scripts/data
 tar -xvzf minimax-m2.5-input-scale.tar.gz
-cp minimax_m2.5_input_scale/minimax-m2.5-input-scale.safetensors ./
-python3 convert_for_minimax_unit_scale.py -i /data/hf_models/MiniMax-M2.5 -o /data/hf_models/MiniMax-M2.5-G2 -s minimax-m2.5-input-scale.safetensors -u
+python3 convert_for_minimax_unit_scale.py -i /data/hf_models/MiniMax-M2.5 -o /data/hf_models/MiniMax-M2.5-G2 -s minimax_m2.5_input_scale/minimax-m2.5-input-scale.safetensors -u
 ```
 
 #### 3.5.4 启动 vLLM
