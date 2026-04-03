@@ -75,34 +75,39 @@ def convert_files(input_path, output_path, input_scale_path, num_experts,
             tensors = {}
             with safe_open(safetensors_path, framework="pt",
                            device="cpu") as tensor_file:
-                for k in tensor_file.keys():
+                for k in tensor_file.keys():  # noqa: SIM118
                     tensor = tensor_file.get_tensor(k)
                     if len(tensor.shape) == 3 and "conv1d" not in k:
                         for idx in range(num_experts):
                             if "gate_up_proj" in k:
-                                gate_weight_name = k.rstrip(
+                                gate_weight_name = k.removesuffix(
                                     "gate_up_proj") + str(
                                         idx) + ".gate_proj.weight"
-                                up_weight_name = k.rstrip(
+                                up_weight_name = k.removesuffix(
                                     "gate_up_proj") + str(
                                         idx) + ".up_proj.weight"
                                 gate_up_tensor = tensor[idx].reshape(
                                     2, -1, tensor.size(-1))
                                 gate_tensor = gate_up_tensor[0]
                                 up_tensor = gate_up_tensor[1]
-                                gate_weight_fp8, gate_weight_scale = dynamic_quant(
-                                    gate_tensor, use_unit_quant=use_unit_quant)
+                                gate_weight_fp8, gate_weight_scale = (
+                                    dynamic_quant(
+                                        gate_tensor,
+                                        use_unit_quant=use_unit_quant))
                                 up_weight_fp8, up_weight_scale = dynamic_quant(
                                     up_tensor, use_unit_quant=use_unit_quant)
-                                gate_weight_scale_name = gate_weight_name + "_scale"
-                                up_weight_scale_name = up_weight_name + "_scale"
+                                gate_weight_scale_name = (gate_weight_name +
+                                                          "_scale")
+                                up_weight_scale_name = (up_weight_name +
+                                                        "_scale")
                                 gate_up_input_scale_name = k + "." + str(
                                     idx) + ".input_scale"
-                                gate_input_scale_tensor = input_scale.get_tensor(
-                                    gate_up_input_scale_name).float(
-                                    ) * 448.0 / 240.0
-                                up_input_scale_tensor = gate_input_scale_tensor.clone(
-                                )
+                                gate_input_scale_tensor = (
+                                    input_scale.get_tensor(
+                                        gate_up_input_scale_name).float() *
+                                    448.0 / 240.0)
+                                up_input_scale_tensor = (
+                                    gate_input_scale_tensor.clone())
                                 gate_input_scale_name = gate_weight_name.rstrip(
                                     "weight") + "input_scale"
                                 up_input_scale_name = up_weight_name.rstrip(
@@ -149,19 +154,25 @@ def convert_files(input_path, output_path, input_scale_path, num_experts,
                                     safetensors_path.split("/")[-1]
                                 })
                             else:
-                                down_weight_name = k.rstrip("down_proj") + str(
-                                    idx) + ".down_proj.weight"
+                                down_weight_name = k.removesuffix(
+                                    "down_proj") + str(
+                                        idx) + ".down_proj.weight"
                                 down_tensor = tensor[idx]
-                                down_weight_fp8, down_weight_scale = dynamic_quant(
-                                    down_tensor, use_unit_quant=use_unit_quant)
-                                down_weight_scale_name = down_weight_name + "_scale"
+                                down_weight_fp8, down_weight_scale = (
+                                    dynamic_quant(
+                                        down_tensor,
+                                        use_unit_quant=use_unit_quant))
+                                down_weight_scale_name = (down_weight_name +
+                                                          "_scale")
                                 down_input_scale_name = k + "." + str(
                                     idx) + ".input_scale"
-                                down_input_scale_tensor = input_scale.get_tensor(
-                                    down_input_scale_name).float(
-                                    ) * 448.0 / 240.0
-                                down_input_scale_name = down_weight_name.rstrip(
-                                    "weight") + "input_scale"
+                                down_input_scale_tensor = (
+                                    input_scale.get_tensor(
+                                        down_input_scale_name).float() *
+                                    448.0 / 240.0)
+                                down_input_scale_name = (
+                                    down_weight_name.rstrip("weight") +
+                                    "input_scale")
                                 tensors.update(
                                     {down_weight_name: down_weight_fp8})
                                 tensors.update({
@@ -223,7 +234,6 @@ def convert_files(input_path, output_path, input_scale_path, num_experts,
     out_json_path = output_path + "/model.safetensors.index.json"
     with open(out_json_path, "w") as f:
         json.dump(result, f, indent=2)
-    f.close
 
 
 if __name__ == "__main__":

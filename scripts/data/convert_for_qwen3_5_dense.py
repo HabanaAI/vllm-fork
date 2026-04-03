@@ -82,7 +82,7 @@ def convert_files(input_path, output_path, input_scale_path, use_unit_quant):
             tensors = {}
             with safe_open(safetensors_path, framework="pt",
                            device="cpu") as tensor_file:
-                for k in tensor_file.keys():
+                for k in tensor_file.keys():  # noqa: SIM118
                     tensor = tensor_file.get_tensor(k)
                     if ("down_proj" in k or "gate_proj" in k or "up_proj" in k
                             or "q_proj" in k or "k_proj" in k or "v_proj" in k
@@ -122,7 +122,6 @@ def convert_files(input_path, output_path, input_scale_path, use_unit_quant):
     out_json_path = output_path + "/model.safetensors.index.json"
     with open(out_json_path, "w") as f:
         json.dump(result, f, indent=2)
-    f.close
 
 
 if __name__ == "__main__":
