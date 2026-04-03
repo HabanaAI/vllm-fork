@@ -21,6 +21,8 @@ python openai_chat_completion_client_for_multimodal.py --chat-type audio
 """
 
 import base64
+import os
+from typing import Optional
 
 import requests
 from openai import OpenAI
@@ -37,6 +39,15 @@ client = OpenAI(
     api_key=openai_api_key,
     base_url=openai_api_base,
 )
+
+
+def encode_base64_content_from_file(path: str) -> str:
+    """Encode a local file to base64 format."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Local file not found: {path}")
+
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
 
 def encode_base64_content_from_url(content_url: str) -> str:
@@ -62,9 +73,40 @@ def run_text_only(model: str) -> None:
 
 
 # Single-image input inference
-def run_single_image(model: str) -> None:
-    ## Use image url in the payload
-    image_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+def run_single_image(model: str, local_image: Optional[str] = None) -> None:
+    if local_image:
+        print(f"Using local image: {local_image}")
+        image_base64 = encode_base64_content_from_file(local_image)
+
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "What's in this image?"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            },
+                        },
+                    ],
+                }
+            ],
+            model=model,
+            max_completion_tokens=64,
+        )
+
+        result = chat_completion.choices[0].message.content
+        print("Chat completion output from local image:", result)
+        return
+
+    image_url = (
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/"
+        "Gfp-wisconsin-madison-the-nature-boardwalk.jpg/"
+        "2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+    )
+
     chat_completion_from_url = client.chat.completions.create(
         messages=[
             {
@@ -288,13 +330,22 @@ def parse_args():
         choices=list(example_function_map.keys()),
         help="Conversation type with multimodal data.",
     )
+    parser.add_argument(
+        "--local-image",
+        type=str,
+        default=None,
+        help="Path to a local image file for single-image test.",
+    )
     return parser.parse_args()
 
 
 def main(args) -> None:
     chat_type = args.chat_type
     model = get_first_model(client)
-    example_function_map[chat_type](model)
+    if chat_type == "single-image":
+        run_single_image(model, args.local_image)
+    else:
+        example_function_map[chat_type](model)
 
 
 if __name__ == "__main__":

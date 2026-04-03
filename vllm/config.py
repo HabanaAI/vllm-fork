@@ -4529,10 +4529,6 @@ class VllmConfig:
                     logger.info_once(
                         'Enable conversion from fp8_e4m3fn to fp8_e4m3fnuz')
                     os.environ["VLLM_HPU_CONVERT_TO_FP8UZ"] = "true"
-                if envs.VLLM_HPU_CONVERT_TO_FP8UZ and \
-                    self.load_config.device != 'cpu':
-                    logger.info_once('Reset weights_load_device to CPU.')
-                    self.load_config.device = 'cpu'
 
         if self.model_config is not None and \
             self.scheduler_config.chunked_prefill_enabled and \

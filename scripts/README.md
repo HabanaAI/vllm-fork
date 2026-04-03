@@ -487,6 +487,7 @@ The following 4 ENVs are used to control the device profiling:
 > The `step` in profiling means a step of the LLM engine, exclude the profile and warmup run in `HabanaModelRunner`.
 
 > Please use the `-f` flag or `export VLLM_PROFILER_ENABLED=True` to enable the high-level vLLM profile and to choose the preferred steps to profile.
+> Use the [high_level_profile_to_csv.py](high_level_profile_to_csv.py) to extract the actual and padded shapes for each scheduler steps from the high-level profile.
 
 # Releases
 ## aice/v1.22.0

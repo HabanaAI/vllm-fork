@@ -1178,6 +1178,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             for _ in range(self.deepstack_num_level)
         ] if self.use_deepstack else None
 
+        # multimodal chunked prefill offsets
         self.mm_offset_image = 0
         self.mm_offset_image_multiscale = 0
         self.mm_offset_video = 0
@@ -1513,6 +1514,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     return_offset=True,
                 )
                 self.mm_offset_image_multiscale = new_offset_multiscale
+
             inputs_embeds, new_offset = merge_multimodal_embeddings(
                 input_ids,
                 inputs_embeds,
@@ -1522,6 +1524,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 return_offset=True,
             )
             self.mm_offset_image = new_offset
+
         if video_input is not None:
             video_embeds = self._process_video_input(video_input)
             if self.use_deepstack:
@@ -1543,6 +1546,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     return_offset=True,
                 )
                 self.mm_offset_video_multiscale = new_offset_multiscale
+
             inputs_embeds, new_offset = merge_multimodal_embeddings(
                 input_ids,
                 inputs_embeds,
@@ -1552,6 +1556,7 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 return_offset=True,
             )
             self.mm_offset_video = new_offset
+
         if self.use_deepstack and deepstack_input_embeds is not None:
             inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
                                       dim=-1)

@@ -98,6 +98,8 @@ class RMSNorm(CustomOp):
     Refer to https://arxiv.org/abs/1910.07467
     """
 
+    name = "RMSNorm"
+
     def __init__(
         self,
         hidden_size: int,
@@ -108,6 +110,8 @@ class RMSNorm(CustomOp):
     ) -> None:
         super().__init__()
 
+        self.tp_world = get_tensor_model_parallel_world_size()
+        self.tp_rank = get_tensor_model_parallel_rank()
         self.hidden_size = hidden_size
         self.variance_epsilon = eps
         self.variance_size_override = (None if var_hidden_size == hidden_size
@@ -226,6 +230,39 @@ class RMSNorm(CustomOp):
             self.weight.data,
             self.variance_epsilon,
         )
+
+    # This path is used to reduce number of all_reduce calls.
+    # When RMSNorm is initialized but we want to apply TP to qk,
+    # it is better to combine qk tensors and perform one all_reduce
+    # if bs * seq is small.
+    @staticmethod
+    def forward_qk(
+        q_norm: "RMSNorm",
+        k_norm: "RMSNorm",
+        q: torch.Tensor,
+        k: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        qnorm_slice = q_norm.hidden_size // q_norm.tp_world
+        knorm_slice = k_norm.hidden_size // q_norm.tp_world
+        s, e = q_norm.tp_rank, q_norm.tp_rank + 1
+        qnorm_weight = q_norm.weight[s * qnorm_slice:e * qnorm_slice]
+        knorm_weight = k_norm.weight[s * knorm_slice:e * knorm_slice]
+        orig_dtype = q.dtype
+        q = q.to(torch.float32)
+        k = k.to(torch.float32)
+        q_var = q.pow(2).mean(dim=-1).unsqueeze(1)
+        k_var = k.pow(2).mean(dim=-1).unsqueeze(1)
+        if q_norm.tp_world > 1:
+            qk_var = torch.cat([q_var, k_var], dim=1)
+            qk_var = tensor_model_parallel_all_reduce(qk_var) / q_norm.tp_world
+            q_var, k_var = qk_var.chunk(2, dim=1)
+        q = q * torch.rsqrt(q_var.transpose(-1, -2) +
+                            q_norm.variance_epsilon) * qnorm_weight
+        k = k * torch.rsqrt(k_var.transpose(-1, -2) +
+                            k_norm.variance_epsilon) * knorm_weight
+        q = q.to(orig_dtype)
+        k = k.to(orig_dtype)
+        return q, k
 
     def extra_repr(self) -> str:
         s = f"hidden_size={self.weight.data.size(0)}"

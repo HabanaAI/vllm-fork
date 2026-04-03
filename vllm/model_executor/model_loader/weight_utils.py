@@ -456,6 +456,21 @@ def np_cache_weights_iterator(
         yield name, torch.from_numpy(param)
 
 
+def _maybe_convert_fp8_range(name: str, tensor: torch.Tensor) -> torch.Tensor:
+    """Convert FP8 tensor range for HPU FP8UZ compatibility when enabled."""
+    if not (current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ):
+        return tensor
+
+    if tensor.dtype == torch.float8_e4m3fn:
+        return (tensor.float() / 2).to(torch.float8_e4m3fn)
+
+    if (tensor.dtype in [torch.float32, torch.bfloat16]
+            and "scale" in name.split(".")[-1]):
+        tensor = tensor * 2
+
+    return tensor
+
+
 def safetensors_weights_iterator(
     hf_weights_files: list[str],
     use_tqdm_on_load: bool,
@@ -469,17 +484,7 @@ def safetensors_weights_iterator(
     ):
         with safe_open(st_file, framework="pt") as f:
             for name in f.keys():  # noqa: SIM118
-                param = f.get_tensor(name)
-                if current_platform.is_hpu(
-                ) and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-                    fp8_e4m3fnuz_max = torch.finfo(torch.float8_e4m3fnuz).max
-                    fp8_e4m3fn_max = torch.finfo(torch.float8_e4m3fn).max
-                    if param.dtype == torch.float8_e4m3fn:
-                        param = (param.float() * fp8_e4m3fnuz_max /
-                                 fp8_e4m3fn_max).to(torch.float8_e4m3fnuz)
-                    elif param.dtype in [torch.float32, torch.bfloat16
-                                         ] and "scale" in name.split(".")[-1]:
-                        param *= fp8_e4m3fn_max / fp8_e4m3fnuz_max
+                param = _maybe_convert_fp8_range(name, f.get_tensor(name))
                 yield name, param
 
 
@@ -496,7 +501,8 @@ def runai_safetensors_weights_iterator(
                 bar_format=_BAR_FORMAT,
         ):
             streamer.stream_file(st_file)
-            yield from streamer.get_tensors()
+            for name, param in streamer.get_tensors():
+                yield name, _maybe_convert_fp8_range(name, param)
 
 
 def fastsafetensors_weights_iterator(
@@ -530,18 +536,7 @@ def fastsafetensors_weights_iterator(
             try:
                 keys = list(fb.key_to_rank_lidx.keys())
                 for k in keys:
-                    t = fb.get_tensor(k)
-                    if current_platform.is_hpu(
-                    ) and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-                        fp8_e4m3fnuz_max = torch.finfo(
-                            torch.float8_e4m3fnuz).max
-                        fp8_e4m3fn_max = torch.finfo(torch.float8_e4m3fn).max
-                        if t.dtype == torch.float8_e4m3fn:
-                            t = (t.float() * fp8_e4m3fnuz_max /
-                                 fp8_e4m3fn_max).to(torch.float8_e4m3fnuz)
-                        elif t.dtype in [torch.float32, torch.bfloat16
-                                         ] and "scale" in k.split(".")[-1]:
-                            t *= fp8_e4m3fn_max / fp8_e4m3fnuz_max
+                    t = _maybe_convert_fp8_range(k, fb.get_tensor(k))
                     yield k, t
             finally:
                 fb.close()
@@ -564,7 +559,8 @@ def pt_weights_iterator(
         state = torch.load(bin_file,
                            map_location=pt_load_map_location,
                            weights_only=True)
-        yield from state.items()
+        for name, tensor in state.items():
+            yield name, _maybe_convert_fp8_range(name, tensor)
         del state
 
 

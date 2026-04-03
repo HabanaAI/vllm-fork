@@ -1200,13 +1200,48 @@ def with_thread_limits():
     """
     Decorator to temporarily set OMP_NUM_THREADS and PyTorch threads,
     and restore them after the function call.
-    
-    Args:
-        div_omp: divide CPU cores by this for OMP_NUM_THREADS
-        div_torch: divide CPU cores by this for torch.set_num_threads
+
+    For single-HPU FP8 conversion on multi-NUMA hosts, this also pins the
+    process to one visible NUMA node to avoid cross-socket scheduling.
     """
 
     def decorator(func):
+
+        def _parse_cpulist(cpulist: str) -> set[int]:
+            cpus: set[int] = set()
+            for chunk in cpulist.split(","):
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+                if "-" in chunk:
+                    start_str, end_str = chunk.split("-", 1)
+                    cpus.update(range(int(start_str), int(end_str) + 1))
+                else:
+                    cpus.add(int(chunk))
+            return cpus
+
+        def _numa_cpu_sets(affinity: list[int]) -> list[list[int]]:
+            if not affinity:
+                return []
+            affinity_set = set(affinity)
+            node_dir = "/sys/devices/system/node"
+            if not os.path.isdir(node_dir):
+                return []
+
+            cpu_sets: list[list[int]] = []
+            for entry in sorted(os.listdir(node_dir)):
+                if not entry.startswith("node"):
+                    continue
+                cpulist_path = os.path.join(node_dir, entry, "cpulist")
+                try:
+                    with open(cpulist_path) as f:
+                        node_cpus = _parse_cpulist(f.read().strip())
+                except (OSError, ValueError):
+                    continue
+                visible_node_cpus = sorted(node_cpus & affinity_set)
+                if visible_node_cpus:
+                    cpu_sets.append(visible_node_cpus)
+            return cpu_sets
 
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -1218,28 +1253,46 @@ def with_thread_limits():
                 world_size = torch.distributed.get_world_size()
             world_size = min(world_size, 8)
 
-            div_omp = world_size
-            div_torch = world_size
-
             # Save original settings
             old_omp = os.environ.get("OMP_NUM_THREADS", None)
             old_torch = torch.get_num_threads()
             import psutil
-            num_cores = len(psutil.Process().cpu_affinity() or [0])
+            process = psutil.Process()
+            old_affinity = process.cpu_affinity() or [0]
+            affinity = old_affinity
+            num_cores = len(affinity)
+
+            numa_cpu_sets = _numa_cpu_sets(affinity)
+            numa_nodes = len(numa_cpu_sets)
+            effective_cores = num_cores
+            pinned_cores = num_cores
+            # On single-HPU runs with multiple NUMA nodes visible, avoid
+            # spanning all sockets during conversion.
+            if world_size == 1 and numa_nodes > 1:
+                selected_node_cpus = max(numa_cpu_sets, key=len)
+                process.cpu_affinity(selected_node_cpus)
+                affinity = selected_node_cpus
+                pinned_cores = len(selected_node_cpus)
+                effective_cores = pinned_cores
+
+            target_threads = max(1, effective_cores // world_size)
 
             # Set new limits
-            os.environ["OMP_NUM_THREADS"] = str(max(1, num_cores // div_omp))
-            torch.set_num_threads(max(1, num_cores // div_torch))
+            os.environ["OMP_NUM_THREADS"] = str(target_threads)
+            torch.set_num_threads(target_threads)
             logger.warning_once(
                 "Setting OMP_NUM_THREADS to %s and torch.set_num_threads to %s "
-                "for %s available CPU cores and world size %s",
+                "for %s available CPU cores, %s pinned cores, %s effective "
+                "cores, %s NUMA nodes and world size %s",
                 os.environ["OMP_NUM_THREADS"], torch.get_num_threads(),
-                num_cores, world_size)
+                num_cores, pinned_cores, effective_cores, numa_nodes,
+                world_size)
             try:
                 # Call the actual function
                 return func(*args, **kwargs)
             finally:
                 # Restore original settings
+                process.cpu_affinity(old_affinity)
                 if old_omp is None:
                     os.environ.pop("OMP_NUM_THREADS", None)
                 else:
@@ -4095,6 +4148,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if query_len in seen_query_len:
                     continue
                 seen_query_len.add(query_len)
+                ctx = 0
                 # Graph memory usage is proportional to seq dimension in a batch
                 phase = f"Graph/{'mix'}/{'prompt'}"
                 seq_len = query_len + ctx * self.block_size
@@ -4110,6 +4164,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         kv_caches,
                         temperature=1.0
                         if batch_size not in warmed_random_sampler_bs else 0,
+                        img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
                     )
                 warmed_random_sampler_bs.add(batch_size)
                 used_mem = align_workers(mem_prof.consumed_device_memory,
