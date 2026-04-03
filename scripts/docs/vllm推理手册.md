@@ -871,7 +871,7 @@ pip install -e vllm-hpu-extension --no-build-isolation
 #### 3.4.3 BF16精度模型部署
 启动 vLLM，进入启动脚本目录，启动 vLLM。
 - 以下命令启动默认上下文长度16384。
-- 环境变量*PT_HPU_LAZY_MODE=0*有更好的性能，**推荐使用**。
+- 环境变量 `PT_HPU_LAZY_MODE=0` 有更好的性能，**推荐使用**。
 
 Qwen3.5-27B 模型2卡部署可使用如下命令启动:
 
@@ -947,7 +947,8 @@ python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data
 启动 vLLM，进入启动脚本目录，启动 vLLM。
 - 以下命令启动默认上下文长度16384。
 - 请用按照3.4.4.1章节中转换出来的模型来启动vLLM。
-- 环境变量*PT_HPU_LAZY_MODE=0 VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
+- 环境变量 `PT_HPU_LAZY_MODE=0 VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false` 有更好的性能，**推荐使用**。
+- 如需加速预热过程，可额外设置环境变量 `VLLM_MOE_GRAPH_BREAK=true`，但会导致解码吞吐量下降约 6%。
 
 Qwen3.5-27B-FP8-G2-Unit 模型1卡部署可使用如下命令启动：
 
