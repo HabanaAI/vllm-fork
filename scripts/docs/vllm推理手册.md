@@ -859,38 +859,24 @@ modelscope download --model Qwen/Qwen3.5-122B-A10B --local_dir /data/hf_models/Q
 ```bash
 # install vllm
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
-cd vllm-fork
-git config --add remote.origin.fetch "+refs/pull/*/head:refs/remotes/origin/pr/*"
-git fetch origin
-git checkout pr/2234
-cd ..
 pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install -r vllm-fork/requirements-hpu.txt
 VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
 
 # [optional] install vllm-hpu-extension to do calibration
 git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
-cd vllm-hpu-extension
-git config --add remote.origin.fetch "+refs/pull/*/head:refs/remotes/origin/pr/*"
-git fetch origin
-git checkout pr/410
-cd ..
 pip install -e vllm-hpu-extension --no-build-isolation
-
-# 升级默认transformers库
-pip install --upgrade transformers==5.3.0
 ```
 
 #### 3.4.3 BF16精度模型部署
 启动 vLLM，进入启动脚本目录，启动 vLLM。
 - 以下命令启动默认上下文长度16384。
-- 环境变量*VLLM_HPU_CONVERT_TO_FP8UZ=false VLLM_SUPPORT_MOE_CHUNK=true*有更好的性能，**推荐使用**。
+- 环境变量*PT_HPU_LAZY_MODE=0*有更好的性能，**推荐使用**。
 
 Qwen3.5-27B 模型2卡部署可使用如下命令启动:
 ```bash
 cd vllm-fork/scripts
-VLLM_HPU_CONVERT_TO_FP8UZ=false \
-VLLM_SUPPORT_MOE_CHUNK=true \
+PT_HPU_LAZY_MODE=0 \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B/ \
 -t 2 \
 -m 0,1 \
@@ -905,8 +891,7 @@ bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B/ \
 Qwen3.5-35B-A3B 模型4卡部署可使用如下命令启动：
 ```bash
 cd vllm-fork/scripts
-VLLM_HPU_CONVERT_TO_FP8UZ=false \
-VLLM_SUPPORT_MOE_CHUNK=true \
+PT_HPU_LAZY_MODE=0 \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-35B-A3B/ \
 -t 4 \
 -m 0,1,2,3 \
@@ -920,8 +905,7 @@ bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-35B-A3B/ \
 Qwen3.5-122B-A10B 模型8卡部署可使用如下命令启动：
 ```bash
 cd vllm-fork/scripts
-VLLM_HPU_CONVERT_TO_FP8UZ=false \
-VLLM_SUPPORT_MOE_CHUNK=true \
+PT_HPU_LAZY_MODE=0 \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B/ \
 -t 8 \
 -a 127.0.0.1:30001 \
@@ -940,17 +924,16 @@ FP8的权重需要通过BF16的模型转换而来，解压复制文件并转换�
 ```bash
 cd vllm-fork/scripts/data
 tar -xvzf qwen3.5-input-scale.tar.gz
-cd vllm-hpu-extension/scripts
 ```
 Qwen3.5-27B 转Unit Scale FP8权重：
 ```bash
-cp vllm-fork/scripts/data/qwen3.5-input-scale/qwen3.5-27b-input-scale.safetensors ./
-python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s qwen3.5-27b-input-scale.safetensors
+cp qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors ./
+python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s qwen3.5-27b-dense-input-scale.safetensors
 ```
 
 Qwen3.5-122B-A10B 转Unit Scale FP8权重：
 ```bash
-cp vllm-fork/scripts/data/qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors ./
+cp qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors ./
 python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s qwen3.5-122b-moe-input-scale.safetensors
 ```
 
@@ -959,11 +942,12 @@ python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data
 启动 vLLM，进入启动脚本目录，启动 vLLM。
 - 以下命令启动默认上下文长度16384。
 - 请用按照3.4.4.1章节中转换出来的模型来启动vLLM。
-- 环境变量*VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
+- 环境变量*PT_HPU_LAZY_MODE=0 VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false*有更好的性能，**推荐使用**。
 
 Qwen3.5-27B-FP8-G2-Unit 模型1卡部署可使用如下命令启动：
 ```bash
 cd vllm-fork/scripts
+PT_HPU_LAZY_MODE=0 \
 VLLM_ENABLE_UNIT_MOE=true \
 VLLM_HPU_CONVERT_TO_FP8UZ=false \
 bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2-Unit/ \
@@ -981,6 +965,7 @@ bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2-Unit/ \
 Qwen3.5-122B-A10B-FP8-G2-Unit 模型4卡部署可使用如下命令启动：
 ```bash
 cd vllm-fork/scripts
+PT_HPU_LAZY_MODE=0 \
 VLLM_ENABLE_UNIT_MOE=true \
 VLLM_HPU_CONVERT_TO_FP8UZ=false \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit/ \
@@ -990,7 +975,7 @@ bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit
 -x 16384 \
 -p 8 \
 -g 1024 \
--u 0.8 \
+-u 0.7 \
 -b 64 \
 -e "--reasoning-parser qwen3" \
 -c /recipe_cache_Qwen3.5-122B-FP8/
@@ -1048,8 +1033,7 @@ pip install -e vllm-hpu-extension --no-build-isolation
 ```bash
 cd vllm-fork/scripts/data
 tar -xvzf minimax-m2.5-input-scale.tar.gz
-cd ../
-cp data/minimax_m2.5_input_scale/minimax-m2.5-input-scale.safetensors ./
+cp minimax_m2.5_input_scale/minimax-m2.5-input-scale.safetensors ./
 python3 convert_for_minimax_unit_scale.py -i /data/hf_models/MiniMax-M2.5 -o /data/hf_models/MiniMax-M2.5-G2 -s minimax-m2.5-input-scale.safetensors -u
 ```
 
