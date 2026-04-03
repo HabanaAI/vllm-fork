@@ -40,7 +40,7 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
     MambaStateDtypeCalculator, MambaStateShapeCalculator)
 from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
     causal_conv1d_update)
-from vllm.model_executor.layers.mamba.ops.torch_gated_delta_relu import (
+from vllm.model_executor.layers.mamba.ops.torch_gated_delta_rule import (
     torch_chunk_gated_delta_rule_opt, torch_recurrent_gated_delta_rule_opt)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
