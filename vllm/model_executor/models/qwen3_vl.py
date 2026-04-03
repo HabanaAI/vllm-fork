@@ -1178,6 +1178,11 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             for _ in range(self.deepstack_num_level)
         ] if self.use_deepstack else None
 
+        self.mm_offset_image = 0
+        self.mm_offset_image_multiscale = 0
+        self.mm_offset_video = 0
+        self.mm_offset_video_multiscale = 0
+
     def _get_deepstack_input_embeds(self) -> IntermediateTensors:
         # get deepstack_input_embeds from buffer, and clear the buffer
         return IntermediateTensors({
@@ -1474,6 +1479,8 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         image_input: Optional[Qwen2_5_VLImageInputs] = None,
         video_input: Optional[Qwen2_5_VLVideoInputs] = None,
     ) -> torch.Tensor:
+        if input_ids.ndim == 1:
+            input_ids = input_ids.unsqueeze(0)
         inputs_embeds = self.get_input_embeddings(
             input_ids)[:, :, :self.text_dim]
 
@@ -1494,20 +1501,27 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     [visual_dim, visual_dim * self.deepstack_num_level],
                     dim=-1)
 
-                deepstack_input_embeds = merge_multimodal_embeddings(
+                (
+                    deepstack_input_embeds,
+                    new_offset_multiscale,
+                ) = merge_multimodal_embeddings(
                     input_ids,
                     deepstack_input_embeds,
                     image_embeds_multiscale,
                     placeholder_token_id=self.config.image_token_id,
+                    mm_offset=self.mm_offset_image_multiscale,
+                    return_offset=True,
                 )
-
-            inputs_embeds = merge_multimodal_embeddings(
+                self.mm_offset_image_multiscale = new_offset_multiscale
+            inputs_embeds, new_offset = merge_multimodal_embeddings(
                 input_ids,
                 inputs_embeds,
                 image_embeds,
                 placeholder_token_id=self.config.image_token_id,
+                mm_offset=self.mm_offset_image,
+                return_offset=True,
             )
-
+            self.mm_offset_image = new_offset
         if video_input is not None:
             video_embeds = self._process_video_input(video_input)
             if self.use_deepstack:
@@ -1517,20 +1531,27 @@ class Qwen3VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     [visual_dim, visual_dim * self.deepstack_num_level],
                     dim=-1)
 
-                deepstack_input_embeds = merge_multimodal_embeddings(
+                (
+                    deepstack_input_embeds,
+                    new_offset_multiscale,
+                ) = merge_multimodal_embeddings(
                     input_ids,
                     deepstack_input_embeds,
                     video_embeds_multiscale,
                     placeholder_token_id=self.config.video_token_id,
+                    mm_offset=self.mm_offset_video_multiscale,
+                    return_offset=True,
                 )
-
-            inputs_embeds = merge_multimodal_embeddings(
+                self.mm_offset_video_multiscale = new_offset_multiscale
+            inputs_embeds, new_offset = merge_multimodal_embeddings(
                 input_ids,
                 inputs_embeds,
                 video_embeds,
                 placeholder_token_id=self.config.video_token_id,
+                mm_offset=self.mm_offset_video,
+                return_offset=True,
             )
-
+            self.mm_offset_video = new_offset
         if self.use_deepstack and deepstack_input_embeds is not None:
             inputs_embeds = torch.cat((inputs_embeds, deepstack_input_embeds),
                                       dim=-1)

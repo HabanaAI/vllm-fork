@@ -7,13 +7,6 @@
 import torch
 import torch.nn.functional as F
 
-from vllm.platforms import current_platform
-
-is_hpu = current_platform.is_hpu()
-
-if is_hpu:
-    import habana_frameworks.torch.core as htcore
-
 
 def torch_chunk_gated_delta_rule_opt(
     query,
@@ -22,6 +15,7 @@ def torch_chunk_gated_delta_rule_opt(
     g,
     beta,
     eye_constant,
+    valid_seq_len=None,
     chunk_size=64,
     inv_loop=12,
     initial_state=None,
@@ -40,6 +34,15 @@ def torch_chunk_gated_delta_rule_opt(
 
     batch_size, num_heads, sequence_length, k_head_dim = key.shape
     v_head_dim = value.shape[-1]
+
+    if valid_seq_len is None:
+        valid_seq_len = torch.full((batch_size, ),
+                                   sequence_length,
+                                   dtype=torch.long,
+                                   device=key.device)
+    else:
+        valid_seq_len = valid_seq_len.to(device=key.device, dtype=torch.long)
+
     pad_size = (chunk_size - sequence_length % chunk_size) % chunk_size
     if pad_size > 0:
         query = F.pad(query, (0, 0, 0, pad_size))
@@ -48,6 +51,21 @@ def torch_chunk_gated_delta_rule_opt(
         beta = F.pad(beta, (0, pad_size))
         g = F.pad(g, (0, pad_size))
     tot_len = sequence_length + pad_size
+
+    token_idx = torch.arange(tot_len, device=key.device).view(1, 1, tot_len)
+    valid_mask = (token_idx < valid_seq_len.view(batch_size, 1,
+                                                 1)).to(value.dtype)
+
+    query = query * valid_mask.unsqueeze(-1)
+    key = key * valid_mask.unsqueeze(-1)
+    value = value * valid_mask.unsqueeze(-1)
+    beta = beta * valid_mask
+    g = g * valid_mask
+
+    valid_chunk_cnt = torch.div(valid_seq_len + chunk_size - 1,
+                                chunk_size,
+                                rounding_mode='floor')
+
     scale = 1 / (query.shape[-1]**0.5)
     query = query * scale
 
@@ -59,6 +77,14 @@ def torch_chunk_gated_delta_rule_opt(
         for x in (query, key, value, k_beta, v_beta)
     ]
     g = g.reshape(g.shape[0], g.shape[1], -1, chunk_size)
+    valid_mask = valid_mask.reshape(batch_size, 1, -1, chunk_size)
+
+    chunk_idx = torch.arange(tot_len // chunk_size,
+                             device=key.device).view(1, 1, -1)
+    chunk_valid = (chunk_idx < valid_chunk_cnt.view(batch_size, 1,
+                                                    1)).to(value.dtype)
+    chunk_valid_state = chunk_valid.unsqueeze(-1).unsqueeze(-1)
+
     mask = torch.ones(chunk_size,
                       chunk_size,
                       dtype=value.dtype,
@@ -74,13 +100,11 @@ def torch_chunk_gated_delta_rule_opt(
                         key.transpose(-1, -2).contiguous()) * \
            decay_mask * mask + eye_constant
     inv_attn = torch.zeros_like(attn) + eye_constant
-    htcore.mark_step()
     for _ in range(inv_loop):
         prod = torch.matmul(attn, inv_attn)
         err = prod * mask
         update = torch.matmul(inv_attn, err)
         inv_attn.sub_(update)
-    htcore.mark_step()
     attn = inv_attn
 
     value = attn @ v_beta
@@ -115,14 +139,17 @@ def torch_chunk_gated_delta_rule_opt(
     C = Q - torch.matmul(A, K)
     core_attn_out = torch.matmul(A, V)
 
+    M = M * chunk_valid_state + k_eye * (1 - chunk_valid_state)
+    N = N * chunk_valid_state
+    C = C * valid_mask.unsqueeze(-1)
+    core_attn_out = core_attn_out * valid_mask.unsqueeze(-1)
+
     # for each chunk
-    htcore.mark_step()
     for i in range(num_chunks):
         core_attn_out[:, :,
                       i].add_(torch.matmul(C[:, :, i], last_recurrent_state))
         last_recurrent_state = torch.matmul(M[:, :, i],
                                             last_recurrent_state) + N[:, :, i]
-    htcore.mark_step()
 
     if not output_final_state:
         last_recurrent_state = None

@@ -67,7 +67,8 @@ from .interfaces import (HasInnerState, IsHybrid, MixtureOfExperts,
 from .qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from .qwen3_next import (Qwen3NextAttention, Qwen3NextDecoderLayer,
                          Qwen3NextGatedDeltaNet, Qwen3NextModel,
-                         Qwen3NextSparseMoeBlock, QwenNextMixtureOfExperts)
+                         Qwen3NextSparseMoeBlock, QwenNextMixtureOfExperts,
+                         _save_conv_state, _save_ssm_state)
 from .qwen3_vl import (Qwen3_VisionTransformer,
                        Qwen3_VisionTransformerStaticShape,
                        Qwen3VLDummyInputsBuilder,
@@ -122,13 +123,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         self.quant_config = quant_config
         self.speculative_config = speculative_config
         self.prefix = prefix
-        self.chunk_size = 64
-
-        self.eye_constant = torch.eye(self.chunk_size,
-                                      dtype=torch.bfloat16,
-                                      device=self.conv1d.weight.device)
-
-        self.inv_loop = int(os.environ.get("VLLM_GDN_INV_LOOP", 12))
 
     def fix_query_key_value_ordering(
         self,
@@ -172,6 +166,268 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             prefix=prefix,
         )
 
+    def adapt_gdn_inputs(self, hidden_states, attn_metadata):
+
+        assert hidden_states.ndim == 3, \
+            f"unexpected hidden_states shape: {hidden_states.shape}"
+
+        #  1) input projection
+        mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
+        qkv_size = (self.key_dim * 2 + self.value_dim) // self.tp_size
+        z_size = self.value_dim // self.tp_size
+        mixed_qkv, z = mixed_qkvz.split([qkv_size, z_size], dim=-1)
+        z = z.reshape(z.size(0), z.size(1), -1, self.head_v_dim)
+        ba, _ = self.in_proj_ba(hidden_states)
+        b, a = ba.chunk(2, dim=-1)
+
+        b = b.contiguous().float()
+        a = a.contiguous().float()
+        mixed_qkv = mixed_qkv.float()
+
+        beta = b.sigmoid().to(hidden_states.dtype)
+        g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
+
+        prefill_part = None
+        decode_part = None
+
+        num_prefills = attn_metadata.num_prefills
+        num_prefill_tokens = attn_metadata.num_prefill_tokens
+        num_decode_tokens = attn_metadata.num_decode_tokens
+
+        # 2) prefill part, packed layout: [1, total_tokens, h]
+        if num_prefills > 0 and num_prefill_tokens > 0:
+            prefill_idx = attn_metadata.mamba_cache_prefill_indices
+
+            assert mixed_qkv.shape[0] == 1
+            assert num_prefill_tokens % num_prefills == 0
+
+            prefill_seq_len = num_prefill_tokens // num_prefills
+            prefill_mixed_qkv = mixed_qkv[:, :num_prefill_tokens, :].reshape(
+                num_prefills, prefill_seq_len, -1)
+            prefill_z = z[:, :num_prefill_tokens, :].reshape(
+                num_prefills, prefill_seq_len, -1)
+            prefill_beta = beta[:, :num_prefill_tokens, :].reshape(
+                num_prefills, prefill_seq_len, -1)
+            prefill_g = g[:, :num_prefill_tokens, :].reshape(
+                num_prefills, prefill_seq_len, -1)
+
+            prev_conv_state = torch.index_select(self.conv_state, 0,
+                                                 prefill_idx)
+            prev_ssm_state = torch.index_select(self.ssm_state, 0, prefill_idx)
+
+            # first chunk -> 0
+            context_lens = attn_metadata.context_lens_tensor[:num_prefills]
+            is_first_chunk = (context_lens == 0)
+            prev_conv_state.masked_fill_(is_first_chunk[:, None, None], 0)
+            prev_ssm_state.masked_fill_(is_first_chunk[:, None, None, None], 0)
+
+            prefill_part = {
+                "mixed_qkv": prefill_mixed_qkv,
+                "z": prefill_z,
+                "beta": prefill_beta,
+                "g": prefill_g,
+                "bs": prefill_mixed_qkv.shape[0],
+                "seq_len": prefill_seq_len,
+                "cache_indices": prefill_idx,
+                "prev_conv_state": prev_conv_state,
+                "prev_ssm_state": prev_ssm_state,
+                "is_first_chunk": is_first_chunk,
+            }
+
+        # 3) decode part
+        if num_decode_tokens > 0:
+            decode_idx = attn_metadata.mamba_cache_decode_indices
+
+            decode_mixed_qkv = mixed_qkv[:, num_prefill_tokens:, :].reshape(
+                num_decode_tokens, 1, -1)
+            decode_z = z[:, num_prefill_tokens:, :].reshape(
+                num_decode_tokens, 1, -1)
+            decode_beta = beta[:, num_prefill_tokens:, :].reshape(
+                num_decode_tokens, 1, -1)
+            decode_g = g[:, num_prefill_tokens:, :].reshape(
+                num_decode_tokens, 1, -1)
+
+            prev_conv_state = torch.index_select(self.conv_state, 0,
+                                                 decode_idx)
+            prev_ssm_state = torch.index_select(self.ssm_state, 0, decode_idx)
+
+            decode_part = {
+                "mixed_qkv": decode_mixed_qkv,
+                "z": decode_z,
+                "beta": decode_beta,
+                "g": decode_g,
+                "bs": decode_mixed_qkv.shape[0],
+                "seq_len": 1,
+                "cache_indices": decode_idx,
+                "prev_conv_state": prev_conv_state,
+                "prev_ssm_state": prev_ssm_state,
+            }
+
+        return prefill_part, decode_part, z
+
+    def forward_chunked_prefill(self, hidden_states: torch.Tensor,
+                                attn_metadata: AttentionMetadata
+                                # output: torch.Tensor,
+                                ):
+
+        prefill_part, decode_part, z = self.adapt_gdn_inputs(
+            hidden_states, attn_metadata)
+
+        if self.conv1d_weight is None:
+            self.conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
+                0, 1).flatten().reshape(self.conv_kernel_size,
+                                        self.conv_dim // self.tp_size).float()
+            del self.conv1d.weight
+
+        core_attn_out = None
+        if prefill_part is not None:
+            qkv_dim = prefill_part["mixed_qkv"].shape[-1]
+            conv_state_indices = \
+                attn_metadata.conv_state_indices % prefill_part["seq_len"]
+            prefill_conv_state = torch.index_select(
+                prefill_part["mixed_qkv"].reshape(-1, qkv_dim),
+                dim=0,
+                index=conv_state_indices).reshape(-1,
+                                                  self.conv_kernel_size - 1,
+                                                  qkv_dim)
+            mixed_qkv_with_pad = torch.cat(
+                [prefill_part["prev_conv_state"], prefill_part["mixed_qkv"]],
+                dim=1)
+
+            # update conv_state
+            mixed_qkv_with_pad = _save_conv_state(
+                mixed_qkv_with_pad, prefill_conv_state, self.conv_state,
+                prefill_part["cache_indices"])
+            for idx in range(self.conv_kernel_size):
+                qkv_slice = mixed_qkv_with_pad[:, idx:(
+                    idx + prefill_part["seq_len"]), :]
+                conv1d_weight_slice = self.conv1d_weight[idx]
+                qkv_conv = qkv_slice * conv1d_weight_slice
+                if idx == 0:
+                    prefill_mixed_qkv_non_spec = qkv_conv
+                else:
+                    prefill_mixed_qkv_non_spec.add_(qkv_conv)
+
+            prefill_mixed_qkv_non_spec = F.silu(prefill_mixed_qkv_non_spec)
+
+            query, key, value = torch.split(
+                prefill_mixed_qkv_non_spec.to(hidden_states.dtype),
+                [
+                    self.key_dim // self.tp_size,
+                    self.key_dim // self.tp_size,
+                    self.value_dim // self.tp_size,
+                ],
+                dim=-1,
+            )
+            query_non_spec = query.reshape(query.shape[0], query.shape[1], -1,
+                                           self.head_k_dim)
+            key_non_spec = key.reshape(key.shape[0], key.shape[1], -1,
+                                       self.head_k_dim)
+            value_non_spec = value.reshape(value.shape[0], value.shape[1], -1,
+                                           self.head_v_dim)
+
+            if self.num_v_heads // self.num_k_heads > 1:
+                query_non_spec = query_non_spec.repeat_interleave(
+                    self.num_v_heads // self.num_k_heads, dim=2)
+                key_non_spec = key_non_spec.repeat_interleave(
+                    self.num_v_heads // self.num_k_heads, dim=2)
+            ssm_indices = torch.remainder(attn_metadata.seq_lens_tensor - 1,
+                                          self.chunked_prefill_size) + 1
+            prefill_core_attn_out, last_recurrent_state = (
+                torch_chunk_gated_delta_rule_opt(
+                    query_non_spec,
+                    key_non_spec,
+                    value_non_spec,
+                    g=prefill_part["g"],
+                    beta=prefill_part["beta"],
+                    eye_constant=self.eye_constant,
+                    valid_seq_len=ssm_indices,
+                    chunk_size=self.chunk_size,
+                    initial_state=prefill_part["prev_ssm_state"],
+                    output_final_state=True,
+                    use_qk_l2norm_in_kernel=True,
+                ))
+            if core_attn_out is None:
+                core_attn_out = prefill_core_attn_out.reshape(
+                    -1, prefill_core_attn_out.shape[-1])
+            # update ssm_state
+            core_attn_out = _save_ssm_state(core_attn_out,
+                                            last_recurrent_state,
+                                            self.ssm_state,
+                                            prefill_part["cache_indices"])
+        if decode_part is not None:
+            decode_mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
+                decode_part["mixed_qkv"],
+                self.conv_state,
+                self.conv1d_weight,
+                self.conv1d.bias,
+                self.activation,
+                conv_state_indices=decode_part["cache_indices"],
+            )
+            decode_mixed_qkv_non_spec = _save_conv_state(
+                decode_mixed_qkv_non_spec, cur_conv_state, self.conv_state,
+                decode_part["cache_indices"])
+
+            query, key, value = torch.split(
+                decode_mixed_qkv_non_spec.to(hidden_states.dtype),
+                [
+                    self.key_dim // self.tp_size,
+                    self.key_dim // self.tp_size,
+                    self.value_dim // self.tp_size,
+                ],
+                dim=-1,
+            )
+            query_non_spec = query.reshape(query.shape[0], query.shape[1], -1,
+                                           self.head_k_dim)
+            key_non_spec = key.reshape(key.shape[0], key.shape[1], -1,
+                                       self.head_k_dim)
+            value_non_spec = value.reshape(value.shape[0], value.shape[1], -1,
+                                           self.head_v_dim)
+
+            if self.num_v_heads // self.num_k_heads > 1:
+                query_non_spec = query_non_spec.repeat_interleave(
+                    self.num_v_heads // self.num_k_heads, dim=2)
+                key_non_spec = key_non_spec.repeat_interleave(
+                    self.num_v_heads // self.num_k_heads, dim=2)
+
+            decode_core_attn_out, last_recurrent_state = (
+                torch_recurrent_gated_delta_rule_opt(
+                    query_non_spec,
+                    key_non_spec,
+                    value_non_spec,
+                    g=decode_part["g"],
+                    beta=decode_part["beta"],
+                    recurrent_state=decode_part["prev_ssm_state"],
+                    output_final_state=True,
+                    use_qk_l2norm_in_kernel=True,
+                ))
+            if core_attn_out is None:
+                core_attn_out = decode_core_attn_out.reshape(
+                    -1, decode_core_attn_out.shape[-1])
+            else:
+                core_attn_out = torch.cat([
+                    core_attn_out,
+                    decode_core_attn_out.reshape(
+                        -1, decode_core_attn_out.shape[-1])
+                ],
+                                          dim=0)
+            core_attn_out = _save_ssm_state(core_attn_out,
+                                            last_recurrent_state,
+                                            self.ssm_state,
+                                            decode_part["cache_indices"])
+
+        # Output Projection
+        z_shape_og = z.shape
+        # reshape input data into 2D tensor
+        z = z.reshape(-1, z.shape[-1])
+        core_attn_out = self.norm(core_attn_out, z).to(hidden_states.dtype)
+        core_attn_out = core_attn_out.reshape(z_shape_og)
+        core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
+                                              core_attn_out.shape[1], -1)
+
+        output, _ = self.out_proj(core_attn_out)
+        return output
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -185,13 +441,15 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         """
         forward_context = get_forward_context()
         attn_metadata: AttentionMetadata = forward_context.attn_metadata
+
+        if len(hidden_states.shape) == 2:
+            hidden_states = hidden_states.unsqueeze(0)
+
+        if attn_metadata.chunk_prefill_enabled:
+            return self.forward_chunked_prefill(hidden_states, attn_metadata)
+
         conv_state = self.conv_state
         ssm_state = self.ssm_state
-
-        if attn_metadata.is_prompt:
-            hidden_states = hidden_states.reshape(
-                (len(attn_metadata.context_lens_tensor)), -1,
-                hidden_states.shape[-1])
 
         # ============================================================
         # Part 1: Input Projection
@@ -226,12 +484,10 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             prefill_conv_state = torch.index_select(
                 mixed_qkv.reshape(-1, qkv_dim),
                 dim=0,
-                index=conv_state_indices).reshape(-1,
-                                                  self.conv_kernel_size - 1,
-                                                  qkv_dim)
-            conv_state.index_copy_(dim=0,
-                                   index=mamba_cache_prefill_indices,
-                                   source=prefill_conv_state)
+                index=conv_state_indices).reshape(bs, -1, qkv_dim)
+            mixed_qkv = _save_conv_state(mixed_qkv, prefill_conv_state,
+                                         conv_state,
+                                         mamba_cache_prefill_indices)
             mixed_qkv_with_pad = F.pad(mixed_qkv,
                                        (0, 0, self.conv_kernel_size - 1, 0))
             for idx in range(self.conv_kernel_size):
@@ -254,8 +510,12 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
             )
-            conv_state.index_copy_(0, mamba_cache_decode_indices,
-                                   cur_conv_state)
+            mixed_qkv_non_spec = _save_conv_state(
+                mixed_qkv_non_spec,
+                cur_conv_state,
+                conv_state,
+                mamba_cache_decode_indices,
+            )
 
         query, key, value = torch.split(
             mixed_qkv_non_spec.to(hidden_states.dtype),
@@ -292,15 +552,16 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                     g=g,
                     beta=beta,
                     eye_constant=self.eye_constant,
+                    valid_seq_len=attn_metadata.seq_lens_tensor,
                     chunk_size=self.chunk_size,
                     inv_loop=self.inv_loop,
                     initial_state=None,
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            ssm_state.index_copy_(dim=0,
-                                  index=mamba_cache_prefill_indices,
-                                  source=last_recurrent_state)
+            core_attn_out = _save_ssm_state(core_attn_out,
+                                            last_recurrent_state, ssm_state,
+                                            mamba_cache_prefill_indices)
         else:
             recurrent_state = torch.index_select(
                 ssm_state,
@@ -318,11 +579,9 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            ssm_state.index_copy_(
-                dim=0,
-                index=mamba_cache_decode_indices,
-                source=last_recurrent_state,
-            )
+            core_attn_out = _save_ssm_state(core_attn_out,
+                                            last_recurrent_state, ssm_state,
+                                            mamba_cache_decode_indices)
 
         # ============================================================
         # Part 3: Output Projection
@@ -421,6 +680,9 @@ class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
                     dtype=config.dtype,
                 ), )
 
+        self.graph_break = os.environ.get("VLLM_MOE_GRAPH_BREAK",
+                                          "false").lower() == "true"
+
 
 @support_torch_compile(
     dynamic_arg_dims={
@@ -486,7 +748,6 @@ class Qwen3_5Model(Qwen3NextModel):
                 name,
                 shard_id,
                 expert_id,
-                #                return_success=True,
             )
             if success:
                 loaded_local_expert = True
@@ -865,8 +1126,10 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration,
 
         if intermediate_tensors is not None:
             inputs_embeds = None
-        input = input_ids if input_ids is not None else inputs_embeds
-        if input.shape[0] * input.shape[1] < positions.shape[-1]:
+        seq_len = input_ids.shape[
+            -1] if input_ids is not None else inputs_embeds.shape[-2]
+        if positions.ndim == 1 and positions.shape[
+                0] == seq_len * 3:  # recover flattened position
             positions = positions.reshape(3, -1)
         hidden_states = self.language_model.model(
             input_ids=input_ids,
@@ -1018,3 +1281,7 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5ForConditionalGeneration,
 
         # set MoE hyperparameters
         self.set_moe_parameters()
+        self.mm_offset_image = 0
+        self.mm_offset_image_multiscale = 0
+        self.mm_offset_video = 0
+        self.mm_offset_video_multiscale = 0
