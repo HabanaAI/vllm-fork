@@ -803,6 +803,11 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             if "rotary_emb.inv_freq" in name:
                 continue
 
+            # Currently DSA is not supported in Gaudi2/3,
+            # falling back to full MLA
+            if "indexer" in name:
+                continue
+
             spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
             if spec_layer is not None:
                 continue  # skip spec decode layers for main model
@@ -871,6 +876,14 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
 
 class DeepseekV3ForCausalLM(DeepseekV2ForCausalLM):
+    pass
+
+
+class DeepseekV32ForCausalLM(DeepseekV2ForCausalLM):
+    pass
+
+
+class GlmMoeDsaForCausalLM(DeepseekV2ForCausalLM):
     pass
 
 
