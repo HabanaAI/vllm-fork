@@ -1119,11 +1119,11 @@ class ModelConfig:
         if not hasattr(self.hf_text_config, "model_type"):
             return False
         elif self.hf_text_config.model_type in (
-            "deepseek_v2",
-            "deepseek_v3",
-            "deepseek_v32",
-            "deepseek_mtp",
-            "glm_moe_dsa",
+                "deepseek_v2",
+                "deepseek_v3",
+                "deepseek_v32",
+                "deepseek_mtp",
+                "glm_moe_dsa",
         ):
             return self.hf_text_config.kv_lora_rank is not None
         elif self.hf_text_config.model_type == 'eagle':
