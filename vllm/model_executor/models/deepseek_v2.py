@@ -197,8 +197,7 @@ def yarn_get_mscale(scale: float = 1, mscale: float = 1) -> float:
 
 
 def get_rope_args(
-    config: PretrainedConfig,
-) -> tuple[float, Optional[dict[str, Any]]]:
+    config: PretrainedConfig, ) -> tuple[float, Optional[dict[str, Any]]]:
     rope_theta = getattr(config, "rope_theta", 10000)
     rope_scaling = getattr(config, "rope_scaling", None)
 
@@ -492,7 +491,7 @@ class DeepseekV2MLAAttention(nn.Module):
                                    base=rope_theta,
                                    rope_scaling=rope_scaling,
                                    is_neox_style=False)
-        
+
         if rope_scaling and "factor" in rope_scaling:
             mscale_all_dim = rope_scaling.get("mscale_all_dim", False)
             scaling_factor = rope_scaling["factor"]
