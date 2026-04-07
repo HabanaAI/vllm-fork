@@ -89,12 +89,22 @@ def get_cached_tokenizer(tokenizer: AnyTokenizer) -> AnyTokenizer:
     """
     cached_tokenizer = copy.copy(tokenizer)
 
-    tokenizer_all_special_ids = tokenizer.all_special_ids
-    tokenizer_all_special_tokens = tokenizer.all_special_tokens
-    tokenizer_all_special_tokens_extended = (
-        tokenizer.all_special_tokens_extended)
+    tokenizer_all_special_ids = getattr(tokenizer, "all_special_ids", [])
+    tokenizer_all_special_tokens = getattr(tokenizer, "all_special_tokens", [])
+    tokenizer_all_special_tokens_extended = getattr(
+        tokenizer,
+        "all_special_tokens_extended",
+        tokenizer_all_special_tokens,
+    )
     tokenizer_vocab = tokenizer.get_vocab()
     tokenizer_len = len(tokenizer)
+
+    # transformers>=5.x / some remote-code tokenizers may return backend
+    # tokenizer objects that do not expose the full PreTrainedTokenizerBase
+    # attribute surface, e.g. `all_special_tokens_extended`.
+    # Fall back to `all_special_tokens` so vLLM can still cache and use them.
+    if tokenizer_all_special_tokens_extended is None:
+        tokenizer_all_special_tokens_extended = tokenizer_all_special_tokens
 
     max_token_id = max(tokenizer_vocab.values())
     # Some tokenizers (e.g., QwenTokenizer) have special tokens that
