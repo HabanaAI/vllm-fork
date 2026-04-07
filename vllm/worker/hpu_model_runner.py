@@ -2283,7 +2283,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         mamba_slot_mapping = None
         if self._is_fla_model():
-            input_stride = input_tokens_tensor.size(-1)
+            input_stride = input_tokens_tensor.size(-1) + \
+                linear_conv_kernel_dim - 1
             if self.use_prefix_caching:
                 # fill conv_state_indices
                 block_span = linear_conv_kernel_dim - 1
