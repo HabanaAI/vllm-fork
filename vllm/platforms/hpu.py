@@ -128,6 +128,21 @@ class HpuPlatform(Platform):
         return False
 
     @classmethod
+    def empty_cache(cls) -> None:
+        """Empty HPU device cache using native API."""
+        try:
+            import habana_frameworks.torch  # noqa: F401
+            torch.hpu.empty_cache()
+        except RuntimeError:
+            logger.warning(
+                "Failed to empty HPU cache. The HPU allocator"
+                " may not support cache clearing.")
+        except ImportError:
+            logger.warning(
+                "habana_frameworks not available,"
+                " skipping HPU cache clearing.")
+
+    @classmethod
     def get_punica_wrapper(cls) -> str:
         return "vllm.lora.punica_wrapper.punica_hpu.PunicaWrapperHPU"
 

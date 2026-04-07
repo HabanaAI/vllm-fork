@@ -1202,13 +1202,21 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
     from vllm.platforms import current_platform
     empty_cache = current_platform.empty_cache
     if empty_cache is not None:
-        empty_cache()
+        try:
+            empty_cache()
+        except RuntimeError as e:
+            logger.warning(
+                "Failed to empty device cache: %s", e)
     try:
         if not current_platform.is_cpu():
             torch._C._host_emptyCache()
     except AttributeError:
         logger.warning(
-            "torch._C._host_emptyCache() only available in Pytorch >=2.5")
+            "torch._C._host_emptyCache() only available in"
+            " Pytorch >=2.5")
+    except RuntimeError as e:
+        logger.warning(
+            "Failed to empty host cache: %s", e)
 
 
 def in_the_same_node_as(pg: Union[ProcessGroup, StatelessProcessGroup],
