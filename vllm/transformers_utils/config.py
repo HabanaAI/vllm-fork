@@ -35,7 +35,7 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, Cohere2Config,
                                              ExaoneConfig, H2OVLChatConfig,
                                              InternVLChatConfig, JAISConfig,
                                              KimiVLConfig, MedusaConfig,
-                                             MiniMaxText01Config,
+                                             MiniMaxText01Config, HYV3Config,
                                              MiniMaxVL01Config, MllamaConfig,
                                              MLPSpeculatorConfig, MPTConfig,
                                              NemotronConfig, NVLM_D_Config,
@@ -90,6 +90,7 @@ _CONFIG_REGISTRY: dict[str, type[PretrainedConfig]] = {
     "qwen3_next": Qwen3NextConfig,
     "qwen3_5": Qwen3_5Config,
     "qwen3_5_moe": Qwen3_5MoeConfig,
+    "hy_v3": HYV3Config,
     **_CONFIG_REGISTRY_OVERRIDE_HF
 }
 
