@@ -36,7 +36,6 @@ from vllm.attention import AttentionMetadata
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, ModelConfig, SpeculativeConfig, VllmConfig
 from vllm.distributed import get_pp_group
-from vllm import forward_context
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm as Qwen3_5RMSNorm

@@ -310,31 +310,6 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 ], self.tp_size, self.tp_rank)
             })
 
-        max_decode_bs = vllm_config.scheduler_config.max_num_seqs
-        mamba_cache_bs = max(8, max_decode_bs) + 2
-
-        conv_state_shape = (
-            mamba_cache_bs,
-            self.conv_kernel_size - 1,
-            divide(self.conv_dim, self.tp_size),
-        )
-        temporal_state_shape = (mamba_cache_bs,
-                                divide(self.num_v_heads, self.tp_size),
-                                self.head_k_dim, self.head_v_dim)
-
-        if config.model_type in ["qwen3_5_text", "qwen3_5_moe_text"]:
-            # Qwen3.5 uses self.kv_cache to store both conv_state and ssm_state
-            # so we don't need to allocate
-            self.conv_state = None
-            self.ssm_state = None
-        else:
-            self.conv_state = torch.empty(conv_state_shape,
-                                          dtype=torch.float32,
-                                          device=self.conv1d.weight.device)
-            self.ssm_state = torch.empty(temporal_state_shape,
-                                        dtype=torch.float32,
-                                        device=self.conv1d.weight.device)
-
         self.kv_cache = [(torch.tensor([]),torch.tensor([]))]
 
         self.chunk_size = 64
@@ -493,9 +468,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
     ):
         forward_context = get_forward_context()
         attn_metadata: AttentionMetadata = forward_context.attn_metadata
-
-        conv_state = self.conv_state
-        ssm_state = self.ssm_state
+        mamba_slot_mapping = attn_metadata.mamba_slot_mapping
+        mamba_block_list = attn_metadata.mamba_block_list
+        kv_cache = self.kv_cache[forward_context.virtual_engine]
 
         projected_states_qkvz, _ = self.in_proj_qkvz(hidden_states)
         projected_states_ba, _ = self.in_proj_ba(hidden_states)
@@ -521,16 +496,19 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         if attn_metadata.is_prompt:
             bs, seq_len, qkv_dim = mixed_qkv.shape
             conv_state_indices = attn_metadata.conv_state_indices
-            prefill_conv_state = torch.index_select(
-                mixed_qkv.reshape(-1, qkv_dim),
-                dim=0,
-                index=conv_state_indices).reshape(bs, -1, qkv_dim)
-            mixed_qkv = _save_conv_state(mixed_qkv, prefill_conv_state,
-                                         conv_state,
-                                         mamba_cache_prefill_indices)
-
             mixed_qkv_with_pad = F.pad(mixed_qkv,
                                        (0, 0, self.conv_kernel_size - 1, 0))
+            prefill_conv_state = torch.index_select(
+                mixed_qkv_with_pad.reshape(-1, qkv_dim),
+                dim=0,
+                index=conv_state_indices).reshape(bs, -1, qkv_dim)
+            if (kv_cache is not None and isinstance(kv_cache, tuple)):
+                conv_cache = kv_cache[0]
+                mixed_qkv_with_pad = _save_conv_state(mixed_qkv_with_pad,
+                                            prefill_conv_state,
+                                            conv_cache,
+                                            mamba_slot_mapping.flatten())
+
             for idx in range(self.conv_kernel_size):
                 qkv_slice = mixed_qkv_with_pad[:, idx:(idx + seq_len), :]
                 conv1d_weight_slice = self.conv1d_weight[idx]
@@ -543,19 +521,21 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
 
         else:
+            assert kv_cache is not None and isinstance(kv_cache, tuple)
+            conv_cache = kv_cache[0]
             mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
                 mixed_qkv,
-                conv_state,
+                conv_cache,
                 self.conv1d_weight,
                 self.conv1d.bias,
                 self.activation,
-                conv_state_indices=mamba_cache_decode_indices,
+                conv_state_indices=mamba_block_list,
             )
             mixed_qkv_non_spec = _save_conv_state(
                 mixed_qkv_non_spec,
                 cur_conv_state,
-                conv_state,
-                mamba_cache_decode_indices,
+                conv_cache,
+                mamba_slot_mapping[:,0],
             )
 
         query, key, value = torch.split(
@@ -600,14 +580,19 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     output_final_state=True,
                     use_qk_l2norm_in_kernel=True,
                 ))
-            core_attn_out = _save_ssm_state(core_attn_out,
-                                            last_recurrent_state, ssm_state,
-                                            mamba_cache_prefill_indices)
+            if kv_cache is not None and isinstance(kv_cache, tuple):
+                ssm_cache = kv_cache[1]
+                core_attn_out = _save_ssm_state(core_attn_out,
+                                                last_recurrent_state,
+                                                ssm_cache,
+                                                mamba_slot_mapping[:,0])
         else:
+            assert kv_cache is not None and isinstance(kv_cache, tuple)
+            ssm_cache = kv_cache[1]
             recurrent_state = torch.index_select(
-                ssm_state,
+                ssm_cache,
                 dim=0,
-                index=mamba_cache_decode_indices,
+                index=mamba_block_list,
             )
             core_attn_out, last_recurrent_state = (
                 torch_recurrent_gated_delta_rule_opt(
@@ -621,8 +606,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     use_qk_l2norm_in_kernel=True,
                 ))
             core_attn_out = _save_ssm_state(core_attn_out,
-                                            last_recurrent_state, ssm_state,
-                                            mamba_cache_decode_indices)
+                                            last_recurrent_state, ssm_cache,
+                                            mamba_slot_mapping[:,0])
 
         z_shape_og = z.shape
         # reshape input data into 2D tensor
