@@ -558,10 +558,10 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
         return t, p, n
 
     def prepare_model_input(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+            self,
+            seq_group_metadata_list: List[SequenceGroupMetadata],
+            virtual_engine: int = 0,
+            finished_requests_ids: Optional[List[str]] = None
     ) -> ModelInputForTPU:
         del finished_requests_ids  # Unused.
         assert virtual_engine == 0

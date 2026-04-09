@@ -228,9 +228,10 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         assert device is None
         assert_prefix_caching_block_or_none(prev_block)
 
-        if (prev_block is not None and
-            prev_block.content_hash in self._cached_blocks and
-            prev_block.block_id != self._cached_blocks[prev_block.content_hash]):
+        if (prev_block is not None
+                and prev_block.content_hash in self._cached_blocks
+                and prev_block.block_id
+                != self._cached_blocks[prev_block.content_hash]):
             # Reuse the cached content hash
             self._decr_refcount_hashless_block(prev_block)
             prev_block.block_id = self._cached_blocks[prev_block.content_hash]
@@ -368,8 +369,8 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         block_id = block.block_id
         assert block_id is not None, "Freeing unallocated block is undefined"
 
-        if (block.content_hash is not None and
-            self.block_is_computed(block.block_id)):
+        if (block.content_hash is not None and block.block_id is not None
+                and self.block_is_computed(block.block_id)):
             # Immutable: This type of block is always cached, and we want to
             # keep it in the evictor for future reuse
             self._decr_refcount_cached_block(block)
@@ -1100,7 +1101,8 @@ class ComputedBlocksTracker:
         """Stop tracking the sequence."""
         # If seq has multi-modal data, we won't record its block hashes,
         # so we won't have to remove it here.
-        if not self._enable_caching or seq_id not in self._seq_id_to_blocks_hashes:
+        if (not self._enable_caching
+                or seq_id not in self._seq_id_to_blocks_hashes):
             return
         assert seq_id in self._seq_id_to_blocks_hashes
         del self._seq_id_to_blocks_hashes[seq_id]

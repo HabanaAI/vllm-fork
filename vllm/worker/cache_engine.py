@@ -150,7 +150,8 @@ class CacheEngine:
             parallel_config, LayerBlockType.mamba)
         if num_linear_attention_layers > 0:
             tp_size = parallel_config.tensor_parallel_size
-            conv_kernel_size = model_config.hf_text_config.linear_conv_kernel_dim
+            conv_kernel_size = model_config.\
+                hf_text_config.linear_conv_kernel_dim
             num_v_heads = model_config.hf_text_config.linear_num_value_heads
             num_k_heads = model_config.hf_text_config.linear_num_key_heads
             head_k_dim = model_config.hf_text_config.linear_key_head_dim
@@ -162,7 +163,7 @@ class CacheEngine:
             conv_size = (conv_kernel_size - 1) * divide(conv_dim, tp_size)
             ssm_size = divide(num_v_heads, tp_size) * head_k_dim * head_v_dim
             # mamba only needs cache one value for one block
-            total_mamba= (conv_size + ssm_size) * num_linear_attention_layers
+            total_mamba = (conv_size + ssm_size) * num_linear_attention_layers
             total_mamba_size = get_dtype_size(torch.float32) * total_mamba
 
         return dtype_size * total + total_mamba_size

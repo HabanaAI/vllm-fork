@@ -1337,8 +1337,7 @@ class Scheduler:
             seq_groups=seq_groups,
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(
-                is_prefill=True, enable_chunking=enable_chunking)
-        )
+                is_prefill=True, enable_chunking=enable_chunking))
 
     def _schedule_default(self) -> SchedulerOutputs:
         """Schedule queued requests.

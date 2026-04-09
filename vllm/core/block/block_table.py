@@ -204,12 +204,12 @@ class BlockTable:
         for _ in range(blocks_to_allocate):
             assert len(self._blocks) > 0
             prev_block = self._blocks[-1]
-            prev_block_id = prev_block.block_id if prev_block is not None else None
+            prev_block_id = (prev_block.block_id
+                             if prev_block is not None else None)
             self._blocks.append(
-                self._allocator.allocate_mutable_block(
-                    prev_block=prev_block,
-                    device=device,
-                    extra_hash=extra_hash))
+                self._allocator.allocate_mutable_block(prev_block=prev_block,
+                                                       device=device,
+                                                       extra_hash=extra_hash))
             # CoW or promotion may update the internal block_id
             if prev_block_id != self._blocks[-2].block_id:
                 # block assignment call _update_block_id private function.

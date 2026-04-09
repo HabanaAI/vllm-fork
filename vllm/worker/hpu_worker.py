@@ -21,8 +21,8 @@ from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
 from vllm.config import VllmConfig
-from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
-                              init_distributed_environment, divide)
+from vllm.distributed import (divide, ensure_model_parallel_initialized,
+                              get_pp_group, init_distributed_environment)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -30,8 +30,8 @@ from vllm.model_executor import set_random_seed
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import ExecuteModelRequest
-from vllm.utils import (LayerBlockType, bind_kv_cache, hpu_backend_string, hpu_device_string,
-                        is_fake_hpu)
+from vllm.utils import (LayerBlockType, bind_kv_cache, hpu_backend_string,
+                        hpu_device_string, is_fake_hpu)
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.hpu_enc_dec_model_runner import HPUEncoderDecoderModelRunner
 from vllm.worker.hpu_model_runner import HPUModelRunner, HPUModelRunnerBase
@@ -627,13 +627,15 @@ class HPUCacheEngine(CacheEngine):
             kv_cache.append(kv_layer)
 
         # For mamba cache
-        num_linear_attention_layers = (self.model_config.
-              get_num_layers_by_block_type(
-              self.parallel_config, LayerBlockType.mamba))
+        num_linear_attention_layers = (
+            self.model_config.get_num_layers_by_block_type(
+                self.parallel_config, LayerBlockType.mamba))
         for _ in range(num_linear_attention_layers):
             tp_size = self.parallel_config.tensor_parallel_size
-            conv_kernel_size = self.model_config.hf_text_config.linear_conv_kernel_dim
-            num_v_heads = self.model_config.hf_text_config.linear_num_value_heads
+            conv_kernel_size = self.model_config.\
+                hf_text_config.linear_conv_kernel_dim
+            num_v_heads = self.model_config.\
+                hf_text_config.linear_num_value_heads
             num_k_heads = self.model_config.hf_text_config.linear_num_key_heads
             head_k_dim = self.model_config.hf_text_config.linear_key_head_dim
             head_v_dim = self.model_config.hf_text_config.linear_value_head_dim
@@ -646,9 +648,8 @@ class HPUCacheEngine(CacheEngine):
                 conv_kernel_size - 1,
                 divide(conv_dim, tp_size),
             )
-            ssm_shape = (num_blocks,
-                         divide(num_v_heads, tp_size),
-                         head_k_dim, head_v_dim)
+            ssm_shape = (num_blocks, divide(num_v_heads,
+                                            tp_size), head_k_dim, head_v_dim)
 
             conv_cache = torch.zeros(conv_shape,
                                      dtype=torch.float32,

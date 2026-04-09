@@ -1561,12 +1561,11 @@ class EngineArgs:
             raise ValueError(msg)
 
         # if using prefix caching, we must set a hash algo
-        if self.enable_prefix_caching:
-            # VLLM_V0 only supports builtin hash algo for prefix caching.
-            if self.prefix_caching_hash_algo == "sha256":
-                raise ValueError(
-                    "sha256 is not supported for prefix caching in V0 engine. "
-                    "Please use 'builtin'.")
+        if (self.enable_prefix_caching
+                and self.prefix_caching_hash_algo == "sha256"):
+            raise ValueError(
+                "sha256 is not supported for prefix caching in V0 engine. "
+                "Please use 'builtin'.")
 
         # Set max_num_seqs to 256 for VLLM_V0.
         if self.max_num_seqs is None:

@@ -2749,6 +2749,7 @@ def bind_kv_cache(
     #    tensor
     from vllm.attention import AttentionType
     from vllm.model_executor.models.utils import extract_layer_index
+
     def _bind_kv_cache(layer_need_kv_cache, offset):
         layer_index_sorted = sorted(
             set(
@@ -2773,8 +2774,8 @@ def bind_kv_cache(
     offset = len(layer_need_kv_cache)
     layer_need_kv_cache = [
         layer_name for layer_name in ctx
-        if (hasattr(ctx[layer_name], 'mamba_type') and
-            ctx[layer_name].mamba_type == "linear_attention")
+        if (hasattr(ctx[layer_name], 'mamba_type')
+            and ctx[layer_name].mamba_type == "linear_attention")
     ]
     _bind_kv_cache(layer_need_kv_cache, offset)
 

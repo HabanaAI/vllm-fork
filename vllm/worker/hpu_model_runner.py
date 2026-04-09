@@ -1909,11 +1909,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.graphed_multimodal_buckets
             model.audio_buckets = AudioBuckets()
 
-    def _prepare_prompt(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        align_worker=False
-    ) -> PreparePromptMetadata:
+    def _prepare_prompt(self,
+                        seq_group_metadata_list: List[SequenceGroupMetadata],
+                        align_worker=False) -> PreparePromptMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
         conv_state_indices_list: List[List[int]] = []
@@ -2015,8 +2013,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.model_config.hf_config.linear_conv_kernel_dim
                 else:
                     linear_conv_kernel_dim = self.model_config.hf_config.text_config.linear_conv_kernel_dim  # noqa: E501
-                conv_state_indices_list.append(list(range(seq_len - context_len,
-                    seq_len - context_len + linear_conv_kernel_dim - 1)))
+                conv_state_indices_list.append(
+                    list(
+                        range(
+                            seq_len - context_len, seq_len - context_len +
+                            linear_conv_kernel_dim - 1)))
 
             token_types_ids = seq_group_metadata.token_type_ids
             token_types.append(token_types_ids) if token_types_ids else []
@@ -2176,8 +2177,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self._is_fla_model():
                 mamba_block_list = [bt[-1] for bt in prefix_block_tables]
                 mamba_block_list = torch.tensor(mamba_block_list,
-                                              dtype=torch.long,
-                                              device='cpu')
+                                                dtype=torch.long,
+                                                device='cpu')
             max_num_block = max(len(bt) for bt in prefix_block_tables)
             prefix_block_list = list(
                 itertools.chain.from_iterable(
@@ -2237,9 +2238,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 filled_conv_state_indices_list = []
                 for conv_state_indices in conv_state_indices_list:
-                    fill_end_index = (math.ceil((conv_state_indices[-1] - block_span + 1)
-                                                / self.block_size) * block_span)
-                    filled_conv_state_indices = prefix_conv_state_indices.copy()
+                    fill_end_index = (math.ceil(
+                        (conv_state_indices[-1] - block_span + 1) /
+                        self.block_size) * block_span)
+                    filled_conv_state_indices = prefix_conv_state_indices.copy(
+                    )
                     filled_conv_state_indices[fill_end_index - block_span:
                                               fill_end_index] = \
                         conv_state_indices
@@ -2248,19 +2251,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 conv_state_indices_list = filled_conv_state_indices_list
 
                 # fill mamba_slot_mapping
-                mamba_slot_mapping = [[slot // self.block_size
-                                       for slot in seq_slot_mapping]
-                                      for seq_slot_mapping in slot_mapping]
-                mamba_slot_mapping = [seq_slot_mapping[::self.block_size]
-                                      for seq_slot_mapping in mamba_slot_mapping]
-                mamba_slot_mapping = make_cpu_tensor(mamba_slot_mapping,
-                            max_len=math.ceil(max_prompt_len / self.block_size),
-                            pad=_PAD_SLOT_ID,
-                            dtype=torch.long,
-                            flat=self.use_merged_prefill)
+                mamba_slot_mapping = [[
+                    slot // self.block_size for slot in seq_slot_mapping
+                ] for seq_slot_mapping in slot_mapping]
+                mamba_slot_mapping = [
+                    seq_slot_mapping[::self.block_size]
+                    for seq_slot_mapping in mamba_slot_mapping
+                ]
+                mamba_slot_mapping = make_cpu_tensor(
+                    mamba_slot_mapping,
+                    max_len=math.ceil(max_prompt_len / self.block_size),
+                    pad=_PAD_SLOT_ID,
+                    dtype=torch.long,
+                    flat=self.use_merged_prefill)
             else:
-                mamba_slot_mapping = [[seq_slot_mapping[-1] // self.block_size]
-                                      for seq_slot_mapping in slot_mapping]
+                mamba_slot_mapping = [[
+                    seq_slot_mapping[-1] // self.block_size
+                ] for seq_slot_mapping in slot_mapping]
                 mamba_slot_mapping = torch.tensor(mamba_slot_mapping,
                                                   dtype=torch.long,
                                                   device='cpu')
@@ -2392,13 +2399,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             token_types=token_types_tensor,
         )
 
-    def _prepare_decode(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        total_seq_ids=None,
-        output=None,
-        align_worker=False
-    ) -> PrepareDecodeMetadata:
+    def _prepare_decode(self,
+                        seq_group_metadata_list: List[SequenceGroupMetadata],
+                        total_seq_ids=None,
+                        output=None,
+                        align_worker=False) -> PrepareDecodeMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
         input_mrope_positions: List[List[int]] = [[] for _ in range(3)]
@@ -2698,7 +2703,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         mamba_slot_mapping = None
         if self._is_fla_model():
             mamba_block_list = []
-            for i,bt in enumerate(block_tables):
+            for i, bt in enumerate(block_tables):
                 if len(bt) == 0:
                     mamba_block_list.append(_PAD_BLOCK_ID)
                 elif slot_mapping[i][-1] % self.block_size == 0:
@@ -2706,8 +2711,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 else:
                     mamba_block_list.append(bt[-1])
             mamba_block_list = torch.tensor(mamba_block_list,
-                                             dtype=torch.long,
-                                             device='cpu')
+                                            dtype=torch.long,
+                                            device='cpu')
             mamba_slot_mapping = [[seq_slot_mapping[0] // self.block_size]
                                   for seq_slot_mapping in slot_mapping]
             mamba_slot_mapping = torch.tensor(mamba_slot_mapping,
@@ -2792,8 +2797,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             enable_kv_scales_calculation=False,
             input_positions=input_positions,
             mamba_block_list=mamba_block_list,
-            mamba_slot_mapping=mamba_slot_mapping
-        )
+            mamba_slot_mapping=mamba_slot_mapping)
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -2868,11 +2872,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return alibi_blocks
 
     def prepare_input_tensors(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        finished_requests_ids: Optional[List[str]] = None,
-        align_worker=False
-    ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
+            self,
+            seq_group_metadata_list: List[SequenceGroupMetadata],
+            finished_requests_ids: Optional[List[str]] = None,
+            align_worker=False) -> Tuple[TModelInputForHPU, SamplingMetadata]:
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -3207,11 +3210,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def prepare_model_input_align_worker(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None,
-        align_worker: bool = False
+            self,
+            seq_group_metadata_list: List[SequenceGroupMetadata],
+            virtual_engine: int = 0,
+            finished_requests_ids: Optional[List[str]] = None,
+            align_worker: bool = False
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -3227,10 +3230,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.profiler_counter_helper.capture_seq_group_metadata_stats(
                 seq_group_metadata_list=seq_group_metadata_list)
             model_input, sampling_metadata = self.prepare_input_tensors(
-                seq_group_metadata_list,
-                finished_requests_ids,
-                align_worker
-            )
+                seq_group_metadata_list, finished_requests_ids, align_worker)
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
@@ -3702,10 +3702,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             conv_dim = \
                 self.model_config.hf_config.text_config.linear_conv_kernel_dim
-        mamba_cache_indices_list = list(range(inputs.batch_size_padded))
-        mamba_cache_indices = torch.tensor(mamba_cache_indices_list,
-                                           dtype=torch.long,
-                                           device='cpu')
         assert inputs.attn_metadata.num_prefills > 0 or \
             inputs.attn_metadata.num_decode_tokens > 0
         if inputs.attn_metadata.num_prefills > 0:
@@ -3720,8 +3716,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               device='cpu')
             conv_state_indices = self.move_to_device(conv_state_indices)
             inputs.attn_metadata.conv_state_indices = conv_state_indices
-        if inputs.attn_metadata.num_decode_tokens > 0:
-            num_decodes = inputs.attn_metadata.num_decode_tokens
 
     def warmup_scenario(self,
                         batch_size,
