@@ -201,7 +201,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
 
         # 2) prefill part, packed layout: [1, total_tokens, h]
         if num_prefills > 0 and num_prefill_tokens > 0:
-            prefill_idx = attn_metadata.mamba_cache_prefill_indices
             mamba_block_list = attn_metadata.mamba_block_list
 
             assert mixed_qkv.shape[0] == 1
@@ -241,7 +240,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                 "g": prefill_g,
                 "bs": prefill_mixed_qkv.shape[0],
                 "seq_len": prefill_seq_len,
-                "cache_indices": prefill_idx,
                 "prev_conv_state": prev_conv_state,
                 "prev_ssm_state": prev_ssm_state,
                 "is_first_chunk": is_first_chunk,
@@ -249,7 +247,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
 
         # 3) decode part
         if num_decode_tokens > 0:
-            decode_idx = attn_metadata.mamba_cache_decode_indices
             mamba_block_list = attn_metadata.mamba_decode_block_list
 
             decode_mixed_qkv = mixed_qkv[:, num_prefill_tokens:, :].reshape(
@@ -284,7 +281,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
                 "g": decode_g,
                 "bs": decode_mixed_qkv.shape[0],
                 "seq_len": 1,
-                "cache_indices": decode_idx,
                 "prev_conv_state": prev_conv_state,
                 "prev_ssm_state": prev_ssm_state,
             }
@@ -546,9 +542,6 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         # ============================================================
         # Part 2: Core Attention (Custom Op)
         # ============================================================
-        mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
-        mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
-
         if self.conv1d_weight is None:
             self.conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
                 0, 1).flatten().reshape(self.conv_kernel_size,

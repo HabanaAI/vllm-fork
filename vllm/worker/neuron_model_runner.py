@@ -251,8 +251,7 @@ class NeuronModelRunner(ModelRunnerBase[ModelInputForNeuron]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None,
-        running_queue_list: Optional[List[int]] = None,
+        finished_requests_ids: Optional[List[str]] = None
     ) -> ModelInputForNeuron:
         multi_modal_kwargs = None
         # NOTE: We assume that all sequences in the group are all prompts or

@@ -233,7 +233,6 @@ class SchedulerOutputs:
     num_lookahead_slots: int
     # The number of requests in the running queue
     running_queue_size: int
-    running_queue_list: Optional[List[int]]
     preempted: int
 
     def __post_init__(self):
@@ -372,7 +371,6 @@ class SchedulerPrefillOutputs:
     # Ignored sequence groups.
     ignored_seq_groups: List[SequenceGroup]
     num_lookahead_slots: int
-    running_seqs: Optional[List[int]]
 
     @classmethod
     def create_empty(cls) -> "SchedulerPrefillOutputs":
@@ -380,7 +378,6 @@ class SchedulerPrefillOutputs:
             seq_groups=[],
             ignored_seq_groups=[],
             num_lookahead_slots=0,
-            running_seqs=[],
         )
 
 
@@ -1165,7 +1162,6 @@ class Scheduler:
             return SchedulerPrefillOutputs(
                 seq_groups=[],
                 ignored_seq_groups=[],
-                running_seqs=[],
                 num_lookahead_slots=self._get_num_lookahead_slots(
                     is_prefill=True, enable_chunking=enable_chunking),
             )
@@ -1337,17 +1333,11 @@ class Scheduler:
         if len(seq_groups) > 0:
             self.prev_prompt = True
 
-        running_seq_ids = [
-            seq.seq_id for seq_group in self.running
-            for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING)
-        ]
-
         return SchedulerPrefillOutputs(
             seq_groups=seq_groups,
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(
-                is_prefill=True, enable_chunking=enable_chunking),
-            running_seqs=running_seq_ids,
+                is_prefill=True, enable_chunking=enable_chunking)
         )
 
     def _schedule_default(self) -> SchedulerOutputs:
@@ -1483,7 +1473,6 @@ class Scheduler:
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=running_scheduled.num_lookahead_slots,
             running_queue_size=len(self.running),
-            running_queue_list=prefills.running_seqs,
             preempted=preempted,
         )
 
@@ -1656,10 +1645,6 @@ class Scheduler:
                                    else running_scheduled.num_lookahead_slots)
             preempted = len(running_scheduled.preempted) + len(
                 running_scheduled.swapped_out)
-            running_seq_ids = [
-                seq.seq_id for seq_group in self.running
-                for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING)
-            ]
             return SchedulerOutputs(
                 scheduled_seq_groups=scheduled_seq_groups,
                 num_prefill_groups=num_prefill_groups,
@@ -1673,7 +1658,6 @@ class Scheduler:
                 swapped_in.infeasible_seq_groups,
                 num_lookahead_slots=num_lookahead_slots,
                 running_queue_size=len(self.running),
-                running_queue_list=running_seq_ids,
                 preempted=preempted,
             )
         # -------- End prefill-only microbatch path --------
@@ -1753,10 +1737,6 @@ class Scheduler:
                                (all_prefills
                                 and not self.scheduler_config.is_multi_step)
                                else running_scheduled.num_lookahead_slots)
-        running_seq_ids = [
-            seq.seq_id for seq_group in self.running
-            for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING)
-        ]
         return SchedulerOutputs(
             scheduled_seq_groups=scheduled_seq_groups,
             num_prefill_groups=num_prefill_groups,
@@ -1770,7 +1750,6 @@ class Scheduler:
             swapped_in.infeasible_seq_groups,
             num_lookahead_slots=num_lookahead_slots,
             running_queue_size=len(self.running),
-            running_queue_list=running_seq_ids,
             preempted=(len(running_scheduled.preempted) +
                        len(running_scheduled.swapped_out)),
         )
