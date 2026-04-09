@@ -3056,29 +3056,37 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         elif not self.use_merged_prefill:
             if self.scheduler_config.enable_chunked_prefill:
                 if num_prefills > 0:
-                    max_len = input_tokens.size(1)
-                    # Ensure tensor type for static checking.
                     assert isinstance(input_tokens, torch.Tensor)
                     assert isinstance(input_positions, torch.Tensor)
-                    input_tokens = input_tokens.flatten()
-                    input_positions = input_positions.flatten()
+
+                    max_len = input_tokens.size(1)
+
+                    prompt_input_tokens: torch.Tensor = input_tokens
+                    prompt_input_positions: torch.Tensor = input_positions
+
+                    input_tokens = prompt_input_tokens.flatten()
+                    input_positions = prompt_input_positions.flatten()
+
                     if num_decode_tokens > 0:
-                        # Ensure tensor type for static checking.
                         assert isinstance(decode_input_tokens, torch.Tensor)
                         assert isinstance(decode_input_positions, torch.Tensor)
-                        decode_input_tokens = decode_input_tokens.flatten()
-                        if (  # type: ignore[union-attr]
-                                input_tokens.numel() \
-                                == input_positions.numel()
-                                and decode_input_tokens.numel()
-                                != decode_input_positions.numel()
-                        ):
 
+                        decode_input_tokens_tensor: \
+                            torch.Tensor = decode_input_tokens
+                        decode_input_positions_tensor: \
+                            torch.Tensor = decode_input_positions
+
+                        decode_input_tokens = \
+                            decode_input_tokens_tensor.flatten()
+
+                        if (input_tokens.numel() == input_positions.numel()
+                                and decode_input_tokens.numel()
+                                != decode_input_positions_tensor.numel()):
                             decode_input_positions = \
-                                decode_input_positions[0].flatten()
+                                decode_input_positions_tensor[0].flatten()
                         else:
                             decode_input_positions = \
-                                decode_input_positions.flatten()
+                                decode_input_positions_tensor.flatten()
 
                         input_tokens = torch.cat(
                             (input_tokens, decode_input_tokens), dim=0)
