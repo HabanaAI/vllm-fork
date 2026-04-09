@@ -928,18 +928,19 @@ FP8的权重需要通过BF16的模型转换而来，解压复制文件并转换�
 ```bash
 cd vllm-fork/scripts/data
 tar -xvzf qwen3.5-input-scale.tar.gz
+cd ..
 ```
 
 Qwen3.5-27B 转Unit Scale FP8权重：
 
 ```bash
-python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors
+python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s data/qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors
 ```
 
 Qwen3.5-122B-A10B 转Unit Scale FP8权重：
 
 ```bash
-python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors
+python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s data/qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors
 ```
 
 ##### 3.4.4.2 启动 vLLM
@@ -1041,7 +1042,9 @@ pip install -e vllm-hpu-extension --no-build-isolation
 ```bash
 cd vllm-fork/scripts/data
 tar -xvzf minimax-m2.5-input-scale.tar.gz
-python3 convert_for_minimax_unit_scale.py -i /data/hf_models/MiniMax-M2.5 -o /data/hf_models/MiniMax-M2.5-G2 -s minimax_m2.5_input_scale/minimax-m2.5-input-scale.safetensors -u
+cd ../
+cp data/minimax_m2.5_input_scale/minimax-m2.5-input-scale.safetensors ./
+python3 convert_for_minimax_unit_scale.py -i /data/hf_models/MiniMax-M2.5 -o /data/hf_models/MiniMax-M2.5-G2 -s minimax-m2.5-input-scale.safetensors -u
 ```
 
 #### 3.5.4 启动 vLLM
