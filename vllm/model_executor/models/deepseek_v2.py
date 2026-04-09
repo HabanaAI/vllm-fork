@@ -34,6 +34,7 @@ from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, ModelConfig, VllmConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from vllm.logger import init_logger
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -58,6 +59,8 @@ from .utils import (PPMissingLayer, is_pp_missing_parameter,
                     maybe_prefix)
 
 is_hpu = current_platform.is_hpu()
+
+logger = init_logger(__name__)
 
 
 class DeepseekV2MLP(nn.Module):
@@ -830,6 +833,9 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             # Currently DSA is not supported in Gaudi2/3,
             # falling back to full MLA
             if "indexer" in name:
+                logger.warning(
+                    "Currently vLLM-fork does not support DSA, falling back "
+                    "to full MLA")
                 continue
 
             spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
