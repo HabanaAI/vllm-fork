@@ -4,6 +4,7 @@
 from vllm.transformers_utils.configs.chatglm import ChatGLMConfig
 from vllm.transformers_utils.configs.cohere2 import Cohere2Config
 from vllm.transformers_utils.configs.dbrx import DbrxConfig
+from vllm.transformers_utils.configs.deepseek_v3 import DeepseekV3Config
 from vllm.transformers_utils.configs.deepseek_vl2 import DeepseekVLV2Config
 from vllm.transformers_utils.configs.dotsocr import DotsOCRConfig
 from vllm.transformers_utils.configs.eagle import EAGLEConfig
@@ -38,13 +39,37 @@ from vllm.transformers_utils.configs.telechat2 import Telechat2Config
 from vllm.transformers_utils.configs.ultravox import UltravoxConfig
 
 __all__ = [
-    "ChatGLMConfig", "Cohere2Config", "DbrxConfig", "DeepseekVLV2Config",
-    "DotsOCRConfig", "MPTConfig", "RWConfig", "H2OVLChatConfig",
-    "InternVLChatConfig", "JAISConfig", "MedusaConfig", "EAGLEConfig",
-    "ExaoneConfig", "MiniMaxText01Config", "MiniMaxVL01Config", "MllamaConfig",
-    "MLPSpeculatorConfig", "MoonViTConfig", "KimiVLConfig", "NemotronConfig",
-    "NemotronHConfig", "NVLM_D_Config", "OvisConfig", "SkyworkR1VChatConfig",
-    "SolarConfig", "Telechat2Config", "UltravoxConfig", "Qwen3NextConfig",
-    "Qwen3_5Config", "Qwen3_5TextConfig", "Qwen3_5MoeConfig",
+    "ChatGLMConfig",
+    "Cohere2Config",
+    "DbrxConfig",
+    "DeepseekVLV2Config",
+    "DeepseekV3Config",
+    "DotsOCRConfig",
+    "MPTConfig",
+    "RWConfig",
+    "H2OVLChatConfig",
+    "InternVLChatConfig",
+    "JAISConfig",
+    "MedusaConfig",
+    "EAGLEConfig",
+    "ExaoneConfig",
+    "MiniMaxText01Config",
+    "MiniMaxVL01Config",
+    "MllamaConfig",
+    "MLPSpeculatorConfig",
+    "MoonViTConfig",
+    "KimiVLConfig",
+    "NemotronConfig",
+    "NemotronHConfig",
+    "NVLM_D_Config",
+    "OvisConfig",
+    "SkyworkR1VChatConfig",
+    "SolarConfig",
+    "Telechat2Config",
+    "UltravoxConfig",
+    "Qwen3NextConfig",
+    "Qwen3_5Config",
+    "Qwen3_5TextConfig",
+    "Qwen3_5MoeConfig",
     "Qwen3_5MoeTextConfig"
 ]

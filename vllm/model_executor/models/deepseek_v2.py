@@ -34,6 +34,7 @@ from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, ModelConfig, VllmConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from vllm.logger import init_logger
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -58,6 +59,8 @@ from .utils import (PPMissingLayer, is_pp_missing_parameter,
                     maybe_prefix)
 
 is_hpu = current_platform.is_hpu()
+
+logger = init_logger(__name__)
 
 
 class DeepseekV2MLP(nn.Module):
@@ -196,6 +199,25 @@ def yarn_get_mscale(scale: float = 1, mscale: float = 1) -> float:
     return 0.1 * mscale * math.log(scale) + 1.0
 
 
+def get_rope_args(
+    config: PretrainedConfig, ) -> tuple[float, Optional[dict[str, Any]]]:
+    rope_theta = getattr(config, "rope_theta", 10000)
+    rope_scaling = getattr(config, "rope_scaling", None)
+
+    rope_parameters = getattr(config, "rope_parameters", None)
+    if isinstance(rope_parameters, dict):
+        rope_theta = rope_parameters.get("rope_theta", rope_theta)
+
+        rope_type = rope_parameters.get("rope_type")
+        # GLM5 / newer HF configs may store RoPE config in rope_parameters.
+        # If it is plain/default RoPE, do not fabricate a rope_scaling dict.
+        # Only non-default rope types should be forwarded as rope_scaling.
+        if rope_type and rope_type != "default":
+            rope_scaling = dict(rope_parameters)
+
+    return rope_theta, rope_scaling
+
+
 class DeepseekV2Attention(nn.Module):
 
     def __init__(
@@ -274,7 +296,9 @@ class DeepseekV2Attention(nn.Module):
                                         quant_config=quant_config,
                                         prefix=f"{prefix}.o_proj")
         if rope_scaling:
-            rope_scaling["rope_type"] = 'deepseek_yarn'
+            rope_scaling = dict(rope_scaling)
+            if "factor" in rope_scaling:
+                rope_scaling["rope_type"] = "deepseek_yarn"
 
         self.rotary_emb = get_rope(qk_rope_head_dim,
                                    rotary_dim=qk_rope_head_dim,
@@ -283,7 +307,7 @@ class DeepseekV2Attention(nn.Module):
                                    rope_scaling=rope_scaling,
                                    is_neox_style=False)
 
-        if rope_scaling:
+        if rope_scaling and "factor" in rope_scaling:
             mscale_all_dim = rope_scaling.get("mscale_all_dim", False)
             scaling_factor = rope_scaling["factor"]
             mscale = yarn_get_mscale(scaling_factor, float(mscale_all_dim))
@@ -460,14 +484,18 @@ class DeepseekV2MLAAttention(nn.Module):
                                         prefix=f"{prefix}.o_proj")
 
         if rope_scaling:
-            rope_scaling["rope_type"] = 'deepseek_yarn'
+            rope_scaling = dict(rope_scaling)
+            if "factor" in rope_scaling:
+                rope_scaling["rope_type"] = "deepseek_yarn"
+
         self.rotary_emb = get_rope(qk_rope_head_dim,
                                    rotary_dim=qk_rope_head_dim,
                                    max_position=max_position_embeddings,
                                    base=rope_theta,
                                    rope_scaling=rope_scaling,
                                    is_neox_style=False)
-        if rope_scaling:
+
+        if rope_scaling and "factor" in rope_scaling:
             mscale_all_dim = rope_scaling.get("mscale_all_dim", False)
             scaling_factor = rope_scaling["factor"]
             mscale = yarn_get_mscale(scaling_factor, float(mscale_all_dim))
@@ -548,8 +576,7 @@ class DeepseekV2DecoderLayer(nn.Module):
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
-        rope_theta = getattr(config, "rope_theta", 10000)
-        rope_scaling = getattr(config, "rope_scaling", None)
+        rope_theta, rope_scaling = get_rope_args(config)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
         # DecoderLayers are created with `make_layers` which passes the prefix
@@ -803,6 +830,14 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             if "rotary_emb.inv_freq" in name:
                 continue
 
+            # Currently DSA is not supported in Gaudi2/3,
+            # falling back to full MLA
+            if "indexer" in name:
+                logger.warning(
+                    "Currently vLLM-fork does not support DSA, falling back "
+                    "to full MLA")
+                continue
+
             spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
             if spec_layer is not None:
                 continue  # skip spec decode layers for main model
@@ -871,6 +906,14 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
 
 class DeepseekV3ForCausalLM(DeepseekV2ForCausalLM):
+    pass
+
+
+class DeepseekV32ForCausalLM(DeepseekV2ForCausalLM):
+    pass
+
+
+class GlmMoeDsaForCausalLM(DeepseekV2ForCausalLM):
     pass
 
 
