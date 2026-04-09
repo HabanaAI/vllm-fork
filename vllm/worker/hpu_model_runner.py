@@ -3061,11 +3061,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                     max_len = input_tokens.size(1)
 
-                    prompt_input_tokens: torch.Tensor = input_tokens
-                    prompt_input_positions: torch.Tensor = input_positions
+                    prompt_input_tokens_tensor: \
+                        torch.Tensor = input_tokens
+                    prompt_input_positions_tensor: \
+                        torch.Tensor = input_positions
 
-                    input_tokens = prompt_input_tokens.flatten()
-                    input_positions = prompt_input_positions.flatten()
+                    input_tokens = prompt_input_tokens_tensor.flatten()
+                    input_positions = prompt_input_positions_tensor.flatten()
 
                     if num_decode_tokens > 0:
                         assert isinstance(decode_input_tokens, torch.Tensor)
@@ -3079,8 +3081,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         decode_input_tokens = \
                             decode_input_tokens_tensor.flatten()
 
-                        if (input_tokens.numel() == input_positions.numel()
-                                and decode_input_tokens.numel()
+                        if (prompt_input_tokens_tensor.numel()
+                                == prompt_input_positions_tensor.numel()
+                                and decode_input_tokens_tensor.numel()
                                 != decode_input_positions_tensor.numel()):
                             decode_input_positions = \
                                 decode_input_positions_tensor[0].flatten()
