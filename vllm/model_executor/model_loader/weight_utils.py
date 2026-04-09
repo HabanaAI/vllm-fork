@@ -462,7 +462,7 @@ def _maybe_convert_fp8_range(name: str, tensor: torch.Tensor) -> torch.Tensor:
         return tensor
 
     if tensor.dtype == torch.float8_e4m3fn:
-        return (tensor.float() / 2).to(torch.float8_e4m3fn)
+        return (tensor.to(torch.float16) / 2).to(torch.float8_e4m3fn)
 
     if (tensor.dtype in [torch.float32, torch.bfloat16]
             and "scale" in name.split(".")[-1]):
