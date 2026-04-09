@@ -3067,14 +3067,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         assert isinstance(decode_input_tokens, torch.Tensor)
                         assert isinstance(decode_input_positions, torch.Tensor)
                         decode_input_tokens = decode_input_tokens.flatten()
-                        if input_tokens.shape == input_positions.shape:  # type: ignore[union-attr]
-                            if decode_input_tokens.shape != \
-                                    decode_input_positions.shape:
-                                decode_input_positions = decode_input_positions[
-                                    0].flatten()
-                            else:
-                                decode_input_positions = \
-                                    decode_input_positions.flatten()
+                        if (  # type: ignore[union-attr]
+                                input_tokens.numel() \
+                                == input_positions.numel()
+                                and decode_input_tokens.numel()
+                                != decode_input_positions.numel()
+                        ):
+
+                            decode_input_positions = \
+                                decode_input_positions[0].flatten()
+                        else:
+                            decode_input_positions = \
+                                decode_input_positions.flatten()
 
                         input_tokens = torch.cat(
                             (input_tokens, decode_input_tokens), dim=0)
