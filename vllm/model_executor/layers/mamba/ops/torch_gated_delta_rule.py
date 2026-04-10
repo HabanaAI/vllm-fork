@@ -24,6 +24,7 @@ def torch_chunk_gated_delta_rule_opt(
     use_qk_l2norm_in_kernel=True,
     ssm_cache=None,
     mamba_slot_mapping=None,
+    save_cache_fn=None,
 ):
     write_block_state_to_ssm_cache = (ssm_cache is not None
                                       or mamba_slot_mapping is not None)
@@ -34,6 +35,8 @@ def torch_chunk_gated_delta_rule_opt(
             "block_size must be specified when writing block state"
         assert block_size % chunk_size == 0, \
             "block_size must be a multiple of chunk_size"
+        assert save_cache_fn is not None, \
+            "save_cache_fn must be specified when writing block state"
         num_chunk_per_block = block_size // chunk_size
     ssm_dtype = g.dtype
     if use_qk_l2norm_in_kernel:
@@ -167,11 +170,9 @@ def torch_chunk_gated_delta_rule_opt(
                                                1) % num_chunk_per_block == 0:
             block_idx = i // num_chunk_per_block
             block_i_mapping = mamba_slot_mapping[:, block_idx]
-            ssm_cache.index_copy_(
-                dim=0,
-                index=block_i_mapping,
-                source=last_recurrent_state.to(ssm_cache.dtype),
-            )
+            core_attn_out = save_cache_fn(
+                core_attn_out, last_recurrent_state.to(ssm_cache.dtype),
+                ssm_cache, block_i_mapping)
 
     if not output_final_state:
         last_recurrent_state = None
