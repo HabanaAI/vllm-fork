@@ -393,6 +393,50 @@ bash calibrate_model.sh \
      -t 4 -u
 ```
 
+对于模型结构里面包含DSA的模型，例如：GLM-5-FP8, GLM-5.1-FP8, DeepSeek-V3.2, 需要把maxabs_quant_g2.json里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：
+
+```bash
+      "lm_head",
+      "mlp\\.gate\\b",
+      "visual",
+      "batch2block_matmul",
+      "block2batch_matmul",
+      "latent_cache_k",
+      "matmul_qk",
+      "matmul_av"
+```
+
+如GLM-5.1-FP8修改后的maxabs_quant_g2.json为：
+
+```bash
+{
+  "mode": "QUANTIZE",
+  "observer": "maxabs",
+  "scale_method": "maxabs_arbitrary",
+  "scale_format": "scalar",
+  "allowlist": {
+    "types": [],
+    "names": []
+  },
+  "blocklist": {
+    "types": [
+      "Softmax"
+    ],
+    "names": [
+      "lm_head",
+      "mlp\\.gate\\b",
+      "visual",
+      "batch2block_matmul",
+      "block2batch_matmul",
+      "latent_cache_k",
+      "matmul_qk",
+      "matmul_av"
+    ]
+  },
+  "dump_stats_path": "/workspace/quantization/glm-5.1-fp8/g2/inc_output",
+  "fp8_config": "E4M3"
+```
+
 ##### 2.3.3.2 对 BF16 模型进行校准
 
 对于仅支持 BF16 精度的模型，例如 Qwen2.5-72B-Instruct，可以使用以下命令在 4 张 Gaudi 卡上进行校准。
