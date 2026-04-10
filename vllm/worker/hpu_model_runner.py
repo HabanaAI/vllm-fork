@@ -2706,7 +2706,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             for i, bt in enumerate(block_tables):
                 if len(bt) == 0:
                     mamba_block_list.append(_PAD_BLOCK_ID)
-                elif slot_mapping[i][-1] % self.block_size == 0:
+                elif (len(bt) > 1
+                      and slot_mapping[i][-1] % self.block_size == 0):
                     mamba_block_list.append(bt[-2])
                 else:
                     mamba_block_list.append(bt[-1])
