@@ -3709,9 +3709,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefills = inputs.attn_metadata.num_prefills
             seq_len = inputs.attn_metadata.num_prefill_tokens
             conv_state_indices = []
+            block_num = 1
+            if (self.use_prefix_caching
+                    and inputs.attn_metadata.mamba_slot_mapping is not None):
+                block_num = inputs.attn_metadata.mamba_slot_mapping.shape[1]
             for i in range(num_prefills):
                 conv_state_indices += list(range(i * seq_len, \
-                    i * seq_len + conv_dim - 1))
+                    i * seq_len + (conv_dim - 1) * block_num))
             conv_state_indices = torch.tensor(conv_state_indices,
                                               dtype=torch.long,
                                               device='cpu')
