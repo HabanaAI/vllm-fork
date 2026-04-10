@@ -839,7 +839,7 @@ docker run -it --name qwen35_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/data \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:1.23.0-695
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
@@ -870,7 +870,8 @@ pip install -e vllm-hpu-extension --no-build-isolation
 
 #### 3.4.3 BF16精度模型部署
 启动 vLLM，进入启动脚本目录，启动 vLLM。
-- 以下命令启动默认上下文长度16384。
+- 以下命令启动默认上下文长度为 262144（即 **256K**）。
+- 如果部署时预热（warmup）时间过长，建议将 `-x` 调整为 `131072`（即 **128K**），以减少初始化耗时。
 - 环境变量 `PT_HPU_LAZY_MODE=0` 有更好的性能，**推荐使用**。
 
 Qwen3.5-27B 模型2卡部署可使用如下命令启动:
@@ -878,13 +879,16 @@ Qwen3.5-27B 模型2卡部署可使用如下命令启动:
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
-bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B/ \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B \
 -t 2 \
 -m 0,1 \
 -a 127.0.0.1:30001 \
--x 16384 \
--p 8 \
+-x 262144 \
+-g 1024 \
+-k 8192 \
 -b 128 \
+-u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /warmup_cache/Qwen3.5-27B/
 ```
@@ -894,13 +898,15 @@ Qwen3.5-35B-A3B 模型4卡部署可使用如下命令启动：
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
-bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-35B-A3B/ \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-35B-A3B \
 -t 4 \
 -m 0,1,2,3 \
 -a 127.0.0.1:30001 \
--x 16384 \
--p 8 \
+-x 262144 \
+-g 1024 \
+-k 8192 \
 -b 128 \
+-u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /warmup_cache/Qwen3.5-35B-A3B/
 ```
@@ -910,12 +916,14 @@ Qwen3.5-122B-A10B 模型8卡部署可使用如下命令启动（8 卡需先完�
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
-bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B/ \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B \
 -t 8 \
 -a 127.0.0.1:30001 \
--x 16384 \
--p 8 \
+-x 262144 \
+-g 1024 \
+-k 8192 \
 -b 128 \
+-u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /warmup_cache/Qwen3.5-122B-A10B/
 ```
@@ -946,10 +954,11 @@ python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data
 ##### 3.4.4.2 启动 vLLM
 
 启动 vLLM，进入启动脚本目录，启动 vLLM。
-- 以下命令启动默认上下文长度16384。
+- 以下命令启动默认上下文长度为 262144（即 **256K**）。
+- 如果部署时预热（warmup）时间过长，建议将 `-x` 调整为 `131072`（即 **128K**），以减少初始化耗时。
 - 请用按照3.4.4.1章节中转换出来的模型来启动vLLM。
 - 环境变量 `PT_HPU_LAZY_MODE=0 VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false` 有更好的性能，**推荐使用**。
-- 如需加速预热过程，可额外设置环境变量 `VLLM_MOE_GRAPH_BREAK=true`，但会导致解码吞吐量下降约 6%。
+- 如需进一步缩短预热时间，可额外设置环境变量 `VLLM_MOE_GRAPH_BREAK=true`，但会导致解码吞吐量下降约 6%。
 
 Qwen3.5-27B-FP8-G2-Unit 模型1卡部署可使用如下命令启动：
 
@@ -958,14 +967,16 @@ cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
 VLLM_ENABLE_UNIT_MOE=true \
 VLLM_HPU_CONVERT_TO_FP8UZ=false \
-bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2-Unit/ \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
+bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2-Unit \
 -t 1 \
 -m 0 \
 -a 127.0.0.1:30001 \
--x 16384 \
--p 8 \
+-x 262144 \
 -g 1024 \
--b 64 \
+-k 8192 \
+-b 128 \
+-u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /recipe_cache_Qwen3.5-27B-FP8/
 ```
@@ -977,15 +988,15 @@ cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
 VLLM_ENABLE_UNIT_MOE=true \
 VLLM_HPU_CONVERT_TO_FP8UZ=false \
-bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit/ \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit \
 -t 4 \
 -m 0,1,2,3 \
 -a 127.0.0.1:30001 \
--x 16384 \
--p 8 \
+-x 262144 \
 -g 1024 \
+-k 8192 \
+-b 128 \
 -u 0.7 \
--b 64 \
 -e "--reasoning-parser qwen3" \
 -c /recipe_cache_Qwen3.5-122B-FP8/
 ```
