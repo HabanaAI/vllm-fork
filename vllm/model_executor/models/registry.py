@@ -238,7 +238,7 @@ _MULTIMODAL_MODELS = {
     ),
     "Qwen3VLForConditionalGeneration": ("qwen3_vl", "Qwen3VLForConditionalGeneration"),  # noqa: E501
     "Qwen3VLMoeForConditionalGeneration": ("qwen3_vl_moe", "Qwen3VLMoeForConditionalGeneration"),  # noqa: E501
-        "Qwen3_5ForConditionalGeneration": (
+    "Qwen3_5ForConditionalGeneration": (
         "qwen3_5",
         "Qwen3_5ForConditionalGeneration",
     ),
