@@ -771,6 +771,11 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
         self.make_empty_intermediate_tensors = (
             self.model.make_empty_intermediate_tensors)
 
+        if "index_topk" in config:
+            logger.warning(
+                "Currently vLLM-fork does not support DSA, falling back to "
+                "full MLA...")
+
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.get_input_embeddings(input_ids)
 
@@ -833,9 +838,6 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             # Currently DSA is not supported in Gaudi2/3,
             # falling back to full MLA
             if "indexer" in name:
-                logger.warning(
-                    "Currently vLLM-fork does not support DSA, falling back "
-                    "to full MLA")
                 continue
 
             spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
