@@ -959,6 +959,7 @@ python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data
 - 请用按照3.4.4.1章节中转换出来的模型来启动vLLM。
 - 环境变量 `PT_HPU_LAZY_MODE=0 VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false` 有更好的性能，**推荐使用**。
 - 如需进一步缩短预热时间，可额外设置环境变量 `VLLM_MOE_GRAPH_BREAK=true`，但会导致解码吞吐量下降约 6%。
+- 当前Qwen3.5系列模型不支持APC功能
 
 Qwen3.5-27B-FP8-G2-Unit 模型1卡部署可使用如下命令启动：
 
