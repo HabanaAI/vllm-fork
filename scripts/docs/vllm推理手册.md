@@ -1400,13 +1400,13 @@ pip install -e vllm-hpu-extension --no-build-isolation
 启动 vLLM，进入启动脚本目录，启动 vLLM。
 - 以下命令启动默认上下文长度为 262144（即 **256K**）。
 - 如果部署时预热（warmup）时间过长，建议将 `-x` 调整为 `131072`（即 **128K**），以减少初始化耗时。
-- 环境变量 `PT_HPU_LAZY_MODE=0` 有更好的性能，**推荐使用**。
+- 环境变量 `PT_HPU_LAZY_MODE=1` 有更好的性能，**推荐使用**。
 
 HY3.0-BF16-Testing 模型8卡部署可使用如下命令启动（8 卡需先完成 libfabric 通信配置，详见 [1.2.1 节](#121-基础镜像及网络配置)）：
 
 ```bash
 cd vllm-fork/scripts
-PT_HPU_LAZY_MODE=0 \
+PT_HPU_LAZY_MODE=1 \
 VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/HY3.0-BF16-Testing \
 -t 8 \
