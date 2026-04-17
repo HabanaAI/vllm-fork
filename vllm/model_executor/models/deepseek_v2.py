@@ -561,6 +561,10 @@ class DeepseekV2MLAAttention(nn.Module):
             k_pe,
             output_shape=(hidden_states.shape[0],
                           self.num_local_heads * self.v_head_dim))
+        # On HPU with chunked prefill, forward_chunked_prefill returns 2D
+        # [T, hidden] while the decoder layer expects 3D, restore to 3D
+        if is_hpu and hidden_states.dim() == 3 and attn_out.dim() == 2:
+            attn_out = attn_out.unsqueeze(0)
         return self.o_proj(attn_out)[0]
 
 
@@ -633,6 +637,16 @@ class DeepseekV2DecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
     ) -> torch.Tensor:
+        # On HPU, chunked prefill passes 2D [total_tokens, hidden] tensors,
+        # Restore to 3D at decoder-layer boundary so every sub-module (attn,
+        # layernorm, mlp/moe) sees expected shape, squeeze back on exit.
+        hpu_2d_input = is_hpu and hidden_states.dim() == 2
+        if hpu_2d_input:
+            hidden_states = hidden_states.unsqueeze(0)
+            if residual is not None:
+                residual = residual.unsqueeze(0)
+            positions = positions.unsqueeze(0)
+
         # Self Attention
         if residual is None:
             residual = hidden_states
@@ -669,6 +683,10 @@ class DeepseekV2DecoderLayer(nn.Module):
             # of DeepseekV2MOE
             hidden_states *= 1. / self.routed_scaling_factor
             residual *= 1. / self.routed_scaling_factor
+
+        if hpu_2d_input:
+            hidden_states = hidden_states.squeeze(0)
+            residual = residual.squeeze(0)
 
         return hidden_states, residual
 

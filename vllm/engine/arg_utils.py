@@ -1521,8 +1521,8 @@ class EngineArgs:
         max_model_len = model_config.max_model_len
         use_long_context = max_model_len > 32768
         if self.enable_chunked_prefill is None:
-            # Chunked prefill not supported for Multimodal or MLA in V0.
-            if model_config.is_multimodal_model or model_config.use_mla:
+            # Chunked prefill not supported for Multimodal in V0 by Default.
+            if model_config.is_multimodal_model:
                 self.enable_chunked_prefill = False
 
             # Enable chunked prefill by default for long context (> 32K)

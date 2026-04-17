@@ -240,6 +240,10 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             raise NotImplementedError(
                 "output is not yet supported for MLAImplBase")
 
+        if attn_metadata.chunk_prefill_enabled:
+            return self.forward_chunked_prefill(q, k_c_normed, k_pe, kv_cache,
+                                                attn_metadata)
+
         batch_size = q.shape[0]
         is_prefill = attn_metadata.is_prompt
 
@@ -277,6 +281,195 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         else:
             return self._forward_decode(decode_ql_nope, q_pe, k_cache,
                                         attn_metadata, batch_size)
+
+    def forward_chunked_prefill(
+        self,
+        q: torch.Tensor,
+        k_c_normed: torch.Tensor,
+        k_pe: torch.Tensor,
+        kv_cache: torch.Tensor,
+        attn_metadata: HPUAttentionMetadata,
+    ) -> torch.Tensor:
+        """Forward pass for chunked prefill with MLA.
+
+        Handles the case where the batch contains both prefill chunks and
+        decode tokens (chunked prefill mode). For prefill tokens, fetches
+        any previously cached prefix latent vectors and concatenates them
+        with the current chunk before computing attention. For decode tokens,
+        delegates to the standard decode path.
+
+        The k_cache stores the full latent vector per token:
+            shape = (num_blocks * block_size, kv_lora_rank + qk_rope_head_dim)
+
+        Args:
+            q: shape = [1, total_tokens, num_heads, qk_head_dim]  (4D, HPU)
+            k_c_normed: shape = [1, total_tokens, kv_lora_rank]
+            k_pe: shape = [1, total_tokens, 1, qk_rope_head_dim]
+            kv_cache: tuple (k_cache,) where k_cache has shape
+                      (num_blocks * block_size, kv_lora_rank + qk_rope_head_dim)
+            attn_metadata: HPUAttentionMetadata with chunk_prefill_enabled=True
+        Returns:
+            shape = [total_tokens, num_heads * v_head_dim]
+        """
+        num_prefill_tokens = attn_metadata.num_prefill_tokens
+        num_decode_tokens = attn_metadata.num_decode_tokens
+
+        q_2d = q.reshape(-1, self.num_heads, self.qk_head_dim)
+        k_c_2d = k_c_normed.reshape(-1, self.kv_lora_rank)
+        k_pe_2d = k_pe.reshape(-1, self.qk_rope_head_dim)
+
+        prompt_output: Optional[torch.Tensor] = None
+        decode_output: Optional[torch.Tensor] = None
+
+        if num_prefill_tokens > 0:
+            q_p = q_2d[:num_prefill_tokens]
+            k_c_p = k_c_2d[:num_prefill_tokens]
+            k_pe_p = k_pe_2d[:num_prefill_tokens]
+
+            num_prefills = attn_metadata.num_prefills
+            prefill_batch_size = num_prefills
+            chunk_len = num_prefill_tokens // num_prefills
+
+            # Write current chunk latents to kv cache
+            slot_mapping = attn_metadata.slot_mapping.flatten(
+            ) if attn_metadata.slot_mapping is not None else None
+            latent_vec_k_p = torch.cat((k_c_p, k_pe_p),
+                                       dim=-1)  # [T_p, lora+rope]
+            if kv_cache is not None and len(kv_cache) >= 1:
+                self.latent_cache_k(latent_vec_k_p, kv_cache[0], slot_mapping)
+                k_cache = kv_cache[0]
+            else:
+                k_cache = None
+
+            # Fetch prefix cached latents if any (chunked prefill with prefix)
+            k_c_normed_full = k_c_p.view(prefill_batch_size, chunk_len,
+                                         self.kv_lora_rank)
+            k_pe_full = k_pe_p.view(prefill_batch_size, chunk_len,
+                                    self.qk_rope_head_dim)
+            if (k_cache is not None and attn_metadata.block_list is not None):
+                block_size = attn_metadata.block_size
+                k_cache_blocked = k_cache.unflatten(0, (-1, block_size))
+                prefix_latent = k_cache_blocked.index_select(
+                    0, attn_metadata.block_list)
+
+                prefix_latent = prefix_latent.reshape(
+                    prefill_batch_size, -1,
+                    self.kv_lora_rank + self.qk_rope_head_dim)
+                prefix_k_c, prefix_k_pe = prefix_latent.split(
+                    [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+                # Concatenate prefix + current chunk
+                k_c_normed_full = torch.cat((prefix_k_c, k_c_normed_full),
+                                            dim=1)
+                k_pe_full = torch.cat((prefix_k_pe, k_pe_full), dim=1)
+
+            # Now compute prefill attention over the full (prefix + chunk) keys
+            q_p_3d = q_p.view(prefill_batch_size, chunk_len, self.num_heads,
+                              self.qk_head_dim)
+
+            k_c_for_proj = k_c_normed_full.reshape(-1, self.kv_lora_rank)
+            kv_nope = self.kv_b_proj(k_c_for_proj)[0]\
+                .view(-1, self.num_heads,
+                      self.qk_nope_head_dim + self.v_head_dim)
+            k_nope, v = kv_nope.split([self.qk_nope_head_dim, self.v_head_dim],
+                                      dim=-1)
+
+            k_pe_expand = k_pe_full.reshape(-1, 1, self.qk_rope_head_dim)
+            k = torch.cat((k_nope, k_pe_expand.expand(
+                (*k_nope.shape[:-1], -1))),
+                          dim=-1)
+
+            full_kv_len = k_c_normed_full.shape[1]
+            k_3d = k.view(prefill_batch_size, full_kv_len, self.num_heads,
+                          self.qk_head_dim)
+            v_3d = v.view(prefill_batch_size, full_kv_len, self.num_heads,
+                          self.v_head_dim)
+
+            to_pad = self.qk_head_dim - self.v_head_dim
+            if to_pad > 0:
+                v_padding = torch.zeros(*v_3d.shape[:-1],
+                                        to_pad,
+                                        device=v_3d.device,
+                                        dtype=v_3d.dtype)
+                v_padded = torch.cat((v_3d, v_padding), dim=-1)
+            else:
+                v_padded = v_3d
+
+            # When prefix exists, use attn_bias (non-causal with mask),
+            # otherwise use causal mask.
+            has_prefix = (attn_metadata.block_list is not None)
+            out = ops.prompt_attention(
+                impl=self.prefill_impl,
+                query=q_p_3d,
+                key=k_3d,
+                value=v_padded,
+                is_causal=not has_prefix,
+                attn_bias=attn_metadata.attn_bias if has_prefix else None,
+                valid_seq_lengths=attn_metadata.seq_lens_tensor
+                if not has_prefix else None,
+                scale=self.scale,
+                matmul_qk_op=self.matmul_qk,
+                softmax_op=self.softmax,
+                matmul_av_op=self.matmul_av,
+                fsdpa_op=self.fused_scaled_dot_product_attention.apply if
+                self.fused_scaled_dot_product_attention is not None else None)
+
+            attn_output = out[..., :self.v_head_dim]
+            prompt_output = attn_output.reshape(
+                num_prefill_tokens, self.num_heads * self.v_head_dim)
+
+        if num_decode_tokens > 0:
+            q_d = q_2d[num_prefill_tokens:]
+            k_c_d = k_c_2d[num_prefill_tokens:]
+            k_pe_d = k_pe_2d[num_prefill_tokens:]
+            decode_batch_size = num_decode_tokens
+
+            # Write decode token latents to kv cache
+            decode_slot_mapping = attn_metadata.decode_slot_mapping.flatten(
+            ) if attn_metadata.decode_slot_mapping is not None else None
+            latent_vec_k_d = torch.cat((k_c_d, k_pe_d), dim=-1)
+            if kv_cache is not None and len(kv_cache) >= 1:
+                self.latent_cache_k(latent_vec_k_d, kv_cache[0],
+                                    decode_slot_mapping)
+                k_cache_d = kv_cache[0]
+            else:
+                k_cache_d = None
+
+            q_nope_d, q_pe_d = q_d.split(
+                [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
+            q_nope_d = q_nope_d.transpose(0, 1)
+            decode_ql_nope = torch.bmm(q_nope_d, self.W_UK_T)
+            decode_ql_nope = decode_ql_nope.transpose(0, 1)
+
+            query_d = torch.cat([decode_ql_nope, q_pe_d], dim=-1)
+            key_cache_d = k_cache_d.unsqueeze(1) if k_cache_d is not None \
+                else None
+            raw_decode = HPUPagedAttention.forward_decode(
+                query=query_d,
+                key_cache=key_cache_d,
+                value_cache=None,
+                block_list=attn_metadata.decode_block_list,
+                block_mapping=attn_metadata.block_mapping,
+                block_bias=attn_metadata.decode_attn_bias,
+                block_groups=attn_metadata.block_groups,
+                block_size=attn_metadata.block_size,
+                scale=self.scale,
+                matmul_qk_op=self.matmul_qk,
+                matmul_av_op=self.matmul_av,
+                batch2block_matmul_op=self.batch2block_matmul,
+                block2batch_matmul_op=self.block2batch_matmul,
+                keys_fetch_func=self.latent_cache_k.fetch_from_cache,
+                values_fetch_func=None,
+                kv_lora_rank=self.kv_lora_rank)
+            raw_decode = self._v_up_proj(raw_decode)
+            decode_output = raw_decode.view(decode_batch_size,
+                                            self.num_heads * self.v_head_dim)
+
+        if prompt_output is None:
+            return decode_output
+        elif decode_output is None:
+            return prompt_output
+        else:
+            return torch.cat((prompt_output, decode_output), dim=0)
 
     def _forward_prefill(  # type: ignore
             self, q: torch.Tensor, k_c_normed: torch.Tensor,
