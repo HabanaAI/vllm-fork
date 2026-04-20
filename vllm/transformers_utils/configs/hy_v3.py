@@ -5,8 +5,8 @@ from transformers import PretrainedConfig
 
 class HYV3Config(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`HYV3Model`].
-    It is used to instantiate a HYV3 model (HY V3 MoE language model) according to
+    This is configuration class to store the configuration of a [`HYV3Model`].
+    It is used to instantiate HYV3 model (HY V3 MoE model) according to
     the specified arguments.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to
@@ -52,8 +52,8 @@ class HYV3Config(PretrainedConfig):
         tie_word_embeddings (`bool`, *optional*, defaults to `False`):
             Whether to tie input and output embedding weights.
         enable_attention_fp32_softmax (`bool`, *optional*, defaults to `False`):
-            Whether to upcast attention softmax to float32. Note: the eager attention
-            path always computes softmax in float32 regardless of this setting; this
+            Whether to upcast attention softmax to float32 on eager attention
+            path always computes softmax in float32 regardless of this setting;
             flag is reserved for future use with custom attention backends.
         enable_lm_head_fp32 (`bool`, *optional*, defaults to `True`):
             Whether to upcast the LM head computation to float32.
@@ -74,15 +74,15 @@ class HYV3Config(PretrainedConfig):
         router_scaling_factor (`float`, *optional*):
             Optional multiplicative scaling factor applied to routing scores.
         use_grouped_mm (`bool`, *optional*, defaults to `False`):
-            Whether to use grouped GEMM for expert computation (not yet implemented).
+            Whether to use grouped GEMM for expert computation.
         enable_moe_fp32_combine (`bool`, *optional*, defaults to `False`):
             Whether to accumulate expert outputs in float32.
         first_k_dense_replace (`int`, *optional*, defaults to 1):
-            Number of initial decoder layers that use a dense FFN instead of MoE.
+            Number of initial decoder layers that use dense FFN instead of MoE.
         output_router_logits (`bool`, *optional*, defaults to `False`):
-            Whether to output router logits from each MoE layer. Useful for computing
-            auxiliary load-balancing loss during training. Disabled by default to avoid
-            the memory overhead of storing per-layer router tensors during inference.
+            Whether to router logits from each MoE layer.For computing
+            auxiliary load-balancing loss during training. By default to avoid
+            memory overhead of storing per-layer router tensors for inference.
 
     Example:
         ```python

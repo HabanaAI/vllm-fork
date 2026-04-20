@@ -51,7 +51,11 @@
     - [3.6.4 FP8 dynamic quant](#364-fp8-dynamic-quant)
     - [3.6.5 PaddleOCR-VL 模型](#365-paddleocr-vl-模型)
     - [3.6.6 问题解答](#366-问题解答)
-
+  - [3.7 Hunyuan-v3系列模型](#37-hunyuan-v3系列模型)
+    - [3.7.1 启动容器和下载模型权重](#371-启动容器和下载模型权重)
+    - [3.7.2 安装 vLLM](#372-安装-vllm)
+    - [3.7.3 BF16精度模型部署](#373-bf16精度模型部署)
+    - [3.7.4 FP8精度模型部署](#374-fp8精度模型部署)
 ## 1.0 环境部署
 
 ### 1.1 BIOS 设置以及操作系统设置
@@ -1352,3 +1356,110 @@ paddleocr doc_parser \
 
 - 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
 - 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。
+
+### 3.7 Hunyuan-v3系列模型
+#### 3.7.1 启动容器和下载模型权重
+
+请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。
+
+```bash
+docker run -it --name Huyuan_v3_server --runtime=habana \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+    -v /mnt/disk4:/data \
+    --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+```
+
+下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
+
+```bash
+pip install modelscope
+modelscope download --model tencent/HY3.0-BF16-Testing --local_dir /data/hf_models/HY3.0-BF16-Testing
+modelscope download --model tencent/HY3.0-FP8-Testing --local_dir /data/hf_models/HY3.0-FP8-Testing
+```
+
+#### 3.7.2 安装 vLLM
+
+为容器设置正确的网络设置，确保容器可以正常访问 github。
+使用如下命令在镜像环境安装 vLLM v1.22.0：
+
+```bash
+# install vllm
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install -r vllm-fork/requirements-hpu.txt
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# [optional] install vllm-hpu-extension to do calibration
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+pip install -e vllm-hpu-extension --no-build-isolation
+```
+
+#### 3.7.3 BF16精度模型部署
+启动 vLLM，进入启动脚本目录，启动 vLLM。
+- 以下命令启动默认上下文长度为 262144（即 **256K**）。
+- 如果部署时预热（warmup）时间过长，建议将 `-x` 调整为 `131072`（即 **128K**），以减少初始化耗时。
+- 环境变量 `PT_HPU_LAZY_MODE=1` 有更好的性能，**推荐使用**。
+
+HY3.0-BF16-Testing 模型8卡部署可使用如下命令启动（8 卡需先完成 libfabric 通信配置，详见 [1.2.1 节](#121-基础镜像及网络配置)）：
+
+```bash
+cd vllm-fork/scripts
+PT_HPU_LAZY_MODE=1 \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/HY3.0-BF16-Testing \
+-t 8 \
+-m 0,1,2,3,4,5,6,7 \
+-a 127.0.0.1:30001 \
+-x 262144 \
+-g 1024 \
+-k 8192 \
+-b 128 \
+-u 0.9 \
+-c /warmup_cache/HY3.0-BF16-Testing/
+```
+
+#### 3.7.4 FP8精度模型部署
+##### 3.7.4.1 模型权重转换
+
+Huyuan-v3的FP8的权重需要进行格式转换,其中方式如下:
+
+```bash
+cd vllm-hpu-extension
+python scripts/convert_weights_for_gaudi2.py -i /data/hf_models/HY3.0-FP8-Testing  -o /data/hf_models/HY3.0-FP8-Testing-G2 -t
+```
+
+##### 3.7.4.2 启动 vLLM
+
+启动 vLLM，进入启动脚本目录，启动 vLLM。
+- 以下命令启动默认上下文长度为 131072（即 **128K**）。
+- 如果部署时预热（warmup）时间过长，建议将 `-x` 调整为 `65536`（即 **64K**），以减少初始化耗时。
+- 请用按照3.7.4.1章节中转换出来的模型来启动vLLM。
+- 环境变量 `PT_HPU_LAZY_MODE=1 VLLM_HPU_CONVERT_TO_FP8UZ=false` 有更好的性能与精度，**推荐使用**。
+
+部署上下文长度128k，同时启用chunked prefill，prefix caching。
+- 128k上下文长度，参数'-x 131072'
+- 启用chunked prefill，参数'-b 16 -n 16 -k 8192'
+- 启用prefix caching，参数'-e "--enable-prefix-caching"'
+
+HY3.0-FP8-Testing-G2 模型4卡部署可使用如下命令启动：
+
+```bash
+cd vllm-fork/scripts
+PT_HPU_LAZY_MODE=1 \
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
+bash ./start_gaudi_vllm_server.sh -w /data/hf_models/HY3.0-FP8-Testing-G2 \
+-t 4 \
+-m 0,1,2,3 \
+-a 127.0.0.1:30001 \
+-x 131072 \
+-g 1024 \
+-k 8192 \
+-b 128 \
+-n 16 \
+-u 0.9 \
+-e "--enable-prefix-caching \
+-c /recipe_cache_HY3.0-FP8-Testing-G2/
+```
