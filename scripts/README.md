@@ -469,10 +469,9 @@ modID   CPU Affinity    NUMA Affinity
 ### Tuning the FusedSDPA kernel
 It's recommended to slice the FusedSDPA kernel calling for cases with long sequence length and/or context length. There are three environment variables are introduced to control the implementation:
 
-* `VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD`: `int`, the threshold for `kv_len` (=q_len+prefix_len) to apply the implementations, defaults to `0`.
-* `VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE`: `int`, chunk size for the slicing in the implementation, defaults to `4096`.
+* `VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD`: `int`, the threshold for `kv_len` (=q_len+prefix_len) to apply the implementations, defaults to `4096`.
+* `VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE`: `int`, chunk size for the slicing in the implementation, defaults to `VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD`.
 * `VLLM_HPU_FSDPA_SLICE_IMPL`: `str` with choices in `['split_kv', 'slice_causal', 'slice_qkv']`, used to select the implementations, defaults to `slice_qkv`.
-* `VLLM_HPU_FSDPA_SLICE_CAUSAL`: `bool`, whether to slicing the causal prompt attention, defaults to `True`.
 
 Please refer to the [PR description](https://github.com/intel/neural-compressor/pull/2361) for more details.
 
