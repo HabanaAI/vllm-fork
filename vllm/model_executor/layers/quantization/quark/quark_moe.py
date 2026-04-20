@@ -205,6 +205,7 @@ class QuarkW8A8Fp8MoEMethod(QuarkMoEMethod):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         from vllm.model_executor.layers.fused_moe import fused_experts
 

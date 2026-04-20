@@ -324,6 +324,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         if current_platform.is_hpu():
             return self.forward_hpu(
@@ -643,6 +644,7 @@ class CompressedTensorsW8A8Fp8MoECutlassMethod(CompressedTensorsMoEMethod):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
 
         assert activation == "silu", (
@@ -780,6 +782,7 @@ class CompressedTensorsW8A8Int8MoEMethod(CompressedTensorsMoEMethod):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         from vllm.model_executor.layers.fused_moe import fused_experts
 
@@ -1070,6 +1073,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         assert activation == "silu", (
             f"{activation} not supported for Marlin MoE.")
@@ -1286,6 +1290,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         from vllm.model_executor.layers.fused_moe import fused_experts
 
