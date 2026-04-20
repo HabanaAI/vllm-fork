@@ -88,11 +88,11 @@ def convert_files(input_path, output_path, input_scale_path, use_unit_quant):
                         print(f"skip {k}.")
                         tensors.update({k: tensor})
                         model_list.update({k: safetensors_path.split("/")[-1]})
-                    elif ("down_proj" in k or "gate_proj" in k or "up_proj" in k
-                            or "q_proj" in k or "k_proj" in k or "v_proj" in k
-                            or "o_proj" in k or "out_proj" in k
-                            or "in_proj_qkv" in k
-                            or "in_proj_z" in k) and "language_model" in k:
+                    elif ("down_proj" in k or "gate_proj" in k
+                          or "up_proj" in k or "q_proj" in k or "k_proj" in k
+                          or "v_proj" in k or "o_proj" in k or "out_proj" in k
+                          or "in_proj_qkv" in k
+                          or "in_proj_z" in k) and "language_model" in k:
                         weight_name = k
                         weight_scale_name = weight_name + "_scale"
                         weight_fp8, scale = dynamic_quant(
