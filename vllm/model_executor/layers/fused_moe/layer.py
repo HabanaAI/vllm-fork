@@ -925,10 +925,6 @@ class FusedMoE(torch.nn.Module):
         self.multicast_fn = self.hpu_multicast if is_hpu\
             else self.naive_multicast
 
-        # if self.scoring_func != "softmax" and not self.use_grouped_topk:
-        #     raise ValueError("Only softmax scoring function is supported for "
-        #                      "non-grouped topk.")
-
         moe = MoEConfig(
             num_experts=self.global_num_experts,
             experts_per_token=top_k,
