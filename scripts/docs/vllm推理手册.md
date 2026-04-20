@@ -923,15 +923,14 @@ Qwen3.5-27B 模型2卡部署可使用如下命令启动:
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
-VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B \
 -t 2 \
 -m 0,1 \
 -a 127.0.0.1:30001 \
 -x 262144 \
--g 1024 \
 -k 8192 \
 -b 128 \
+-n 8 \
 -u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /warmup_cache/Qwen3.5-27B/
@@ -942,14 +941,15 @@ Qwen3.5-35B-A3B 模型4卡部署可使用如下命令启动：
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
+VLLM_SUPPORT_MOE_CHUNK=true \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-35B-A3B \
 -t 4 \
 -m 0,1,2,3 \
 -a 127.0.0.1:30001 \
 -x 262144 \
--g 1024 \
 -k 8192 \
 -b 128 \
+-n 8 \
 -u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /warmup_cache/Qwen3.5-35B-A3B/
@@ -960,13 +960,14 @@ Qwen3.5-122B-A10B 模型8卡部署可使用如下命令启动（8 卡需先完�
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
+VLLM_SUPPORT_MOE_CHUNK=true \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B \
 -t 8 \
 -a 127.0.0.1:30001 \
 -x 262144 \
--g 1024 \
 -k 8192 \
 -b 128 \
+-n 8 \
 -u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /warmup_cache/Qwen3.5-122B-A10B/
@@ -983,16 +984,22 @@ tar -xvzf qwen3.5-input-scale.tar.gz
 cd ..
 ```
 
-Qwen3.5-27B 转Unit Scale FP8权重：
+Qwen3.5-27B 转FP8权重：
 
 ```bash
-python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2-Unit -u -s data/qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors
+python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2 -s data/qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors
 ```
 
-Qwen3.5-122B-A10B 转Unit Scale FP8权重：
+Qwen3.5-122B-A10B 转Unit Scale FP8权重（Qwen3.5-35B-A3B与Qwen3.6-35B-A3B也可使用类似命令）：
 
 ```bash
 python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s data/qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors
+```
+
+Qwen3.5-397B-A17B-FP8 转FP8权重：
+
+```bash
+python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-397B-A17B-FP8 -o /data/hf_models/Qwen3.5-397B-A17B-FP8-G2 -s data/qwen3.5-input-scale/qwen3.5-397b-moe-input-scale.safetensors
 ```
 
 ##### 3.4.4.2 启动 vLLM
@@ -1001,26 +1008,27 @@ python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data
 - 以下命令启动默认上下文长度为 262144（即 **256K**）。
 - 如果部署时预热（warmup）时间过长，建议将 `-x` 调整为 `131072`（即 **128K**），以减少初始化耗时。
 - 请用按照3.4.4.1章节中转换出来的模型来启动vLLM。
-- 环境变量 `PT_HPU_LAZY_MODE=0 VLLM_ENABLE_UNIT_MOE=true VLLM_HPU_CONVERT_TO_FP8UZ=false` 有更好的性能，**推荐使用**。
+- 默认环境变量使用torch.compile模式 `PT_HPU_LAZY_MODE=0`。
+- 对Qwen3.5-35B-A3B-FP8和Qwen3.5-122B-A10B-FP8模型**建议使用** `VLLM_ENABLE_UNIT_MOE=true` 以获得更好的性能。
+- 对Qwen3.5-35B-A3B-FP8和Qwen3.5-122B-A10B-FP8模型**至少使用** 2卡启动，**建议使用** 4卡。
+- 对Qwen3.5-397B-A17B-FP8模型**不使用** `VLLM_ENABLE_UNIT_MOE=true` ，**建议使用** `PT_HPU_MOE_STATIC_LIMITS=8,64`。
 - 如需进一步缩短预热时间，可额外设置环境变量 `VLLM_MOE_GRAPH_BREAK=true`，但会导致解码吞吐量下降约 6%。
-- 当前Qwen3.5系列模型不支持APC功能
+- 当前Qwen3.5系列模型**不支持**APC功能
 
-Qwen3.5-27B-FP8-G2-Unit 模型1卡部署可使用如下命令启动：
+Qwen3.5-27B-FP8-G2 模型1卡部署可使用如下命令启动：
 
 ```bash
 cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
-VLLM_ENABLE_UNIT_MOE=true \
 VLLM_HPU_CONVERT_TO_FP8UZ=false \
-VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
-bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2-Unit \
+bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2 \
 -t 1 \
 -m 0 \
 -a 127.0.0.1:30001 \
 -x 262144 \
--g 1024 \
 -k 8192 \
 -b 128 \
+-n 8 \
 -u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /recipe_cache_Qwen3.5-27B-FP8/
@@ -1033,17 +1041,38 @@ cd vllm-fork/scripts
 PT_HPU_LAZY_MODE=0 \
 VLLM_ENABLE_UNIT_MOE=true \
 VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_SUPPORT_MOE_CHUNK=true \
 bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit \
 -t 4 \
 -m 0,1,2,3 \
 -a 127.0.0.1:30001 \
 -x 262144 \
--g 1024 \
 -k 8192 \
 -b 128 \
+-n 8 \
 -u 0.7 \
 -e "--reasoning-parser qwen3" \
 -c /recipe_cache_Qwen3.5-122B-FP8/
+```
+
+Qwen3.5-397B-A17B-FP8-G2 模型8卡部署可使用如下命令启动：
+
+```bash
+cd vllm-fork/scripts
+PT_HPU_LAZY_MODE=0 \
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_SUPPORT_MOE_CHUNK=true \
+PT_HPU_MOE_STATIC_LIMITS=8,64 \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-397B-A17B-FP8-G2 \
+-t 8 \
+-a 127.0.0.1:30001 \
+-x 262144 \
+-k 8192 \
+-b 64 \
+-n 8 \
+-u 0.7 \
+-e "--reasoning-parser qwen3" \
+-c /recipe_cache_Qwen3.5-397B-FP8/
 ```
 
 ### 3.5 MiniMax-M2.5
