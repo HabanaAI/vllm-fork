@@ -77,7 +77,11 @@ def convert_files(input_path, output_path, input_scale_path, num_experts,
                            device="cpu") as tensor_file:
                 for k in tensor_file.keys():  # noqa: SIM118
                     tensor = tensor_file.get_tensor(k)
-                    if len(tensor.shape) == 3 and "conv1d" not in k:
+                    if "mtp" in k:
+                        print(f"skip {k}.")
+                        tensors.update({k: tensor})
+                        model_list.update({k: safetensors_path.split("/")[-1]})
+                    elif len(tensor.shape) == 3 and "conv1d" not in k:
                         for idx in range(num_experts):
                             if "gate_up_proj" in k:
                                 gate_weight_name = k.removesuffix(
