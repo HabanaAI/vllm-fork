@@ -999,7 +999,7 @@ python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data
 Qwen3.5-397B-A17B-FP8 转FP8权重：
 
 ```bash
-python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-397B-A17B-FP8 -o /data/hf_models/Qwen3.5-397B-A17B-FP8-G2 -s data/qwen3.5-input-scale/qwen3.5-397b-moe-input-scale.safetensors
+python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-397B-A17B -o /data/hf_models/Qwen3.5-397B-A17B-FP8-G2 -s data/qwen3.5-input-scale/qwen3.5-397b-moe-input-scale.safetensors
 ```
 
 ##### 3.4.4.2 启动 vLLM
