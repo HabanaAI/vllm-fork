@@ -1197,7 +1197,7 @@ bash start_gaudi_vllm_server.sh \
 
 #### 3.6.1 启动容器和下载模型权重
 
-请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。
+请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。  
 GLM-5.1-FP8和DeepSeek-V3.2推理需要16张Gaudi2，需要在能通过hccl互联的2机16卡分别启动容器安装vLLM。并且两台机器有共享文件夹，假设为`/share`。
 
 ```bash
@@ -1220,8 +1220,8 @@ modelscope download --model deepseek-ai/DeepSeek-V3.2 --local_dir /data/hf_model
 
 #### 3.6.2 安装 vLLM
 
-为容器设置正确的网络设置，确保容器可以正常访问 github。
-使用如下命令在镜像环境安装 vLLM v1.22.0：
+为容器设置正确的网络设置，确保容器可以正常访问 github。  
+使用如下命令在镜像环境安装 vLLM v1.22.0：  
 vllm-hpu-extension 下载到映射到容器里面的2机共享文件夹，按照3.6.1命令启动，即为/workspace
 
 ```bash
@@ -1250,7 +1250,7 @@ pip install transformers==5.2.0
 
 #### 3.6.3 2机互联配置
 
-GLM-5.1-FP8 和 DeepSeek-V3.2 vLLM需要2机16卡,参考[Gaudi2E_1.23.0_环境搭建及性能检测手册.md](https://github.com/HabanaAI/vllm-fork/blob/aice/v1.22.0/scripts/docs/Gaudi2E_1.23.0_%E7%8E%AF%E5%A2%83%E6%90%AD%E5%BB%BA%E5%8F%8A%E6%80%A7%E8%83%BD%E6%A3%80%E6%B5%8B%E6%89%8B%E5%86%8C.md#33-host-nic-scale-out-%E9%85%8D%E7%BD%AE) 3.3 Host NIC Scale-Out 配置
+GLM-5.1-FP8 和 DeepSeek-V3.2 vLLM需要2机16卡,参考[Gaudi2E_1.23.0_环境搭建及性能检测手册.md](https://github.com/HabanaAI/vllm-fork/blob/aice/v1.22.0/scripts/docs/Gaudi2E_1.23.0_%E7%8E%AF%E5%A2%83%E6%90%AD%E5%BB%BA%E5%8F%8A%E6%80%A7%E8%83%BD%E6%A3%80%E6%B5%8B%E6%89%8B%E5%86%8C.md#33-host-nic-scale-out-%E9%85%8D%E7%BD%AE) 3.3 Host NIC Scale-Out 配置。  
 按照Gaudi2E_1.23.0_环境搭建及性能检测手册.md 3.3 章说明在2台机器上运行的容器里面，安装配置好libfabric 和 hccl_ofi_wrapper 库，然后在容器内运行[hccl_demo](https://github.com/HabanaAI/hccl_demo.git) 检查2机16卡集合通信连接
 
 机器1：
@@ -1280,7 +1280,7 @@ HCCL_COMM_ID=${机器1的IP}:5555 python3 run_hccl_demo.py --test all_reduce --n
 ```
 
 此处命令中仍配置机器1的IP。
-Gaudi2E hccl_demo测试参考数据：
+Gaudi2E 16卡 hccl_demo all_reduce 测试参考数据：
 
 ```bash
 
@@ -1293,7 +1293,7 @@ Gaudi2E hccl_demo测试参考数据：
 ```
 
 #### 3.6.4 原生 FP8 模型进行校准
-对GLM-5.1-FP8 和 DeepSeek-V3.2 做FP8校准，需要通过hccl互联2机16卡。
+对GLM-5.1-FP8 和 DeepSeek-V3.2 做FP8校准，需要通过hccl互联2机16卡。  
 以下操作都在容器内运行。
 
 机器1：
@@ -1305,7 +1305,7 @@ export VLLM_HOST_IP=${机器1的IP}
 export GLOO_SOCKET_IFNAME=ens20f0
 ```
 
-创建的'/workspace/vllm-hpu-extension/calibration/quant_config_buffer.json'在共享文件夹。
+创建的'/workspace/vllm-hpu-extension/calibration/quant_config_buffer.json'在共享文件夹。  
 GLOO_SOCKET_IFNAME按照机器1实际NIC 接口名称配置
 
 机器2：
@@ -1318,7 +1318,7 @@ export GLOO_SOCKET_IFNAME=ens20f0
 
 GLOO_SOCKET_IFNAME按照机器2实际NIC 接口名称配置
 
-建立ray连接
+建立ray连接  
 机器1：
 
 ```bash
@@ -1351,7 +1351,7 @@ HPU_SIZE=16
 Calibration process done
 ```
 
-模型的校验输出文件在/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8。
+模型的校验输出文件在/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8。  
 对于模型结构里面包含DSA的模型GLM-5.1-FP8, DeepSeek-V3.2, 需要把maxabs_quant_g2.json (/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8/maxabs_quant_g2.json) 里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：
 
 ```bash
@@ -1367,7 +1367,6 @@ Calibration process done
 
 如果是模型是GLM-5.1-FP8, 请按照如下内容修改maxabs_quant_g2.json文件：
 
-```md
 ```json
 {
   "mode": "QUANTIZE",
@@ -1410,7 +1409,7 @@ export VLLM_HOST_IP=${机器1的IP}
 export GLOO_SOCKET_IFNAME=ens20f0
 ```
 
-GLOO_SOCKET_IFNAME按照机器1实际情况配置
+GLOO_SOCKET_IFNAME按照机器1实际NIC 接口名称配置
 
 机器2：
 
@@ -1422,9 +1421,9 @@ export VLLM_HOST_IP=${机器2的IP}
 export GLOO_SOCKET_IFNAME=ens20f0
 ```
 
-GLOO_SOCKET_IFNAME按照机器2实际情况配置
+GLOO_SOCKET_IFNAME按照机器2实际NIC 接口名称配置
 
-建立ray连接
+建立ray连接  
 机器1：
 
 ```bash
