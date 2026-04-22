@@ -408,7 +408,9 @@ bash calibrate_model.sh \
      -t 4 -u
 ```
 
-对于模型结构里面包含DSA的模型，例如：GLM-5-FP8, GLM-5.1-FP8, DeepSeek-V3.2, 需要把maxabs_quant_g2.json里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：
+对于模型结构里面包含DSA的模型，目前支持的主流DSA模型如下：  
+DeepSeek-V3.2，GLM-5-FP8及GLM-5.1-FP8；如需确认模型是否包含DSA结构请上[HuggingFace](https://huggingface.co)查找信息。  
+这些模型需要把maxabs_quant_g2.json里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：
 
 ```bash
       "lm_head",
@@ -1352,7 +1354,9 @@ Calibration process done
 ```
 
 模型的校验输出文件在/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8。  
-对于模型结构里面包含DSA的模型GLM-5.1-FP8, DeepSeek-V3.2, 需要把maxabs_quant_g2.json (/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8/maxabs_quant_g2.json) 里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：
+对于模型结构里面包含DSA的模型，目前支持的主流DSA模型如下：  
+DeepSeek-V3.2，GLM-5-FP8及GLM-5.1-FP8；如需确认模型是否包含DSA结构请上[HuggingFace](https://huggingface.co)查找信息。  
+这些模型需要把maxabs_quant_g2.json (/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8/maxabs_quant_g2.json) 里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：  
 
 ```bash
       "lm_head",
