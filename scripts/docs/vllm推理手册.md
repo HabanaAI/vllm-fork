@@ -996,7 +996,7 @@ tar -xvzf qwen3.5-input-scale.tar.gz
 cd ..
 ```
 
-Qwen3.5-27B 转FP8权重：
+Qwen3.5-27B 转FP8权重（Qwen3.6-27B也可使用类似命令）：
 
 ```bash
 python3 convert_for_qwen3_5_dense.py -i /data/hf_models/Qwen3.5-27B -o /data/hf_models/Qwen3.5-27B-FP8-G2 -s data/qwen3.5-input-scale/qwen3.5-27b-dense-input-scale.safetensors
@@ -1008,7 +1008,7 @@ Qwen3.5-122B-A10B 转Unit Scale FP8权重（Qwen3.5-35B-A3B与Qwen3.6-35B-A3B也
 python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-122B-A10B -o /data/hf_models/Qwen3.5-122B-A10B-FP8-G2-Unit -u -s data/qwen3.5-input-scale/qwen3.5-122b-moe-input-scale.safetensors
 ```
 
-Qwen3.5-397B-A17B-FP8 转FP8权重：
+Qwen3.5-397B-A17B 转FP8权重：
 
 ```bash
 python3 convert_for_qwen3_5_moe.py -i /data/hf_models/Qwen3.5-397B-A17B -o /data/hf_models/Qwen3.5-397B-A17B-FP8-G2 -s data/qwen3.5-input-scale/qwen3.5-397b-moe-input-scale.safetensors
@@ -1039,7 +1039,7 @@ bash ./start_gaudi_vllm_server.sh -w /data/hf_models/Qwen3.5-27B-FP8-G2 \
 -a 127.0.0.1:30001 \
 -x 262144 \
 -k 8192 \
--b 128 \
+-b 32 \
 -n 8 \
 -u 0.7 \
 -e "--reasoning-parser qwen3" \
