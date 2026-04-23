@@ -664,6 +664,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ):
         if self.use_marlin:
             topk_weights, topk_ids = FusedMoE.select_experts(

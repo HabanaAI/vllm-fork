@@ -469,12 +469,18 @@ modID   CPU Affinity    NUMA Affinity
 ### Tuning the FusedSDPA kernel
 It's recommended to slice the FusedSDPA kernel calling for cases with long sequence length and/or context length. There are three environment variables are introduced to control the implementation:
 
-* `VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD`: `int`, the threshold for `kv_len` (=q_len+prefix_len) to apply the implementations, defaults to `0`.
+* `VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD`: `int`, the threshold for `kv_len` (=q_len+prefix_len) to apply the implementations, defaults to `0` (disabled).
 * `VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE`: `int`, chunk size for the slicing in the implementation, defaults to `4096`.
 * `VLLM_HPU_FSDPA_SLICE_IMPL`: `str` with choices in `['split_kv', 'slice_causal', 'slice_qkv']`, used to select the implementations, defaults to `slice_qkv`.
 * `VLLM_HPU_FSDPA_SLICE_CAUSAL`: `bool`, whether to slicing the causal prompt attention, defaults to `True`.
 
 Please refer to the [PR description](https://github.com/intel/neural-compressor/pull/2361) for more details.
+
+> [!IMPORTANT]
+> **For OOM issue of long `max_model_len` running**: Please set `VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD` to a valid value like `8192` to enable slicing for the FusedSDPA kernel to reduce the peak memory usage especially when the chunked prefill or APC are enabled.
+
+> [!WARNING]
+> The slicing for the FusedSDPA kernel may impact the accuracy, use `longbench` to confirm.
 
 ### Profile the LLM engine
 The following 4 ENVs are used to control the device profiling:

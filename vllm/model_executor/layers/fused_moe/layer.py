@@ -399,6 +399,7 @@ class FusedMoEMethodBase(QuantizeMethodBase):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -543,6 +544,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ) -> torch.Tensor:
         return self.forward(
             x=x,
@@ -559,7 +561,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias,
             activation=activation,
-            apply_router_weight_on_input=apply_router_weight_on_input)
+            apply_router_weight_on_input=apply_router_weight_on_input,
+            router_scaling_factor=router_scaling_factor)
 
     def forward_cuda(
         self,
@@ -668,6 +671,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
         **kwargs,
     ):
         input_shape = x.shape
@@ -696,13 +700,15 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             else:
                 raise ValueError(
                     f"Unsupported scoring functions: {scoring_func}")
-
             if e_score_correction_bias is not None:
                 topk_weights = topk_weights + e_score_correction_bias
 
             topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
             if renormalize:
                 topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
+
+            if router_scaling_factor is not None:
+                topk_weights = topk_weights * router_scaling_factor
         topk_ids = topk_ids.to(torch.int64)
         topk_weights = topk_weights.to(x.dtype)
         if layer.dp_size > 1:
@@ -859,6 +865,7 @@ class FusedMoE(torch.nn.Module):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        router_scaling_factor: Optional[float] = None,
     ):
         super().__init__()
 
@@ -914,12 +921,9 @@ class FusedMoE(torch.nn.Module):
         self.e_score_correction_bias = e_score_correction_bias
         self.apply_router_weight_on_input = apply_router_weight_on_input
         self.activation = activation
+        self.router_scaling_factor = router_scaling_factor
         self.multicast_fn = self.hpu_multicast if is_hpu\
             else self.naive_multicast
-
-        if self.scoring_func != "softmax" and not self.use_grouped_topk:
-            raise ValueError("Only softmax scoring function is supported for "
-                             "non-grouped topk.")
 
         moe = MoEConfig(
             num_experts=self.global_num_experts,
@@ -1568,6 +1572,7 @@ class FusedMoE(torch.nn.Module):
             e_score_correction_bias=self.e_score_correction_bias,
             activation=self.activation,
             apply_router_weight_on_input=self.apply_router_weight_on_input,
+            router_scaling_factor=self.router_scaling_factor,
         )
 
         if self.dp_size > 1:

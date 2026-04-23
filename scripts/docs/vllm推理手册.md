@@ -44,14 +44,24 @@
     - [3.5.2 安装 vLLM](#352-安装-vllm)
     - [3.5.3 模型权重转换](#353-模型权重转换)
     - [3.5.4 启动 vLLM](#354-启动-vllm)
-  - [3.6 多模态模型](#36-多模态模型)
-    - [3.6.1 Qwen 系列多模态模型](#361-qwen-系列多模态模型)
-    - [3.6.2 client 端请求格式样例](#362-client-端请求格式样例)
-    - [3.6.3 FP8 static quant](#363-fp8-static-quant)
-    - [3.6.4 FP8 dynamic quant](#364-fp8-dynamic-quant)
-    - [3.6.5 PaddleOCR-VL 模型](#365-paddleocr-vl-模型)
-    - [3.6.6 问题解答](#366-问题解答)
-
+  - [3.6 GLM-5.1-FP8/DeepSeek-V3.2](#36-glm-5.1-fp8-deepseek-v3.2)
+    - [3.6.1 启动容器和下载模型权重](#361-启动容器和下载模型权重)
+    - [3.6.2 安装 vLLM](#362-安装-vllm)
+    - [3.6.3 2机互联配置](#363-2机互联配置)
+    - [3.6.4 原生 FP8 模型进行校准](#364-原生-fp8-模型进行校准)
+    - [3.6.5 启动 vLLM](#365-启动-vllm)
+  - [3.7 多模态模型](#37-多模态模型)
+    - [3.7.1 Qwen 系列多模态模型](#371-qwen-系列多模态模型)
+    - [3.7.2 client 端请求格式样例](#372-client-端请求格式样例)
+    - [3.7.3 FP8 static quant](#373-fp8-static-quant)
+    - [3.7.4 FP8 dynamic quant](#374-fp8-dynamic-quant)
+    - [3.7.5 PaddleOCR-VL 模型](#375-paddleocr-vl-模型)
+    - [3.7.6 问题解答](#376-问题解答)
+  - [3.8 Hunyuan-v3系列模型](#38-hunyuan-v3系列模型)
+    - [3.8.1 启动容器和下载模型权重](#381-启动容器和下载模型权重)
+    - [3.8.2 安装 vLLM](#382-安装-vllm)
+    - [3.8.3 BF16精度模型部署](#383-bf16精度模型部署)
+    - [3.8.4 FP8精度模型部署](#384-fp8精度模型部署)
 ## 1.0 环境部署
 
 ### 1.1 BIOS 设置以及操作系统设置
@@ -398,7 +408,9 @@ bash calibrate_model.sh \
      -t 4 -u
 ```
 
-对于模型结构里面包含DSA的模型，例如：GLM-5-FP8, GLM-5.1-FP8, DeepSeek-V3.2, 需要把maxabs_quant_g2.json里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：
+对于模型结构里面包含DSA的模型，目前支持的主流DSA模型如下：  
+DeepSeek-V3.2，GLM-5-FP8及GLM-5.1-FP8；如需确认模型是否包含DSA结构请上[HuggingFace](https://huggingface.co)查找信息。  
+这些模型需要把maxabs_quant_g2.json里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：
 
 ```bash
       "lm_head",
@@ -1183,7 +1195,273 @@ bash start_gaudi_vllm_server.sh \
 -e "--enable-prefix-caching --tool-call-parser minimax_m2 --reasoning-parser deepseek_r1 --enable-auto-tool-choice"
 ```
 
-### 3.6 多模态模型
+### 3.6 GLM-5.1-FP8/DeepSeek-V3.2
+
+#### 3.6.1 启动容器和下载模型权重
+
+请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。  
+GLM-5.1-FP8和DeepSeek-V3.2推理需要16张Gaudi2，需要在能通过hccl互联的2机16卡分别启动容器安装vLLM。并且两台机器有共享文件夹，假设为`/share`。
+
+```bash
+docker run -it --name glm_deepseek_server --runtime=habana \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+    -v /mnt/disk4:/data \
+    -v /share:/workspace \
+    --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+```
+
+下载模型权重（假设模型权重下载到 `/data/hf_models` 目录），2台机器的容器都能通过/data/hf_models访问到模型文件：
+
+```bash
+pip install modelscope
+modelscope download --model zai-org/GLM-5.1-FP8 --local_dir /data/hf_models/GLM-5.1-FP8
+modelscope download --model deepseek-ai/DeepSeek-V3.2 --local_dir /data/hf_models/DeepSeek-V3.2
+```
+
+#### 3.6.2 安装 vLLM
+
+为容器设置正确的网络设置，确保容器可以正常访问 github。  
+使用如下命令在镜像环境安装 vLLM v1.22.0：  
+vllm-hpu-extension 下载到映射到容器里面的2机共享文件夹，按照3.6.1命令启动，即为/workspace
+
+```bash
+# install vllm
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+cd vllm-fork
+git checkout aice/v1.22.0
+cd ..
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install -r vllm-fork/requirements-hpu.txt
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# install vllm-hpu-extension to do calibration
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+cd vllm-hpu-extension
+git checkout aice/v1.22.0
+cd ..
+pip install -e vllm-hpu-extension --no-build-isolation
+```
+
+如果运行GLM-5.1-FP8，需要手动升级transformers到5.2.0
+
+```bash
+pip install transformers==5.2.0
+```
+
+#### 3.6.3 2机互联配置
+
+GLM-5.1-FP8 和 DeepSeek-V3.2 vLLM需要2机16卡,参考[Gaudi2E_1.23.0_环境搭建及性能检测手册.md](https://github.com/HabanaAI/vllm-fork/blob/aice/v1.22.0/scripts/docs/Gaudi2E_1.23.0_%E7%8E%AF%E5%A2%83%E6%90%AD%E5%BB%BA%E5%8F%8A%E6%80%A7%E8%83%BD%E6%A3%80%E6%B5%8B%E6%89%8B%E5%86%8C.md#33-host-nic-scale-out-%E9%85%8D%E7%BD%AE) 3.3 Host NIC Scale-Out 配置。  
+按照Gaudi2E_1.23.0_环境搭建及性能检测手册.md 3.3 章说明在2台机器上运行的容器里面，安装配置好libfabric 和 hccl_ofi_wrapper 库，然后在容器内运行[hccl_demo](https://github.com/HabanaAI/hccl_demo.git) 检查2机16卡集合通信连接
+
+机器1：
+
+```bash
+git clone https://github.com/HabanaAI/hccl_demo hccl_demo_node0
+```
+
+机器2:
+
+```bash
+git clone https://github.com/HabanaAI/hccl_demo hccl_demo_node1
+```
+
+机器1:
+
+```bash
+cd hccl_demo_node0
+HCCL_COMM_ID=${机器1的IP}:5555 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 0 --size 32m --ranks_per_node 8
+```
+
+机器2:
+
+```bash
+cd hccl_demo_node1
+HCCL_COMM_ID=${机器1的IP}:5555 python3 run_hccl_demo.py --test all_reduce --nranks 16 --loop 1000 --node_id 1 --size 32m --ranks_per_node 8
+```
+
+此处命令中仍配置机器1的IP。
+Gaudi2E 16卡 hccl_demo all_reduce 测试参考数据：
+
+```bash
+
+#########################################################################################
+[BENCHMARK] hcclAllReduce(dataSize=33554432, count=8388608, dtype=float, iterations=1000)
+[BENCHMARK]     NW Bandwidth   : 89.982557 GB/s
+[BENCHMARK]     Algo Bandwidth : 47.990697 GB/s
+#########################################################################################
+
+```
+
+#### 3.6.4 原生 FP8 模型进行校准
+对GLM-5.1-FP8 和 DeepSeek-V3.2 做FP8校准，需要通过hccl互联2机16卡。  
+以下操作都在容器内运行。
+
+机器1：
+
+```bash
+touch /workspace/vllm-hpu-extension/calibration/quant_config_buffer.json
+export QUANT_CONFIG=/workspace/vllm-hpu-extension/calibration/quant_config_buffer.json
+export VLLM_HOST_IP=${机器1的IP}
+export GLOO_SOCKET_IFNAME=ens20f0
+```
+
+创建的'/workspace/vllm-hpu-extension/calibration/quant_config_buffer.json'在共享文件夹。  
+GLOO_SOCKET_IFNAME按照机器1实际NIC 接口名称配置
+
+机器2：
+
+```bash
+export QUANT_CONFIG=/workspace/vllm-hpu-extension/calibration/quant_config_buffer.json
+export VLLM_HOST_IP=${机器2的IP}
+export GLOO_SOCKET_IFNAME=ens20f0
+```
+
+GLOO_SOCKET_IFNAME按照机器2实际NIC 接口名称配置
+
+建立ray连接  
+机器1：
+
+```bash
+ray start --head --port=6379 --resources='{"HPU": 8, "TPU": 0}'
+```
+
+机器2：
+
+```bash
+ray start --address='${机器1的IP}:6379' --resources='{"HPU": 8, "TPU": 0}'
+```
+
+在机器1运行下面命令做精度校准
+
+```bash
+cd vllm-hpu-extension/calibration
+MODEL=/data/HF_models/GLM-5.1-FP8
+HPU_SIZE=16
+./calibrate_model.sh \
+     -m $MODEL \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t $HPU_SIZE \
+     -u
+```
+
+精度校准需要约2小时，精度校准结束时会输出打印
+
+```bash
+Calibration process done
+```
+
+模型的校验输出文件在/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8。  
+对于模型结构里面包含DSA的模型，目前支持的主流DSA模型如下：  
+DeepSeek-V3.2，GLM-5-FP8及GLM-5.1-FP8；如需确认模型是否包含DSA结构请上[HuggingFace](https://huggingface.co)查找信息。  
+这些模型需要把maxabs_quant_g2.json (/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8/maxabs_quant_g2.json) 里的scale_method修改为maxabs_arbitrary, 并且在blocklist里面添加以下内容：  
+
+```bash
+      "lm_head",
+      "mlp\\.gate\\b",
+      "visual",
+      "batch2block_matmul",
+      "block2batch_matmul",
+      "latent_cache_k",
+      "matmul_qk",
+      "matmul_av"
+```
+
+如果是模型是GLM-5.1-FP8, 请按照如下内容修改maxabs_quant_g2.json文件：
+
+```json
+{
+  "mode": "QUANTIZE",
+  "observer": "maxabs",
+  "scale_method": "maxabs_arbitrary",
+  "scale_format": "scalar",
+  "allowlist": {
+    "types": [],
+    "names": []
+  },
+  "blocklist": {
+    "types": [
+      "Softmax"
+    ],
+    "names": [
+      "lm_head",
+      "mlp\\.gate\\b",
+      "visual",
+      "batch2block_matmul",
+      "block2batch_matmul",
+      "latent_cache_k",
+      "matmul_qk",
+      "matmul_av"
+    ]
+  },
+  "dump_stats_path": "/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8/g2/inc_output",
+  "fp8_config": "E4M3"
+```
+
+#### 3.6.5 启动 vLLM
+先关闭ray连接，重新配置环境变量，再重连ray。
+
+机器1：
+
+```bash
+ray stop -f
+pkill -9 -f ray
+export QUANT_CONFIG=/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8/maxabs_quant_g2.json
+export VLLM_HOST_IP=${机器1的IP}
+export GLOO_SOCKET_IFNAME=ens20f0
+```
+
+GLOO_SOCKET_IFNAME按照机器1实际NIC 接口名称配置
+
+机器2：
+
+```bash
+ray stop -f
+pkill -9 -f ray
+export QUANT_CONFIG=/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8/maxabs_quant_g2.json
+export VLLM_HOST_IP=${机器2的IP}
+export GLOO_SOCKET_IFNAME=ens20f0
+```
+
+GLOO_SOCKET_IFNAME按照机器2实际NIC 接口名称配置
+
+建立ray连接  
+机器1：
+
+```bash
+ray start --head --port=6379 --resources='{"HPU": 8, "TPU": 0}'
+```
+
+机器2：
+
+```bash
+ray start --address='${机器1的IP}:6379' --resources='{"HPU": 8, "TPU": 0}'
+```
+
+启动vLLM
+
+```bash
+VLLM_HPU_FSDPA_SLICE_CAUSAL=false \
+VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE=8192 \
+VLLM_HPU_FSDPA_SLICE_IMPL=slice_qkv \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
+VLLM_GRAPH_RESERVED_MEM=0.4 \
+bash start_gaudi_vllm_server.sh \
+-w /data/HF_models/GLM-5.1-FP8 \
+-t 16 \
+-d fp8 \
+-b 16 \
+-k 8192 \
+-g 32768 \
+-x 202752 \
+-u 0.8 \
+-e " --enable-prefix-caching" \
+-c ./vllm_warmup_cache_glm_5.1_fp8
+```
+
+### 3.7 多模态模型
 
 如果要做音频处理，需要安装音频相关的库。
 
@@ -1191,7 +1469,7 @@ bash start_gaudi_vllm_server.sh \
 pip install vllm[audio]
 ```
 
-#### 3.6.1 Qwen 系列多模态模型
+#### 3.7.1 Qwen 系列多模态模型
 
 **启动服务**\
 **Qwen2-VL**: Support Image and Video inputs
@@ -1257,7 +1535,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
 - `--limit-mm-per-prompt` 设置每个 prompt 中每种多模态数据的最大个数
 - `--mm_processor_kwargs max_pixels=1003520` 限制输入图片最大尺寸。超过的图片会被保持宽高比例缩小。
 
-#### 3.6.2 client 端请求格式样例
+#### 3.7.2 client 端请求格式样例
 
 多模态 client 端请求格式可以参考脚本 [openai_chat_completion_client_for_multimodal.py](../examples/online_serving/openai_chat_completion_client_for_multimodal.py)
 
@@ -1272,7 +1550,7 @@ python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
     -c audio
 ```
 
-#### 3.6.3 FP8 static quant
+#### 3.7.3 FP8 static quant
 
 *static quant*有更好的性能。 **推荐使用**。
 
@@ -1317,7 +1595,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     --max-model-len 131072
 ```
 
-#### 3.6.4 FP8 dynamic quant
+#### 3.7.4 FP8 dynamic quant
 
 *dynamic quant*流程更简单不需要校准，而且精度更高。
 
@@ -1343,7 +1621,7 @@ PT_HPU_LAZY_MODE=1 VLLM_GRAPH_RESERVED_MEM=0.5 vllm serve \
     --mm_processor_kwargs max_pixels=1003520,min_pixels=3136
 ```
 
-#### 3.6.5 PaddleOCR-VL 模型
+#### 3.7.5 PaddleOCR-VL 模型
 **启动服务**
 
 ```bash
@@ -1377,7 +1655,114 @@ paddleocr doc_parser \
     --save_path ./output
 ```
 
-#### 3.6.6 问题解答
+#### 3.7.6 问题解答
 
 - 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
 - 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。
+
+### 3.8 Hunyuan-v3系列模型
+#### 3.8.1 启动容器和下载模型权重
+
+请用如下命令启动容器，假设 `/mnt/disk4` 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。
+
+```bash
+docker run -it --name Huyuan_v3_server --runtime=habana \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+    -v /mnt/disk4:/data \
+    --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
+    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+```
+
+下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
+
+```bash
+pip install modelscope
+modelscope download --model tencent/HY3.0-BF16-Testing --local_dir /data/hf_models/HY3.0-BF16-Testing
+modelscope download --model tencent/HY3.0-FP8-Testing --local_dir /data/hf_models/HY3.0-FP8-Testing
+```
+
+#### 3.8.2 安装 vLLM
+
+为容器设置正确的网络设置，确保容器可以正常访问 github。
+使用如下命令在镜像环境安装 vLLM v1.22.0：
+
+```bash
+# install vllm
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install -r vllm-fork/requirements-hpu.txt
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# [optional] install vllm-hpu-extension to do calibration
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+pip install -e vllm-hpu-extension --no-build-isolation
+```
+
+#### 3.8.3 BF16精度模型部署
+启动 vLLM，进入启动脚本目录，启动 vLLM。
+- 以下命令启动默认上下文长度为 262144（即 **256K**）。
+- 如果部署时预热（warmup）时间过长，建议将 `-x` 调整为 `131072`（即 **128K**），以减少初始化耗时。
+- 环境变量 `PT_HPU_LAZY_MODE=1` 有更好的性能，**推荐使用**。
+
+HY3.0-BF16-Testing 模型8卡部署可使用如下命令启动（8 卡需先完成 libfabric 通信配置，详见 [1.2.1 节](#121-基础镜像及网络配置)）：
+
+```bash
+cd vllm-fork/scripts
+PT_HPU_LAZY_MODE=1 \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
+bash start_gaudi_vllm_server.sh -w /data/hf_models/HY3.0-BF16-Testing \
+-t 8 \
+-m 0,1,2,3,4,5,6,7 \
+-a 127.0.0.1:30001 \
+-x 262144 \
+-g 1024 \
+-k 8192 \
+-b 128 \
+-u 0.9 \
+-c /warmup_cache/HY3.0-BF16-Testing/
+```
+
+#### 3.8.4 FP8精度模型部署
+##### 3.8.4.1 模型权重转换
+
+Huyuan-v3的FP8的权重需要进行格式转换,其中方式如下:
+
+```bash
+cd vllm-hpu-extension
+python scripts/convert_weights_for_gaudi2.py -i /data/hf_models/HY3.0-FP8-Testing  -o /data/hf_models/HY3.0-FP8-Testing-G2 -t
+```
+
+##### 3.8.4.2 启动 vLLM
+
+启动 vLLM，进入启动脚本目录，启动 vLLM。
+- 以下命令启动默认上下文长度为 131072（即 **128K**）。
+- 如果部署时预热（warmup）时间过长，建议将 `-x` 调整为 `65536`（即 **64K**），以减少初始化耗时。
+- 请用按照3.8.4.1章节中转换出来的模型来启动vLLM。
+- 环境变量 `PT_HPU_LAZY_MODE=1 VLLM_HPU_CONVERT_TO_FP8UZ=false` 有更好的性能与精度，**推荐使用**。
+
+部署上下文长度128k，同时启用chunked prefill，prefix caching。
+- 128k上下文长度，参数'-x 131072'
+- 启用chunked prefill，参数'-b 16 -n 16 -k 8192'
+- 启用prefix caching，参数'-e "--enable-prefix-caching"'
+
+HY3.0-FP8-Testing-G2 模型4卡部署可使用如下命令启动：
+
+```bash
+cd vllm-fork/scripts
+PT_HPU_LAZY_MODE=1 \
+VLLM_HPU_CONVERT_TO_FP8UZ=false \
+VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=8192 \
+bash ./start_gaudi_vllm_server.sh -w /data/hf_models/HY3.0-FP8-Testing-G2 \
+-t 4 \
+-m 0,1,2,3 \
+-a 127.0.0.1:30001 \
+-x 131072 \
+-g 1024 \
+-k 8192 \
+-b 128 \
+-n 16 \
+-u 0.9 \
+-e "--enable-prefix-caching \
+-c /recipe_cache_HY3.0-FP8-Testing-G2/
+```

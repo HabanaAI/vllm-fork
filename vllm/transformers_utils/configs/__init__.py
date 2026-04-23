@@ -14,6 +14,7 @@ from vllm.transformers_utils.configs.exaone import ExaoneConfig
 # `FalconConfig` class from the official HuggingFace transformers library.
 from vllm.transformers_utils.configs.falcon import RWConfig
 from vllm.transformers_utils.configs.h2ovl import H2OVLChatConfig
+from vllm.transformers_utils.configs.hy_v3 import HYV3Config
 from vllm.transformers_utils.configs.internvl import InternVLChatConfig
 from vllm.transformers_utils.configs.jais import JAISConfig
 from vllm.transformers_utils.configs.kimi_vl import KimiVLConfig
@@ -47,5 +48,5 @@ __all__ = [
     "NemotronConfig", "NemotronHConfig", "NVLM_D_Config", "OvisConfig",
     "SkyworkR1VChatConfig", "SolarConfig", "Telechat2Config", "UltravoxConfig",
     "Qwen3NextConfig", "Qwen3_5Config", "Qwen3_5TextConfig",
-    "Qwen3_5MoeConfig", "Qwen3_5MoeTextConfig"
+    "Qwen3_5MoeConfig", "Qwen3_5MoeTextConfig", "HYV3Config"
 ]
