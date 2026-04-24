@@ -217,7 +217,9 @@ def fixed_sub_image_list(model):
     # supports 0~6 excluding 1. 1 means the sub image is equal
     # to global image, which is not allowed.
     return [i for i in range(6+1) if i!=1] \
-        if model.config.model_type == 'deepseek_ocr' else None
+        if hasattr(model, 'config') and \
+            model.config.model_type == 'deepseek_ocr' \
+        else None
 
 
 def pad_flat_tensor(tensor, desired_size):
