@@ -43,7 +43,7 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, Cohere2Config,
                                              Qwen3_5MoeConfig, Qwen3NextConfig,
                                              RWConfig, SkyworkR1VChatConfig,
                                              SolarConfig, Telechat2Config,
-                                             UltravoxConfig)
+                                             UltravoxConfig, Step3p5Config)
 # yapf: enable
 from vllm.transformers_utils.utils import check_gguf_file
 from vllm.utils import resolve_obj_by_qualname
@@ -88,6 +88,7 @@ _CONFIG_REGISTRY: dict[str, type[PretrainedConfig]] = {
     "telechat": Telechat2Config,
     "ultravox": UltravoxConfig,
     "qwen3_next": Qwen3NextConfig,
+    "step3p5": Step3p5Config,
     "qwen3_5": Qwen3_5Config,
     "qwen3_5_moe": Qwen3_5MoeConfig,
     "hy_v3": HYV3Config,

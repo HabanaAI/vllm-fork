@@ -185,6 +185,42 @@ class GeluAndMul(CustomOp):
     def extra_repr(self) -> str:
         return f'approximate={repr(self.approximate)}'
 
+# --8<-- [start:swiglustep_and_mul]
+@CustomOp.register("swiglustep_and_mul")
+class SwigluStepAndMul(CustomOp):
+    """An activation function for SwiGLU with clamping.
+
+    Computes x -> silu(x[:d]).clamp(max=limit) * x[d:].clamp(-limit, limit)
+    where d = x.shape[-1] // 2.
+
+    Shapes:
+        x: (num_tokens, 2 * d) or (batch_size, seq_len, 2 * d)
+        return: (num_tokens, d) or (batch_size, seq_len, d)
+    """
+
+    def __init__(self, limit: float = 7.0):
+        super().__init__()
+        if limit is None:
+            raise ValueError("SwigluStepAndMul requires limit to be set.")
+        self.limit = limit
+
+    def forward_native(self, x: torch.Tensor) -> torch.Tensor:
+        """PyTorch-native implementation equivalent to forward()."""
+        gate, up = x.chunk(2, dim=-1)
+        gate = F.silu(gate)
+        gate = gate.clamp(max=self.limit)
+        up = up.clamp(min=-self.limit, max=self.limit)
+        return gate * up
+
+    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
+        d = x.shape[-1] // 2
+        output_shape = x.shape[:-1] + (d,)
+        out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
+        swiglustep_and_mul_triton(out, x, self.limit)
+        return out
+
+    def extra_repr(self) -> str:
+        return f"limit={repr(self.limit)}"
 
 @CustomOp.register("gelu_new")
 class NewGELU(CustomOp):

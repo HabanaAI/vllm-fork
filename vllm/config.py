@@ -1207,6 +1207,8 @@ class ModelConfig:
             "num_key_value_heads",
             # For ChatGLM:
             "multi_query_group_num",
+            # For Step-3.5-Flash:
+            "num_attention_groups",
         ]
         for attr in attributes:
             num_kv_heads = getattr(self.hf_text_config, attr, None)
