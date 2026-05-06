@@ -2518,7 +2518,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 if self.interleaved_sliding_window is not None:
                     sliding_window_blocks = (self.interleaved_sliding_window //
-                                             self.block_size)
+                                             self.block_size) + 1
                     window_block_table = block_table[-sliding_window_blocks:]
                     window_block_tables.append(window_block_table)
 
