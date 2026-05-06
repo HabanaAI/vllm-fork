@@ -701,9 +701,15 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 raise ValueError(
                     f"Unsupported scoring functions: {scoring_func}")
             if e_score_correction_bias is not None:
-                topk_weights = topk_weights + e_score_correction_bias
+                topk_weights_select = topk_weights + e_score_correction_bias
+            else:
+                topk_weights_select = topk_weights
 
-            topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
+            topk_weights_select, topk_ids = torch.topk(topk_weights_select, top_k, dim=-1)
+            if(scoring_func == "sigmoid" and e_score_correction_bias is not None):
+                topk_weights = topk_weights.gather(1, topk_ids)
+            else:
+                topk_weights = topk_weights_select
             if renormalize:
                 topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
 
