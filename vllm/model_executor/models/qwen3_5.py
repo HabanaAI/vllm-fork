@@ -166,12 +166,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
             prefix=prefix,
         )
 
-    def adapt_gdn_inputs(self, hidden_states, attn_metadata):
-
-        assert hidden_states.ndim == 3, \
-            f"unexpected hidden_states shape: {hidden_states.shape}"
-
-        #  1) input projection
+    def generate_qkvzba(self, hidden_states):
         mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
         qkv_size = (self.key_dim * 2 + self.value_dim) // self.tp_size
         z_size = self.value_dim // self.tp_size
@@ -183,6 +178,15 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         b = b.contiguous().float()
         a = a.contiguous().float()
         mixed_qkv = mixed_qkv.float()
+        return mixed_qkv, b, a
+
+    def adapt_gdn_inputs(self, hidden_states, attn_metadata):
+
+        assert hidden_states.ndim == 3, \
+            f"unexpected hidden_states shape: {hidden_states.shape}"
+
+        #  1) input projection
+        mixed_qkv, b, a = generate_qkvzba(hidden_states)
 
         beta = b.sigmoid().to(hidden_states.dtype)
         g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
@@ -454,17 +458,7 @@ class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
         # ============================================================
         # Part 1: Input Projection
         # ============================================================
-        mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
-        qkv_size = (self.key_dim * 2 + self.value_dim) // self.tp_size
-        z_size = self.value_dim // self.tp_size
-        mixed_qkv, z = mixed_qkvz.split([qkv_size, z_size], dim=-1)
-        z = z.reshape(z.size(0), z.size(1), -1, self.head_v_dim)
-        ba, _ = self.in_proj_ba(hidden_states)
-        b, a = ba.chunk(2, dim=-1)
-
-        b = b.contiguous().float()
-        a = a.contiguous().float()
-        mixed_qkv = mixed_qkv.float()
+        mixed_qkv, b, a = generate_qkvzba(hidden_states)
 
         # ============================================================
         # Part 2: Core Attention (Custom Op)

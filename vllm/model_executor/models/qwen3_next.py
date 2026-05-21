@@ -479,16 +479,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         value = rearrange(value, 'l (h d) -> 1 l h d', d=self.head_v_dim)
         return query, key, value
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-    ):
-        forward_context = get_forward_context()
-        attn_metadata: AttentionMetadata = forward_context.attn_metadata
-
-        conv_state = self.conv_state
-        ssm_state = self.ssm_state
-
+    def generate_qkvzba(self, hidden_states):
         projected_states_qkvz, _ = self.in_proj_qkvz(hidden_states)
         projected_states_ba, _ = self.in_proj_ba(hidden_states)
 
@@ -500,133 +491,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         query, key, value = (x.reshape(x.shape[0], x.shape[1], -1).float() \
             for x in (query, key, value))
         mixed_qkv = torch.cat((query, key, value), dim=-1)
+        return mixed_qkv, b, a
 
-        mamba_cache_prefill_indices = attn_metadata.mamba_cache_prefill_indices
-        mamba_cache_decode_indices = attn_metadata.mamba_cache_decode_indices
-
-        if self.conv1d_weight is None:
-            self.conv1d_weight = self.conv1d.weight.squeeze(1).transpose(
-                0, 1).flatten().reshape(self.conv_kernel_size,
-                                        self.conv_dim // self.tp_size).float()
-            del self.conv1d.weight
-
-        if attn_metadata.is_prompt:
-            bs, seq_len, qkv_dim = mixed_qkv.shape
-            conv_state_indices = attn_metadata.conv_state_indices
-            prefill_conv_state = torch.index_select(
-                mixed_qkv.reshape(-1, qkv_dim),
-                dim=0,
-                index=conv_state_indices).reshape(bs, -1, qkv_dim)
-            mixed_qkv = _save_conv_state(mixed_qkv, prefill_conv_state,
-                                         conv_state,
-                                         mamba_cache_prefill_indices)
-
-            mixed_qkv_with_pad = F.pad(mixed_qkv,
-                                       (0, 0, self.conv_kernel_size - 1, 0))
-            for idx in range(self.conv_kernel_size):
-                qkv_slice = mixed_qkv_with_pad[:, idx:(idx + seq_len), :]
-                conv1d_weight_slice = self.conv1d_weight[idx]
-                qkv_conv = qkv_slice * conv1d_weight_slice
-                if idx == 0:
-                    mixed_qkv_non_spec = qkv_conv
-                else:
-                    mixed_qkv_non_spec.add_(qkv_conv)
-
-            mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
-
-        else:
-            mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
-                mixed_qkv,
-                conv_state,
-                self.conv1d_weight,
-                self.conv1d.bias,
-                self.activation,
-                conv_state_indices=mamba_cache_decode_indices,
-            )
-            mixed_qkv_non_spec = _save_conv_state(
-                mixed_qkv_non_spec,
-                cur_conv_state,
-                conv_state,
-                mamba_cache_decode_indices,
-            )
-
-        query, key, value = torch.split(
-            mixed_qkv_non_spec.to(hidden_states.dtype),
-            [
-                self.key_dim // self.tp_size,
-                self.key_dim // self.tp_size,
-                self.value_dim // self.tp_size,
-            ],
-            dim=-1,
-        )
-        query_non_spec = query.reshape(query.shape[0], query.shape[1], -1,
-                                       self.head_k_dim)
-        key_non_spec = key.reshape(key.shape[0], key.shape[1], -1,
-                                   self.head_k_dim)
-        value_non_spec = value.reshape(value.shape[0], value.shape[1], -1,
-                                       self.head_v_dim)
-
-        beta = b.sigmoid().to(hidden_states.dtype)
-        g = -self.A_log.float().exp() * F.softplus(a.float() + self.dt_bias)
-
-        if self.num_v_heads // self.num_k_heads > 1:
-            query_non_spec = query_non_spec.repeat_interleave(
-                self.num_v_heads // self.num_k_heads, dim=2)
-            key_non_spec = key_non_spec.repeat_interleave(self.num_v_heads //
-                                                          self.num_k_heads,
-                                                          dim=2)
-
-        if attn_metadata.is_prompt:
-            core_attn_out, last_recurrent_state = (
-                torch_chunk_gated_delta_rule_opt(
-                    query_non_spec,
-                    key_non_spec,
-                    value_non_spec,
-                    g=g,
-                    beta=beta,
-                    eye_constant=self.eye_constant,
-                    valid_seq_len=attn_metadata.seq_lens_tensor,
-                    chunk_size=self.chunk_size,
-                    inv_loop=self.inv_loop,
-                    initial_state=None,
-                    output_final_state=True,
-                    use_qk_l2norm_in_kernel=True,
-                ))
-            core_attn_out = _save_ssm_state(core_attn_out,
-                                            last_recurrent_state, ssm_state,
-                                            mamba_cache_prefill_indices)
-        else:
-            recurrent_state = torch.index_select(
-                ssm_state,
-                dim=0,
-                index=mamba_cache_decode_indices,
-            )
-            core_attn_out, last_recurrent_state = (
-                torch_recurrent_gated_delta_rule_opt(
-                    query_non_spec,
-                    key_non_spec,
-                    value_non_spec,
-                    g=g,
-                    beta=beta,
-                    recurrent_state=recurrent_state,
-                    output_final_state=True,
-                    use_qk_l2norm_in_kernel=True,
-                ))
-            core_attn_out = _save_ssm_state(core_attn_out,
-                                            last_recurrent_state, ssm_state,
-                                            mamba_cache_decode_indices)
-
-        z_shape_og = z.shape
-        # reshape input data into 2D tensor
-        core_attn_out = core_attn_out.reshape(-1, core_attn_out.shape[-1])
-        z = z.reshape(-1, z.shape[-1])
-        core_attn_out = self.norm(core_attn_out, z).to(hidden_states.dtype)
-        core_attn_out = core_attn_out.reshape(z_shape_og)
-        core_attn_out = core_attn_out.reshape(core_attn_out.shape[0],
-                                              core_attn_out.shape[1], -1)
-
-        output, _ = self.out_proj(core_attn_out)
-        return output
 
 
 class Qwen3NextAttention(nn.Module):
