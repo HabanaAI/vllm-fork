@@ -771,7 +771,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         # ============================================================
         # Part 1: Input Projection
         # ============================================================
-        mixed_qkv, z, b, a = generate_qkvzba(hidden_states)
+        mixed_qkv, z, b, a = self.generate_qkvzba(hidden_states)
 
         # ============================================================
         # Part 2: Core Attention (Custom Op)
