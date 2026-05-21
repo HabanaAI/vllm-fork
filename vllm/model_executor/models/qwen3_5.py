@@ -29,14 +29,11 @@ import typing
 from collections.abc import Callable, Iterable
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
-from vllm.attention import AttentionMetadata
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, ModelConfig, SpeculativeConfig, VllmConfig
 from vllm.distributed import get_pp_group
-from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm as Qwen3_5RMSNorm
 from vllm.model_executor.layers.linear import MergedColumnParallelLinear
@@ -44,10 +41,6 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.mamba.mamba_utils import (
     MambaStateCopyFunc, MambaStateCopyFuncCalculator,
     MambaStateDtypeCalculator, MambaStateShapeCalculator)
-from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
-    causal_conv1d_update)
-from vllm.model_executor.layers.mamba.ops.torch_gated_delta_rule import (
-    torch_chunk_gated_delta_rule_opt, torch_recurrent_gated_delta_rule_opt)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
@@ -67,8 +60,7 @@ from .interfaces import (HasInnerState, IsHybrid, MixtureOfExperts,
 from .qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from .qwen3_next import (Qwen3NextAttention, Qwen3NextDecoderLayer,
                          Qwen3NextGatedDeltaNet, Qwen3NextModel,
-                         Qwen3NextSparseMoeBlock, QwenNextMixtureOfExperts,
-                         _save_conv_state, _save_ssm_state)
+                         Qwen3NextSparseMoeBlock, QwenNextMixtureOfExperts)
 from .qwen3_vl import (Qwen3_VisionTransformer,
                        Qwen3_VisionTransformerStaticShape,
                        Qwen3VLDummyInputsBuilder,
