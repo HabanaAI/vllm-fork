@@ -122,14 +122,14 @@ echo "vm.nr_hugepages=15000" | sudo tee -a /etc/sysctl.conf
 
 #### 1.2.1 基础镜像及网络配置
 
-在 Host 使用如下命令启动最新的容器（以 1.23.0 docker image 为例）：
+在 Host 使用如下命令启动最新的容器（以 1.24.0 docker image 为例）：
 
 ```bash
 docker run -it --name gaudi_server --runtime=habana \
     -e HABANA_VISIBLE_DEVICES=all \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     --cap-add=sys_nice --net=host --ipc=host --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 若Gaudi 2E服务器需要使用8卡运行模型推理，需要在容器内安装 libfabric 及 hccl_ofi_wrapper 库来使能 4 卡以上的通信互联。  
@@ -141,6 +141,7 @@ docker run -it --name gaudi_server --runtime=habana \
 ```bash
 export LIBFABRIC_ROOT=/opt/libfabric
 export LD_LIBRARY_PATH=$LIBFABRIC_ROOT/lib:$LD_LIBRARY_PATH
+export HCL_USE_SHM_PROVIDER=1
 ```
 
 Gaudi2 通过 HCCL Demo 来验证通信功能：
@@ -532,7 +533,7 @@ docker run -it --name deepseek_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     --cap-add=sys_nice --cap-add SYS_PTRACE --cap-add=CAP_IPC_LOCK \
     --ulimit memlock=-1:-1 --net=host --ipc=host \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -642,7 +643,7 @@ docker run -it --name deepseek_r1_distill_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/models \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -731,7 +732,7 @@ docker run -it --name qwen_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/models \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -902,7 +903,7 @@ docker run -it --name qwen35_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/data \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
@@ -1106,7 +1107,7 @@ docker run -it --name minimax_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/data \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
@@ -1216,7 +1217,7 @@ docker run -it --name glm_deepseek_server --runtime=habana \
     -v /mnt/disk4:/data \
     -v /share:/workspace \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录），2台机器的容器都能通过/data/hf_models访问到模型文件：
@@ -1680,7 +1681,7 @@ docker run -it --name Huyuan_v3_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/data \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
@@ -1788,7 +1789,7 @@ docker run -it --name glm_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/data/hf_models \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载BF16模型权重（假设把目标模型权重下载在 /data/hf_models 目录）：
