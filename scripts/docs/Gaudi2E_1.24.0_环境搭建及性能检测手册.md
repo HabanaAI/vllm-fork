@@ -1,6 +1,6 @@
-# Gaudi2E 环境构建及验证手册 – v1.23.0 版本
+# Gaudi2E 环境构建及验证手册 – v1.24.0 版本
 
-本手册旨在为开发人员和系统管理员提供一份详尽的指南，指导如何在 Intel Gaudi2E 平台上从零开始构建、配置和验证 v1.23.0 版本的运行环境。本文档以 Ubuntu 22.04.3 LTS (Kernel 5.15.0) 为基础，全面覆盖了从底层硬件设置到上层应用测试的全过程。
+本手册旨在为开发人员和系统管理员提供一份详尽的指南，指导如何在 Intel Gaudi2E 平台上从零开始构建、配置和验证 v1.24.0 版本的运行环境。本文档以 Ubuntu 22.04.3 LTS (Kernel 5.15.0) 为基础，全面覆盖了从底层硬件设置到上层应用测试的全过程。
 
 **主要内容包括**：
 
@@ -217,7 +217,7 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
 
 #### 1.2.2 Docker 环境配置
 
-配置 Docker 环境以支持运行 Intel Gaudi 容器化应用。详细说明请参考官方文档[Docker 环境安装手册](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/Docker_Installation.html#docker-installation)。
+配置 Docker 环境以支持运行 Intel Gaudi 容器化应用。详细说明请参考官方文档[Docker 环境安装手册](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Additional_Installation/Docker_Installation.html#docker-installation)。
 
 1. 下载安装docker，详细步骤参考[Docker 官方安装文档](https://docs.docker.com/engine/install/ubuntu/)
 
@@ -511,17 +511,17 @@ Intel 提供了 Gaudi Qualification Tool Package 用于在用户的服务器上�
 `hl_qual` 是 Intel Gaudi Qualification Tool Package 中执行每个单元测试的统一接口应用程序，通过添加同用配置参数和测试插件专用参数来运行不同的测试。
 
 运行的测试集包括如下：
-- **内存压力测试**: 验证 HBM/内部内存的读写稳定性与纠错机制，在长时间压力下观察容量利用与错误统计，常用于排查间歇性 ECC 与超时问题。测试内容详细说明请参考[Memory Stress Test Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Memory_Stress_Tests_Plugin.html)
-- **功耗与 EDP 测试**: 在不同负载下采样功率于温度与能效点（EDP）压力测试下，评估供电与散热裕度以及能效表现。测试内容详细说明请参考[Power and EDP Stress Test Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Power_and_EDP_Stress_Tests_Plugin.html)
-- **SerDes 测试**: 验证 SerDes 内/外部端口连通性、数据完整性与带宽稳定性，辅助定位链路训练、降速与误码相关问题。测试内容详细说明请参考[Connectivity SerDes Tests Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Connectivity_Serdes_Tests_Plugin.html)
-- **功能性测试**: 在真实/合成训练场景下同时驱动多单元（HBM、DMA、MME、TPC、SerDes 等），校验计算正确性与性能（FPS/吞吐），并在长时运行中暴露热、功耗、链路和计算性能问题。测试内容详细说明请参考[Functional Tests Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Functional_Tests_Plugin.html)
-- **带宽测试**: 测量 DMA/PCI 带宽测量，覆盖 HBM/SRAM 内存通路和主机-设备 PCIe 通路，校验链路是否达标。测试内容详细说明请参考[Bandwidth Tests Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Bandwidth_Tests_Plugin.html)
+- **内存压力测试**: 验证 HBM/内部内存的读写稳定性与纠错机制，在长时间压力下观察容量利用与错误统计，常用于排查间歇性 ECC 与超时问题。测试内容详细说明请参考[Memory Stress Test Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Memory_Stress_Tests_Plugin.html)
+- **功耗与 EDP 测试**: 在不同负载下采样功率于温度与能效点（EDP）压力测试下，评估供电与散热裕度以及能效表现。测试内容详细说明请参考[Power and EDP Stress Test Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Power_and_EDP_Stress_Tests_Plugin.html)
+- **SerDes 测试**: 验证 SerDes 内/外部端口连通性、数据完整性与带宽稳定性，辅助定位链路训练、降速与误码相关问题。测试内容详细说明请参考[Connectivity SerDes Tests Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Connectivity_Serdes_Tests_Plugin.html)
+- **功能性测试**: 在真实/合成训练场景下同时驱动多单元（HBM、DMA、MME、TPC、SerDes 等），校验计算正确性与性能（FPS/吞吐），并在长时运行中暴露热、功耗、链路和计算性能问题。测试内容详细说明请参考[Functional Tests Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Functional_Tests_Plugin.html)
+- **带宽测试**: 测量 DMA/PCI 带宽测量，覆盖 HBM/SRAM 内存通路和主机-设备 PCIe 通路，校验链路是否达标。测试内容详细说明请参考[Bandwidth Tests Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Bandwidth_Tests_Plugin.html)
 
 驱动安装好后，测试工具的默认安装路径在 `/opt/habanalabs/qual/gaudi2/bin/hl_qual`，运行前请确保已配置好相关的环境变量，具体可参考[驱动及软件安装验证](#122-驱动及软件安装验证)。
 
-工具使用说明可通过 `./hl_qual -gaudi2 -h` 查看。详细的测试内容描述可参考官方连接 [Inetl Gaudi Qualification Tool 使用指南](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/index.html#gaudi-qualification-library)
+工具使用说明可通过 `./hl_qual -gaudi2 -h` 查看。详细的测试内容描述可参考官方连接 [Inetl Gaudi Qualification Tool 使用指南](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/index.html#gaudi-qualification-library)
 
-Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，测试和报告分析工具, 位于目录 `/opt/habanalabs/qual/diag_tool`，详细的使用说明请参考官方文档 [Intel Gaudi Diagnostic Tool 指南](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Diagnostic_Tool/index.html)。
+Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，测试和报告分析工具, 位于目录 `/opt/habanalabs/qual/diag_tool`，详细的使用说明请参考官方文档 [Intel Gaudi Diagnostic Tool 指南](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Diagnostic_Tool/index.html)。
 
 ### 2.2 基础测试
 
@@ -568,7 +568,7 @@ Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，�
 
     测试预期： <span style="color:green">**PASSED**</span>
 
-如果测试结果显示为 <span style="color:red">**FAILED**</span>, 请参考测试失败调试方法官方文档 [hl_qual Expected Output and Failure Debug](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/hl_qual_Expected_Output_and_Failure_Debug.html)
+如果测试结果显示为 <span style="color:red">**FAILED**</span>, 请参考测试失败调试方法官方文档 [hl_qual Expected Output and Failure Debug](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/hl_qual_Expected_Output_and_Failure_Debug.html)
 
 ### 2.3 报告结构说明
 
@@ -731,7 +731,7 @@ ENABLE_CONSOLE=true LOG_LEVEL=DEBUG HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl
 
 ## 参考连接
 
-- [Intel Gaudi v1.23.0 官方指南](https://docs.habana.ai/en/v1.24.0/index.html)
+- [Intel Gaudi v1.24.0 官方指南](https://docs.habana.ai/en/v1.24.0/index.html)
 - [Intel Gaudi 驱动安装指南](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Driver_Installation.html)
 - [Intel Gaudi 系统管理工具指南](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Embedded_System_Tools_Guide/System_Management_Interface_Tool.html#system-management-tools)
 - [Intel Gaudi 环境安装指南](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Additional_Installation/index.html)
