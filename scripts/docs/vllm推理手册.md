@@ -44,7 +44,7 @@
     - [3.5.2 安装 vLLM](#352-安装-vllm)
     - [3.5.3 模型权重转换](#353-模型权重转换)
     - [3.5.4 启动 vLLM](#354-启动-vllm)
-  - [3.6 GLM-5.1-FP8/DeepSeek-V3.2](#36-glm-5.1-fp8-deepseek-v3.2)
+  - [3.6 GLM-5.1-FP8/DeepSeek-V3.2](#36-glm-51-fp8deepseek-v32)
     - [3.6.1 启动容器和下载模型权重](#361-启动容器和下载模型权重)
     - [3.6.2 安装 vLLM](#362-安装-vllm)
     - [3.6.3 2机互联配置](#363-2机互联配置)
@@ -62,6 +62,12 @@
     - [3.8.2 安装 vLLM](#382-安装-vllm)
     - [3.8.3 BF16精度模型部署](#383-bf16精度模型部署)
     - [3.8.4 FP8精度模型部署](#384-fp8精度模型部署)
+  - [3.9 GLM-4.6V/GLM-4.6V-FP8模型](#39-glm-46vglm-46v-fp8模型)
+    - [3.9.1 启动容器和下载模型权重](#391-启动容器和下载模型权重)
+    - [3.9.2 安装vLLM](#392-安装vllm)
+    - [3.9.3 GLM-4.6V（4卡部署）](#393-glm-46v4卡部署)
+    - [3.9.4 GLM-4.6V-FP8（2卡部署）](#394-glm-46v-fp82卡部署)
+
 ## 1.0 环境部署
 
 ### 1.1 BIOS 设置以及操作系统设置
@@ -116,14 +122,14 @@ echo "vm.nr_hugepages=15000" | sudo tee -a /etc/sysctl.conf
 
 #### 1.2.1 基础镜像及网络配置
 
-在 Host 使用如下命令启动最新的容器（以 1.23.0 docker image 为例）：
+在 Host 使用如下命令启动最新的容器（以 1.24.0 docker image 为例）：
 
 ```bash
 docker run -it --name gaudi_server --runtime=habana \
     -e HABANA_VISIBLE_DEVICES=all \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     --cap-add=sys_nice --net=host --ipc=host --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 若Gaudi 2E服务器需要使用8卡运行模型推理，需要在容器内安装 libfabric 及 hccl_ofi_wrapper 库来使能 4 卡以上的通信互联。  
@@ -135,6 +141,7 @@ docker run -it --name gaudi_server --runtime=habana \
 ```bash
 export LIBFABRIC_ROOT=/opt/libfabric
 export LD_LIBRARY_PATH=$LIBFABRIC_ROOT/lib:$LD_LIBRARY_PATH
+export HCL_USE_SHM_PROVIDER=1
 ```
 
 Gaudi2 通过 HCCL Demo 来验证通信功能：
@@ -145,9 +152,8 @@ cd hccl_demo && make -j
 HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1000 --ranks_per_node 8
 ```
 
-当出现带宽的结果时则证明多卡间高速互联功能已开启（带宽数值随高速网卡配置变化）。
-
-如果Gaudi-2E 服务器在没有配置高速互联网卡（如Mellanox CX6/CX7）的情况下仍然需要运行8卡的模型推理，请安装hccl_SHM的性能优化包，安装后，8卡 all_reduce "Algo Bandwidth" 可以达到20GB/s左右。
+当出现带宽的结果时则证明多卡间高速互联功能已开启（带宽数值随高速网卡配置变化）。  
+在没有配置高速网卡的情况下，8卡 all_reduce "Algo Bandwidth" 可以达到20GB/s左右。
 
 ### 1.3 模型权重文件下载
 
@@ -425,7 +431,7 @@ DeepSeek-V3.2，GLM-5-FP8及GLM-5.1-FP8；如需确认模型是否包含DSA结�
 
 如GLM-5.1-FP8修改后的maxabs_quant_g2.json为：
 
-```bash
+```json
 {
   "mode": "QUANTIZE",
   "observer": "maxabs",
@@ -452,6 +458,7 @@ DeepSeek-V3.2，GLM-5-FP8及GLM-5.1-FP8；如需确认模型是否包含DSA结�
   },
   "dump_stats_path": "/workspace/quantization/glm-5.1-fp8/g2/inc_output",
   "fp8_config": "E4M3"
+  }
 ```
 
 ##### 2.3.3.2 对 BF16 模型进行校准
@@ -525,7 +532,7 @@ docker run -it --name deepseek_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     --cap-add=sys_nice --cap-add SYS_PTRACE --cap-add=CAP_IPC_LOCK \
     --ulimit memlock=-1:-1 --net=host --ipc=host \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -635,7 +642,7 @@ docker run -it --name deepseek_r1_distill_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/models \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -724,7 +731,7 @@ docker run -it --name qwen_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/models \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载在 `/data/hf_models` 目录）：
@@ -895,7 +902,7 @@ docker run -it --name qwen35_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/data \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
@@ -1099,7 +1106,7 @@ docker run -it --name minimax_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/data \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
@@ -1209,7 +1216,7 @@ docker run -it --name glm_deepseek_server --runtime=habana \
     -v /mnt/disk4:/data \
     -v /share:/workspace \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录），2台机器的容器都能通过/data/hf_models访问到模型文件：
@@ -1398,6 +1405,7 @@ DeepSeek-V3.2，GLM-5-FP8及GLM-5.1-FP8；如需确认模型是否包含DSA结�
   },
   "dump_stats_path": "/workspace/vllm-hpu-extension/calibration/quantization/glm-5.1-fp8/g2/inc_output",
   "fp8_config": "E4M3"
+}
 ```
 
 #### 3.6.5 启动 vLLM
@@ -1454,9 +1462,10 @@ bash start_gaudi_vllm_server.sh \
 -d fp8 \
 -b 16 \
 -k 8192 \
--g 32768 \
+-g 1024 \
 -x 202752 \
 -u 0.8 \
+-l 0.5 \
 -e " --enable-prefix-caching" \
 -c ./vllm_warmup_cache_glm_5.1_fp8
 ```
@@ -1671,7 +1680,7 @@ docker run -it --name Huyuan_v3_server --runtime=habana \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     -v /mnt/disk4:/data \
     --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
-    vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
 ```
 
 下载模型权重（假设模型权重下载到 `/data/hf_models` 目录）：
@@ -1766,3 +1775,121 @@ bash ./start_gaudi_vllm_server.sh -w /data/hf_models/HY3.0-FP8-Testing-G2 \
 -e "--enable-prefix-caching \
 -c /recipe_cache_HY3.0-FP8-Testing-G2/
 ```
+
+### 3.9 GLM-4.6V/GLM-4.6V-FP8模型
+
+#### 3.9.1 启动容器和下载模型权重
+
+请用如下命令启动容器，假设 /mnt/disk4 有足够的硬盘空间用来保存模型权重，或者模型权重已经保存在该目录下。请为容器设置正确的网络设置，可以在容器内正常访问互联网资源。
+
+```bash
+docker run -it --name glm_server --runtime=habana \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+    -v /mnt/disk4:/data/hf_models \
+    --cap-add=sys_nice --net=host --ipc=host --workdir=/workspace --privileged \
+    vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
+```
+
+下载BF16模型权重（假设把目标模型权重下载在 /data/hf_models 目录）：
+
+```bash
+pip install modelscope
+modelscope download --model zai-org/GLM-4.6V --local_dir /data/hf_models/GLM-4.6V
+```
+
+下载FP8模型权重（假设把目标模型权重下载在 /data/hf_models 目录）：
+
+```bash
+pip install modelscope
+modelscope download --model zai-org/GLM-4.6V-FP8 --local_dir /data/hf_models/GLM-4.6V-FP8
+```
+
+#### 3.9.2 安装vLLM
+为容器设置正确的网络设置，确保容器可以正常访问 github。  
+使用下命令在镜像环境安装 vLLM v1.22.0：  
+
+```bash
+# install vllm
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-fork
+cd vllm-fork
+git checkout aice/v1.22.0
+cd ..
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install -r vllm-fork/requirements-hpu.txt
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+
+# install vllm-hpu-extension to do calibration
+git clone -b aice/v1.22.0 https://github.com/HabanaAI/vllm-hpu-extension
+cd vllm-hpu-extension
+git checkout aice/v1.22.0
+cd ..
+pip install -e vllm-hpu-extension --no-build-isolation
+```
+
+安装指定版本transformers
+
+```bash
+git clone https://github.com/huggingface/transformers
+cd transformers
+git checkout 66d5711
+pip uninstall transformers
+pip install .
+```
+
+#### 3.9.3 GLM-4.6V（4卡部署）
+
+**启动服务**\
+**GLM-4.6V**: Support Image and Video inputs
+
+```bash
+PT_HPU_LAZY_MODE=1 \
+vllm serve \
+/data/hf_models/GLM-4.6V \
+--max-num-seqs 128 \
+--port 30010 \
+--host 127.0.0.1 \
+--tensor-parallel-size 4 \
+--max-model-len 16384 \
+--limit-mm-per-prompt '{"video":5, "image":5}'
+```
+
+- `--limit-mm-per-prompt` 设置每个 prompt 中每种多模态数据的最大个数
+
+#### 3.9.4 GLM-4.6V-FP8（2卡部署）
+
+GLM-4.6V-FP8 需要使用 calibrate_model.sh 脚本进行校准：  
+如果要部署4卡，需要把校准命令参数-t修改为4.
+
+```bash
+cd /workspace/vllm-hpu-extension/calibration
+PT_HPU_LAZY_MODE=1 \
+bash ./calibrate_model.sh \
+-m /data/hf_models/GLM-4.6V-FP8 \
+-d NeelNanda/pile-10k \
+-o quantization \
+-t 2 \
+-u
+```
+
+校准大概需要40分钟，校准过程生成文件会输出到quantization文件夹，若按照示例路径执行命令，校准文件会在/workspace/vllm-hpu-extension/calibration/quantization/glm-4.6v-fp8
+
+**启动服务**\
+**GLM-4.6V-FP8**: Support Image and Video inputs
+若校准输出文件位于/workspace/vllm-hpu-extension/calibration/quantization/glm-4.6v-fp8，请使用以下命令启动服务：
+
+```bash
+QUANT_CONFIG=/workspace/vllm-hpu-extension/calibration/quantization/glm-4.6v-fp8/maxabs_quant_g2.json \
+PT_HPU_LAZY_MODE=1 \
+vllm serve \
+/data/hf_models/GLM-4.6V-FP8 \
+--max-num-seqs 128 \
+--port 30010 \
+--host 127.0.0.1 \
+--tensor-parallel-size 2 \
+--enable-expert-parallel \
+--max-model-len 16384 \
+--limit-mm-per-prompt '{"video":5, "image":5}'
+```
+
+- `--limit-mm-per-prompt` 设置每个 prompt 中每种多模态数据的最大个数
