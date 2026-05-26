@@ -452,13 +452,14 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
     export PATH=/opt/habanalabs/qual/diag_tool/scripts:/opt/habanalabs/openmpi-5.0.8/bin:$PATH
     export __python_cmd=python3
     ```
-    这些环境变量已经在驱动安装过程中自动配置到系统文件 `/etc/profile.d/habanalabs*.sh` 中，如果存在环境变量缺失，请手动添加。
-
+  
+ 这些环境变量已经在驱动安装过程中自动配置到系统文件 `/etc/profile.d/habanalabs*.sh` 中，如果存在环境变量缺失，请手动添加。
+  
     ```bash
-    source /etc/profile.d/habanalabs*.sh
+ source /etc/profile.d/habanalabs*.sh
     ```
 
-6. 检查 Gaudi 设备 internal ports 的启用状态，确保网口处于 `UP` 状态。 如果出现 port 状态为 `DOWN`，需要查看 `dmesg` 中的日志排查问题，尝试重新加载驱动模块以及检查顶板的连接情况。
+1. 检查 Gaudi 设备 internal ports 的启用状态，确保网口处于 `UP` 状态。 如果出现 port 状态为 `DOWN`，需要查看 `dmesg` 中的日志排查问题，尝试重新加载驱动模块以及检查顶板的连接情况。
 
     <span style="color:yellow">**提示**</span> internal ports 是 Gaudi2E 设备内部用于多张Gaudi2E设备互联的高速通信端口。如果需要多台服务器互联，需要通过服务器上安插RDMA网卡进行跨机器互联, 实现方式可参照[Host NIC Scale-Out 配置](#33-host-nic-scale-out-配置)。
 
@@ -491,7 +492,7 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
     ... (省略其他设备输出) ...
     ```
 
-7. 使用 Intel Gaudi Qualification Tool `hl_qual` 进行硬件健康检测, 参照[性能测试验证](#20-性能测试验证)。
+2. 使用 Intel Gaudi Qualification Tool `hl_qual` 进行硬件健康检测, 参照[性能测试验证](#20-性能测试验证)。
 
 #### 1.2.4 （可选项）环境安装
 
@@ -576,7 +577,7 @@ Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，�
 
 **报告存储与命名**：
 - **默认路径**：测试日志通常保存在 `$HABANA_LOGS/qual`（若未定义环境变量，默认路径为 `/var/log/habana_logs/qual`）。
-- **文件命名**：文件名包含服务器名、`hl_qual_report` 字样以及详细的时间戳（例如 `G2E-PCIE-1_hl_qual_report_Tue_May_26_13-23-52_2026.log`）。
+- **文件命名**：文件名包含服务器名、`hl_qual_report` 字样以及详细的时间戳（例如 `server_hl_qual_report_Tue_May_26_13-23-52_2026.log`）。
 
 **报告组成部分**：
 1. **设备识别报告 (Device Identification Report)**：展示 PCI 总线 ID 及设备的运行状态。
