@@ -152,9 +152,7 @@ cd hccl_demo && make -j
 HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1000 --ranks_per_node 8
 ```
 
-当出现带宽的结果时则证明多卡间高速互联功能已开启（带宽数值随高速网卡配置变化）。
-
-如果Gaudi-2E 服务器在没有配置高速互联网卡（如Mellanox CX6/CX7）的情况下仍然需要运行8卡的模型推理，请安装hccl_SHM的性能优化包，安装后，8卡 all_reduce "Algo Bandwidth" 可以达到20GB/s左右。
+当出现带宽的结果时则证明多卡间高速互联功能已开启（带宽数值随高速网卡配置变化）。8卡 all_reduce "Algo Bandwidth" 可以达到20GB/s左右。
 
 ### 1.3 模型权重文件下载
 
