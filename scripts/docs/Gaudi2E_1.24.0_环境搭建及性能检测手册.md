@@ -1,6 +1,6 @@
-# Gaudi2E 环境搭建及性能检测手册 – v1.23.0 版本
+# Gaudi2E 环境搭建及性能检测手册 – v1.24.0 版本
 
-本手册旨在为开发人员和系统管理员提供一份详尽的指南，指导如何在 Intel Gaudi2E 平台上从零开始构建、配置和验证 v1.23.0 版本的运行环境。本文档以 Ubuntu 22.04.3 LTS (Kernel 5.15.0) 为基础，全面覆盖了从底层硬件设置到上层应用测试的全过程。
+本手册旨在为开发人员和系统管理员提供一份详尽的指南，指导如何在 Intel Gaudi2E 平台上从零开始构建、配置和验证 v1.24.0 版本的运行环境。本文档以 Ubuntu 22.04.3 LTS (Kernel 5.15.0) 为基础，全面覆盖了从底层硬件设置到上层应用测试的全过程。
 
 **主要内容包括**：
 
@@ -138,25 +138,54 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
 1. 连接互联网，下载 Gaudi2E 驱动及相关软件包安装的执行脚本`habanalabs-installer.sh`。
 
     ```bash
-    wget -nv https://vault.habana.ai/artifactory/gaudi-installer/1.23.0/habanalabs-installer.sh
+    wget -nv https://vault.habana.ai/artifactory/gaudi-installer/1.24.0/habanalabs-installer.sh
     chmod +x habanalabs-installer.sh
     ./habanalabs-installer.sh install --type base -y
 
     --- 输出示例 ---
     ...
-    [  +0.000005] habanalabs 0000:27:00.0: Successfully added device 0000:27:00.0 to habanalabs driver
-    [  +0.039769] habanalabs_cn: loading driver, version: 1.23.0-2eae87a
-    [  +0.007822] habanalabs_en: loading driver, version: 1.23.0-2eae87a
-    [  +0.034138] habanalabs_ib: loading driver, version: 1.23.0-2eae87a
+    ================================================================================
+    Install dependencies
+    ================================================================================
+    ================================================================================
+    Install the firmware
+    ================================================================================
+    ================================================================================
+    Install the driver
+    ================================================================================
+    ================================================================================
+    Install the basic packages
+    ================================================================================
+    ================================================================================
+    Install the optional packages
+    ================================================================================
+    ================================================================================
+    Stop driver
+    ================================================================================
+    ================================================================================
+    Validate the firmware package
+    ================================================================================
+    ================================================================================
+    Validate driver package
+    ================================================================================
+    ================================================================================
+    Validate the basic package
+    ================================================================================
+    ================================================================================
+    Set hugepage /etc/sysctl.conf
+    ================================================================================
+    ================================================================================
+    Start driver
+    ================================================================================
     ================================================================================
     Habanalabs software was installed successfully
     ================================================================================
     ================================================================================
-    Full install log: /root/habanalabs-installer-log/install-2026-01-06-19-42-55.log
+    Full install log: /root/habanalabs-installer-log/install-2026-05-26-12-45-52.log
     ================================================================================
     ```
 
-    安装日志存放在默认路径`/root/habanalabs-installer-log/`, 如果安装过程中出现问题，可以查看日志文件`install-2026-01-06-19-42-55.log`以获取详细信息。
+    安装日志存放在默认路径`/root/habanalabs-installer-log/`, 如果安装过程中出现问题，可以查看日志文件`install-2026-05-26-12-45-52.log`以获取详细信息。
 
 2. 安装 habanalabs-container-runtime 依赖包以支持运行容器化应用
 
@@ -188,7 +217,7 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
 
 #### 1.2.2 Docker 环境配置
 
-配置 Docker 环境以支持运行 Intel Gaudi 容器化应用。详细说明请参考官方文档[Docker 环境安装手册](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/Docker_Installation.html#docker-installation)。
+配置 Docker 环境以支持运行 Intel Gaudi 容器化应用。详细说明请参考官方文档[Docker 环境安装手册](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Additional_Installation/Docker_Installation.html#docker-installation)。
 
 1. 下载安装docker，详细步骤参考[Docker 官方安装文档](https://docs.docker.com/engine/install/ubuntu/)
 
@@ -250,22 +279,22 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
 4. 拉取 Intel 官方提供的 Docker 镜像
 
     ```bash
-    docker pull vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+    docker pull vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
     ```
 
 5. 运行 Intel Gaudi Docker 容器
 
     ```bash
-    docker run -itd --name gaudi2e_1.23.0 --runtime=habana \
+    docker run -itd --name gaudi2e_1.24.0 --runtime=habana \
         -e HABANA_VISIBLE_DEVICES=all \
         --device=/dev:/dev -v /dev:/dev \
         -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
         --cap-add=sys_nice --cap-add SYS_PTRACE --cap-add=CAP_IPC_LOCK \
         --ulimit memlock=-1:-1 --net=host --ipc=host \
-        vault.habana.ai/gaudi-docker/1.23.0/ubuntu22.04/habanalabs/pytorch-installer-2.9.0:latest
+        vault.habana.ai/gaudi-docker/1.24.0/ubuntu22.04/habanalabs/pytorch-installer-2.10.0:latest
     ```
 
-    启动容器后， 执行`docker exec -it gaudi2e_1.23.0 bash` 进入容器，运行 `hl-smi` 命令查看设备和驱动状态。
+    启动容器后， 执行`docker exec -it gaudi2e_1.24.0 bash` 进入容器，运行 `hl-smi` 命令查看设备和驱动状态。
 
     [<span style="color:red">**注意**</span>]：
     1. 容器内的环境变量和驱动配置已经预先设置好，无需额外配置。
@@ -315,13 +344,13 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
 2. 使用 `dmesg` 命令查看驱动加载日志，确认驱动版本和设备识别情况
 
     ```bash
-    dmesg | grep habanalabs
+    dmesg -T | grep habanalabs | grep -i "loading driver"
 
     --- 输出示例 ---
-    [    1.234567] habanalabs 0000:29:00.0: Habana Labs Gaudi2E device detected
-    [    1.234890] habanalabs 0000:29:00.0: Driver version: 1.23.0-2eae87a
-    [    1.235123] habanalabs 0000:2a:00.0: Habana Labs Gaudi2E device detected
-    [    1.235456] habanalabs 0000:2a:00.0: Driver version: 1.23.0-2eae87a
+    [Tue May 26 12:57:12 2026] habanalabs: loading driver, version: 1.24.0-bb94c81
+    [Tue May 26 12:57:35 2026] habanalabs_cn: loading driver, version: 1.24.0-bb94c81
+    [Tue May 26 12:57:41 2026] habanalabs_ib: loading driver, version: 1.24.0-bb94c81
+    [Tue May 26 12:57:43 2026] habanalabs_en: loading driver, version: 1.24.0-bb94c81
     ```
 
     <span style="color:yellow">**提示**</span> 如果驱动未正确加载，可以尝试手动加载驱动模块：
@@ -334,43 +363,43 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
     modprobe habanalabs_compat && modprobe habanalabs timeout_locked=0 && modprobe habanalabs_cn && modprobe habanalabs_en && modprobe habanalabs_ib
     ```
 
-3. 使用 Gaudi 的系统管理工具 `hl-smi` 验证和查看驱动版本及设备信息。详细的工具使用说明可参考官方链接 [Intel Gaudi 系统管理工具指南](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Embedded_System_Tools_Guide/System_Management_Interface_Tool.html#system-management-tools)
+3. 使用 Gaudi 的系统管理工具 `hl-smi` 验证和查看驱动版本及设备信息。详细的工具使用说明可参考官方链接 [Intel Gaudi 系统管理工具指南](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Embedded_System_Tools_Guide/System_Management_Interface_Tool.html#system-management-tools)
 
     ```bash
     hl-smi
 
     --- 输出示例 ---
     +-----------------------------------------------------------------------------+
-    | HL-SMI Version:                              hl-1.23.0-fw-62.2.1.1          |
-    | Driver Version:                                     1.23.0-2eae87a          |
-    | Nic Driver Version:                                 1.23.0-2eae87a          |
+    | HL-SMI Version:                              hl-1.24.0-fw-62.6.2.0          |
+    | Driver Version:                                     1.24.0-bb94c81          |
+    | Nic Driver Version:                                 1.24.0-bb94c81          |
     |-------------------------------+----------------------+----------------------+
     | AIP  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncor-Events|
     | Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | AIP-Util  Compute M. |
     |===============================+======================+======================|
-    |   0  HL-288E             N/A  | 0000:2a:00.0     N/A |                   0  |
-    | N/A   28C   P0   80W /  450W  |   768MiB /  98304MiB |     0%            0% |
+    |   0  HL-288E             N/A  | 0000:29:00.0     N/A |                   0  |
+    | N/A   30C   P0   75W /  450W  |   768MiB /  98304MiB |     0%            0% |
     |-------------------------------+----------------------+----------------------+
     |   1  HL-288E             N/A  | 0000:aa:00.0     N/A |                   0  |
-    | N/A   29C   P0   84W /  450W  |   768MiB /  98304MiB |     0%            0% |
+    | N/A   31C   P0   86W /  450W  |   768MiB /  98304MiB |     0%            0% |
     |-------------------------------+----------------------+----------------------+
-    |   2  HL-288E             N/A  | 0000:29:00.0     N/A |                   0  |
-    | N/A   30C   P0   96W /  450W  |   768MiB /  98304MiB |     0%            0% |
+    |   2  HL-288E             N/A  | 0000:2a:00.0     N/A |                   0  |
+    | N/A   30C   P0   61W /  450W  |   768MiB /  98304MiB |     0%            0% |
     |-------------------------------+----------------------+----------------------+
     |   3  HL-288E             N/A  | 0000:ab:00.0     N/A |                   0  |
-    | N/A   29C   P0   78W /  450W  |   768MiB /  98304MiB |     0%            0% |
+    | N/A   30C   P0   75W /  450W  |   768MiB /  98304MiB |     0%            0% |
     |-------------------------------+----------------------+----------------------+
     |   4  HL-288E             N/A  | 0000:3a:00.0     N/A |                   0  |
-    | N/A   29C   P0   78W /  450W  |   768MiB /  98304MiB |     0%            0% |
+    | N/A   29C   P0   80W /  450W  |   768MiB /  98304MiB |     0%            0% |
     |-------------------------------+----------------------+----------------------+
-    |   5  HL-288E             N/A  | 0000:bb:00.0     N/A |                   0  |
-    | N/A   28C   P0   77W /  450W  |   768MiB /  98304MiB |     0%            0% |
+    |   5  HL-288E             N/A  | 0000:bc:00.0     N/A |                   0  |
+    | N/A   30C   P0   85W /  450W  |   768MiB /  98304MiB |     0%            0% |
     |-------------------------------+----------------------+----------------------+
     |   6  HL-288E             N/A  | 0000:3b:00.0     N/A |                   0  |
-    | N/A   29C   P0   77W /  450W  |   768MiB /  98304MiB |     0%            0% |
+    | N/A   29C   P0   72W /  450W  |   768MiB /  98304MiB |     0%            0% |
     |-------------------------------+----------------------+----------------------+
-    |   7  HL-288E             N/A  | 0000:bc:00.0     N/A |                   0  |
-    | N/A   29C   P0   67W /  450W  |   768MiB /  98304MiB |     0%            0% |
+    |   7  HL-288E             N/A  | 0000:bb:00.0     N/A |                   0  |
+    | N/A   30C   P0   77W /  450W  |   768MiB /  98304MiB |     0%            0% |
     |-------------------------------+----------------------+----------------------+
     | Compute Processes:                                               AIP Memory |
     |  AIP       PID   Type   Process name                             Usage      |
@@ -384,6 +413,7 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
     |   6        N/A   N/A    N/A                                      N/A        |
     |   7        N/A   N/A    N/A                                      N/A        |
     +=============================================================================+
+
     ```
 
 4. 利用软件管理工具`apt`查看已安装的软件包版本。
@@ -392,14 +422,16 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
     apt list --installed | grep habana
 
     --- 输出示例 ---
-    habanalabs-dkms/jammy,now 1.23.0-695 all [installed]
-    habanalabs-firmware-odm/jammy,now 1.23.0-695 amd64 [installed]
-    habanalabs-firmware-tools/jammy,now 1.23.0-695 amd64 [installed]
-    habanalabs-firmware/jammy,now 1.23.0-695 amd64 [installed]
-    habanalabs-graph/jammy,now 1.23.0-695 amd64 [installed]
-    habanalabs-qual/jammy,now 1.23.0-695 amd64 [installed]
-    habanalabs-rdma-core/jammy,now 1.23.0-695 all [installed]
-    habanalabs-thunk/jammy,now 1.23.0-695 all [installed]
+    habanalabs-container-runtime/jammy,now 1.24.0-1007 amd64 [installed]
+    habanalabs-dkms/jammy,now 1.24.0-1007 all [installed]
+    habanalabs-firmware-odm/jammy,now 1.24.0-1007 amd64 [installed]
+    habanalabs-firmware-tools/jammy,now 1.24.0-1007 amd64 [installed]
+    habanalabs-firmware/jammy,now 1.24.0-1007 amd64 [installed]
+    habanalabs-graph/jammy,now 1.24.0-1007 amd64 [installed]
+    habanalabs-qual-workloads/jammy,now 1.24.0-1007 all [installed]
+    habanalabs-qual/jammy,now 1.24.0-1007 amd64 [installed]
+    habanalabs-rdma-core/jammy,now 1.24.0-1007 all [installed]
+    habanalabs-thunk/jammy,now 1.24.0-1007 all [installed]
     ```
 
 5. 确保系统正常运行，检查如下的系统的环境变量是否设定正确
@@ -413,6 +445,11 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
     export RDMA_CORE_LIB=/opt/habanalabs/rdma-core/src/build/lib
     export HABANA_SCAL_BIN_PATH=/opt/habanalabs/engines_fw
     export DATA_LOADER_AEON_LIB_PATH=/usr/lib/habanalabs/libaeon.so
+    export PYTHONPATH=/opt/habanalabs/qual/diag_tool:/opt/habanalabs/qual/diag_tool/automation:
+    export MPI_ROOT=/opt/habanalabs/openmpi-5.0.8
+    export LD_LIBRARY_PATH=/opt/habanalabs/openmpi-5.0.8/lib:/opt/libfabric/lib:/usr/lib/habanalabs/:/usr/local/lib/:$LD_LIBRARY_PATH
+    export OPAL_PREFIX=/opt/habanalabs/openmpi-5.0.8
+    export PATH=/opt/habanalabs/qual/diag_tool/scripts:/opt/habanalabs/openmpi-5.0.8/bin:$PATH
     export __python_cmd=python3
     ```
 
@@ -460,11 +497,11 @@ bc:00.0 Processing accelerators [1200]: Habana Labs Ltd. Device [1da3:1021] (rev
 #### 1.2.4 （可选项）环境安装
 
 在安装好驱动及相关组件后，依据自身的使用场景，选择合适的环境进行安装。
-- Bare Metal 环境安装 - 在裸机上安装Intel Gaudi Pytorch 环境。 参考官方手册 [Bare Metal 环境安装手册](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/Bare_Metal_Installation.html#bare-metal-pytorch)
+- Bare Metal 环境安装 - 在裸机上安装Intel Gaudi Pytorch 环境。 参考官方手册 [Bare Metal 环境安装手册](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Additional_Installation/Bare_Metal_Installation.html#bare-metal-pytorch)
 
 如果选择 Kubernetes 或 OpenShift 等云基础架构环境
-- Kubernetes 环境安装 - 使用 Intel Gaudi Base Operator 在 Kubernetes 环境中安装并自动化管理所有 Intel Gaudi 的驱动和软件。 参考官方手册 [Kubernetes 环境安装手册](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/Kubernetes_Installation/index.html#kubernetes-install)
-- OpenShift 环境安装 - 使用 Intel Gaudi Base Operator 在 OpenShift 环境中安装并自动化管理所有 Intel Gaudi 的驱动和软件。 参考官方手册 [OpenShift 环境安装手册](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/OpenShift_Installation/index.html#intel-gaudi-base-operator-openshift)
+- Kubernetes 环境安装 - 使用 Intel Gaudi Base Operator 在 Kubernetes 环境中安装并自动化管理所有 Intel Gaudi 的驱动和软件。 参考官方手册 [Kubernetes 环境安装手册](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Additional_Installation/Kubernetes_Installation/index.html#kubernetes-install)
+- OpenShift 环境安装 - 使用 Intel Gaudi Base Operator 在 OpenShift 环境中安装并自动化管理所有 Intel Gaudi 的驱动和软件。 参考官方手册 [OpenShift 环境安装手册](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Additional_Installation/OpenShift_Installation/index.html#intel-gaudi-base-operator-openshift)
 
 ## 2.0 性能测试验证
 
@@ -475,17 +512,17 @@ Intel 提供了 Gaudi Qualification Tool Package 用于在用户的服务器上�
 `hl_qual` 是 Intel Gaudi Qualification Tool Package 中执行每个单元测试的统一接口应用程序，通过添加通用配置参数和测试插件专用参数来运行不同的测试。
 
 运行的测试集包括如下：
-- **内存压力测试**: 验证 HBM/内部内存的读写稳定性与纠错机制，在长时间压力下观察容量利用与错误统计，常用于排查间歇性 ECC 与超时问题。测试内容详细说明请参考[Memory Stress Test Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Memory_Stress_Tests_Plugin.html)
-- **功耗与 EDP 测试**: 在不同负载下采样功率与温度与能效点（EDP）压力测试下，评估供电与散热裕度以及能效表现。测试内容详细说明请参考[Power and EDP Stress Test Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Power_and_EDP_Stress_Tests_Plugin.html)
-- **SerDes 测试**: 验证 SerDes 内/外部端口连通性、数据完整性与带宽稳定性，辅助定位链路训练、降速与误码相关问题。测试内容详细说明请参考[Connectivity SerDes Tests Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Connectivity_Serdes_Tests_Plugin.html)
-- **功能性测试**: 在真实/合成训练场景下同时驱动多单元（HBM、DMA、MME、TPC、SerDes 等），校验计算正确性与性能（FPS/吞吐），并在长时运行中暴露热、功耗、链路和计算性能问题。测试内容详细说明请参考[Functional Tests Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Functional_Tests_Plugin.html)
-- **带宽测试**: 进行 DMA/PCI 带宽测量，覆盖 HBM/SRAM 内存通路和主机-设备 PCIe 通路，校验链路是否达标。测试内容详细说明请参考[Bandwidth Tests Plugin](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Bandwidth_Tests_Plugin.html)
+- **内存压力测试**: 验证 HBM/内部内存的读写稳定性与纠错机制，在长时间压力下观察容量利用与错误统计，常用于排查间歇性 ECC 与超时问题。测试内容详细说明请参考[Memory Stress Test Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Memory_Stress_Tests_Plugin.html)
+- **功耗与 EDP 测试**: 在不同负载下采样功率与温度，并在能效点（EDP）压力测试下，评估供电与散热裕度以及能效表现。测试内容详细说明请参考[Power and EDP Stress Test Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Power_and_EDP_Stress_Tests_Plugin.html)
+- **SerDes 测试**: 验证 SerDes 内/外部端口连通性、数据完整性与带宽稳定性，辅助定位链路训练、降速与误码相关问题。测试内容详细说明请参考[Connectivity SerDes Tests Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Connectivity_Serdes_Tests_Plugin.html)
+- **功能性测试**: 在真实/合成训练场景下同时驱动多单元（HBM、DMA、MME、TPC、SerDes 等），校验计算正确性与性能（FPS/吞吐），并在长时运行中暴露热、功耗、链路和计算性能问题。测试内容详细说明请参考[Functional Tests Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Functional_Tests_Plugin.html)
+- **带宽测试**: 测量 DMA/PCI 带宽，覆盖 HBM/SRAM 内存通路和主机-设备 PCIe 通路，校验链路是否达标。测试内容详细说明请参考[Bandwidth Tests Plugin](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Bandwidth_Tests_Plugin.html)
 
 驱动安装好后，测试工具的默认安装路径在 `/opt/habanalabs/qual/gaudi2/bin/hl_qual`，运行前请确保已配置好相关的环境变量，具体可参考[驱动及软件安装验证](#123-驱动及软件安装验证)。
 
-工具使用说明可通过 `./hl_qual -gaudi2 -h` 查看。详细的测试内容描述可参考官方链接 [Intel Gaudi Qualification Tool 使用指南](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/index.html#gaudi-qualification-library)
+工具使用说明可通过 `./hl_qual -gaudi2 -h` 查看。详细的测试内容描述可参考官方链接 [Intel Gaudi Qualification Tool 使用指南](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/index.html#gaudi-qualification-library)
 
-Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，测试和报告分析工具, 位于目录 `/opt/habanalabs/qual/diag_tool`，详细的使用说明请参考官方文档 [Intel Gaudi Diagnostic Tool 指南](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/Diagnostic_Tool/index.html)。
+Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，测试和报告分析工具, 位于目录 `/opt/habanalabs/qual/diag_tool`，详细的使用说明请参考官方文档 [Intel Gaudi Diagnostic Tool 指南](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/Diagnostic_Tool/index.html)。
 
 ### 2.2 基础测试
 
@@ -515,7 +552,7 @@ Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，�
 1. 测试全部Gaudi2E设备的三种传输模式下的PCI带宽 （Download: Host ==> Device; Upload: Host <== Device; Bidirectional: Host <==> Device）并且检查在PCIe传输链路中的可能存在的通信带宽瓶颈。
 
     ```bash
-    ./hl_qual -gaudi2 -c all -rmod parallel -t 20 -p -b -gen gen4 -dis_mon
+    ./hl_qual -gaudi2 -c all -rmod parallel -t 20 -p -b -dis_mon
     ```
 
     测试预期： <span style="color:green">**PASSED**</span>
@@ -532,7 +569,7 @@ Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，�
 
     测试预期： <span style="color:green">**PASSED**</span>
 
-如果测试结果显示为 <span style="color:red">**FAILED**</span>, 请参考测试失败调试方法官方文档 [hl_qual Expected Output and Failure Debug](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/hl_qual_Expected_Output_and_Failure_Debug.html)
+如果测试结果显示为 <span style="color:red">**FAILED**</span>, 请参考测试失败调试方法官方文档 [hl_qual Expected Output and Failure Debug](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/hl_qual_Expected_Output_and_Failure_Debug.html)
 
 ### 2.3 报告结构说明
 
@@ -540,7 +577,7 @@ Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，�
 
 **报告存储与命名**：
 - **默认路径**：测试日志通常保存在 `$HABANA_LOGS/qual`（若未定义环境变量，默认路径为 `/var/log/habana_logs/qual`）。
-- **文件命名**：文件名包含服务器名、`hl_qual_report` 字样以及详细的时间戳（例如 `server_hl_qual_report_Sat_Dec_4_09-15-16_2021.log`）。
+- **文件命名**：文件名包含服务器名、`hl_qual_report` 字样以及详细的时间戳（例如 `<hostname>_hl_qual_report_Tue_May_26_13-23-52_2026.log`）。
 
 **报告组成部分**：
 1. **设备识别报告 (Device Identification Report)**：展示 PCI 总线 ID 及设备的运行状态。
@@ -551,7 +588,7 @@ Intel Gaudi Qualification Tool Package 也提供了一键式自动化诊断，�
 6. **受测设备报告 (Tested Device Report)**：包含设备硬件详情（序列号、PCB 版本）、测试起止时间及内部插件运行数据。
 7. **总结报告 (Closing Report)**：汇总全过程的统计指标（功率、时钟、温度），并给出单卡及系统的最终 <span style="color:green">**PASSED**</span>/<span style="color:red">**FAILED**</span> 判定。
 
-详细的报告结构说明请参考官方文档 [hl_qual Report Structure](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/hl_qual_Report_Structure.html)
+详细的报告结构说明请参考官方文档 [hl_qual Report Structure](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/hl_qual_Report_Structure.html)
 
 ## 3.0 集合通信测试
 
@@ -695,10 +732,10 @@ ENABLE_CONSOLE=true LOG_LEVEL_ALL=0 HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl
 
 ## 参考链接
 
-- [Intel Gaudi v1.23.0 官方指南](https://docs.habana.ai/en/v1.23.0/index.html)
-- [Intel Gaudi 驱动安装指南](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Driver_Installation.html)
-- [Intel Gaudi 系统管理工具指南](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Embedded_System_Tools_Guide/System_Management_Interface_Tool.html#system-management-tools)
-- [Intel Gaudi 环境安装指南](https://docs.habana.ai/en/v1.23.0/Installation_Guide/Additional_Installation/index.html)
-- [Intel Gaudi Qualification Tool 使用指南](https://docs.habana.ai/en/v1.23.0/Management_and_Monitoring/Qualification_Library/index.html#gaudi-qualification-library)
+- [Intel Gaudi v1.24.0 官方指南](https://docs.habana.ai/en/v1.24.0/index.html)
+- [Intel Gaudi 驱动安装指南](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Driver_Installation.html)
+- [Intel Gaudi 系统管理工具指南](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Embedded_System_Tools_Guide/System_Management_Interface_Tool.html#system-management-tools)
+- [Intel Gaudi 环境安装指南](https://docs.habana.ai/en/v1.24.0/Installation_Guide/Additional_Installation/index.html)
+- [Intel Gaudi Qualification Tool 使用指南](https://docs.habana.ai/en/v1.24.0/Management_and_Monitoring/Qualification_Library/index.html#gaudi-qualification-library)
 - [Intel Habana Communications Library GitHub](https://github.com/HabanaAI/HCL)
 - [Intel HCCL Demo GitHub](https://github.com/HabanaAI/hccl_demo)
