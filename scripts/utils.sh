@@ -385,6 +385,19 @@ set_perf_tuning(){
     else
         dist_backend="mp"
     fi
+
+    # set up the FusedSDPA slicing configuration for HPU
+    if [ "$chunk_size" != "" ]; then
+        export VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=${VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD:-"$chunk_size"}
+        export VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE=${VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE:-"4096"}
+        export VLLM_HPU_FSDPA_SLICE_IMPL=${VLLM_HPU_FSDPA_SLICE_IMPL:-"slice_qkv"}
+        export VLLM_HPU_FSDPA_SLICE_CAUSAL=${VLLM_HPU_FSDPA_SLICE_CAUSAL:-"false"}
+    elif [ "$max_model_len" -ge 32768 ]; then
+        export VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD=${VLLM_HPU_FSDPA_SLICE_SEQ_LEN_THLD:-"8192"}
+        export VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE=${VLLM_HPU_FSDPA_SLICE_CHUNK_SIZE:-"4096"}
+        export VLLM_HPU_FSDPA_SLICE_IMPL=${VLLM_HPU_FSDPA_SLICE_IMPL:-"slice_qkv"}
+        export VLLM_HPU_FSDPA_SLICE_CAUSAL=${VLLM_HPU_FSDPA_SLICE_CAUSAL:-"true"}
+    fi
 }
 
 set_config(){
