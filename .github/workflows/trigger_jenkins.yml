@@ -66,7 +66,7 @@ jobs:
           ref: ${{ needs.read_codeowners.outputs.pr_branch }}
           token: ${{ secrets.GH_PAT }}
       - name: 'Dependency Review'
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
           base-ref: ${{ needs.read_codeowners.outputs.pr_target_branch }}
