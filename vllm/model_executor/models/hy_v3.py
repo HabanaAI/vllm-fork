@@ -597,6 +597,20 @@ class HYV3ForCausalLM(nn.Module, SupportsPP, SupportsLoRA):
         loaded_params: set[str] = set()
 
         for name, loaded_weight in weights:
+            # Minimal fix: skip next-n predict/spec layer weights
+            # (e.g. model.layers.80.* when num_hidden_layers=80 and
+            # num_nextn_predict_layers=1), because this modeling only
+            # instantiates the base decoder layers.
+            skip_spec_layer = False
+            if (hasattr(self.config, "num_nextn_predict_layers")
+                    and self.config.num_nextn_predict_layers > 0):
+                layer_idx = self.config.num_hidden_layers
+                for i in range(self.config.num_nextn_predict_layers):
+                    if name.startswith(f"model.layers.{layer_idx + i}."):
+                        skip_spec_layer = True
+                        break
+            if skip_spec_layer:
+                continue
             if "rotary_emb.inv_freq" in name:
                 continue
             if (bool(_cfg(self.config, "tie_word_embeddings", False))

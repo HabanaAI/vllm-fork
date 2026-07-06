@@ -1772,7 +1772,7 @@ bash ./start_gaudi_vllm_server.sh -w /data/hf_models/HY3.0-FP8-Testing-G2 \
 -b 128 \
 -n 16 \
 -u 0.9 \
--e "--enable-prefix-caching \
+-e "--enable-prefix-caching" \
 -c /recipe_cache_HY3.0-FP8-Testing-G2/
 ```
 
