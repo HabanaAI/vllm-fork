@@ -167,6 +167,8 @@ markers = [
 [tool.pymarkdown]
 plugins.md004.style = "sublist" # ul-style
 plugins.md013.enabled = false # line-length
-plugins.md041.enabled = false # first-line-h1
-plugins.md033.enabled = false # inline-html
 plugins.md024.allow_different_nesting = true # no-duplicate-headers
+plugins.md031.enabled = false # false alarm for three exclamation blocks
+plugins.md033.enabled = false # inline-html
+plugins.md041.enabled = false # first-line-h1
+plugins.md046.enabled = false # false alarm for code blocks in three exclamation blocks

@@ -11,6 +11,7 @@ from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, PoolerConfig, VllmConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.forward_context import get_forward_context
+from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.activation import (get_act_and_mul_fn,
                                                    get_act_fn)
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
@@ -89,16 +90,27 @@ class BertEmbedding(nn.Module):
         return embeddings
 
 
-class BertPooler(nn.Module):
+@CustomOp.register("bert_pooler")
+class BertPooler(CustomOp):
 
     def __init__(self, config: BertConfig):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.activation = nn.Tanh()
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward_native(self, hidden_states: torch.Tensor) -> torch.Tensor:
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token.
+        first_token_tensor = hidden_states[0, :]
+        pooled_output = self.dense(first_token_tensor)
+        pooled_output = self.activation(pooled_output)
+        return pooled_output
+
+    def forward_hpu(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        # We "pool" the model by simply taking the hidden state corresponding
+        # to the first token.
+        # input hidden_states[batch_size,seq_length, hidden_size]
+        hidden_states = hidden_states.permute(1, 0, 2)
         first_token_tensor = hidden_states[0, :]
         pooled_output = self.dense(first_token_tensor)
         pooled_output = self.activation(pooled_output)

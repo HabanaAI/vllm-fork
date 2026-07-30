@@ -123,16 +123,13 @@ class RobertaEmbedding(CustomOp):
 
             for index, (positions, tokens, seq_len) in enumerate(
                     zip(pos_list, token_list, seq_lens)):
-                # Verify assumption that incoming position are
-                # always a sequence from 0 to N.
-                expected_pos = torch.arange(positions.size()[0],
+                index_tensor = torch.tensor([index],
                                             dtype=torch.long,
                                             device=inputs_embeds.device)
-                valid_input_mask = expected_pos < seq_len
-                expected_pos = expected_pos * valid_input_mask
-                assert torch.equal(positions, expected_pos)
-                position_ids[index] = create_position_ids_from_input_ids_hpu(
+                pos = create_position_ids_from_input_ids_hpu(
                     tokens, self.padding_idx, seq_len)
+                pos = pos.unsqueeze(0)
+                position_ids.index_copy_(0, index_tensor, pos)
 
         # Position embeddings.
         position_embeddings = self.position_embeddings(position_ids)
@@ -236,7 +233,8 @@ def create_position_ids_from_input_ids_hpu(input_ids,
 
 
 # Adapted from transformers
-class RobertaClassificationHead(nn.Module):
+@CustomOp.register("roberta_classificationhead")
+class RobertaClassificationHead(CustomOp):
     """Head for sentence-level classification tasks."""
 
     def __init__(self, config: RobertaConfig):
@@ -244,8 +242,16 @@ class RobertaClassificationHead(nn.Module):
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
 
-    def forward(self, features, **kwargs):
+    def forward_native(self, features, **kwargs):
         x = features[0, :]  # take <s> token (equiv. to [CLS])
+        x = self.dense(x)
+        x = torch.tanh(x)
+        x = self.out_proj(x)
+        return x
+
+    def forward_hpu(self, features, **kwargs):
+        features = features.permute(1, 0, 2)
+        x = features[0, ...]
         x = self.dense(x)
         x = torch.tanh(x)
         x = self.out_proj(x)

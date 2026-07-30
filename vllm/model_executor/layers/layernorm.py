@@ -179,7 +179,6 @@ class RMSNorm(CustomOp):
             residual.add_(x)
             x = residual
             x = HPUFusedRMSNorm.apply(x.float(), self.weight.float(),
-
                                       self.variance_epsilon)
             return x.to(residual.dtype), residual
 

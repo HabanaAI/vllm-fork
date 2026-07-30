@@ -343,7 +343,6 @@ def _flatten_embeddings(embeddings: NestedTensors) -> torch.Tensor:
     if isinstance(embeddings, torch.Tensor):
         # Flatten all but the last dimension.
         return embeddings.flatten(0, -2)
-
     return torch.cat(tuple(_flatten_embeddings(t) for t in embeddings))
 
 
@@ -391,8 +390,19 @@ def _merge_multimodal_embeddings(
     """
     # skip check for HPU, the number of tokens is a cpu fallback during HPU lazy
     if current_platform.is_hpu():
-        flattened = _flatten_embeddings(multimodal_embeddings)
-        inputs_embeds[is_multimodal] = flattened
+
+        if isinstance(multimodal_embeddings, torch.Tensor):
+            is_multimodal = is_multimodal.reshape(-1)
+            batch_size, seq_length, hidden_size = inputs_embeds.shape
+            inputs_embeds = inputs_embeds.reshape(-1, hidden_size)
+            flattened = multimodal_embeddings.reshape(-1, hidden_size)
+            inputs_embeds[is_multimodal] = flattened
+            inputs_embeds = inputs_embeds.reshape(batch_size, seq_length,
+                                                  hidden_size)
+        else:
+            flattened = _flatten_embeddings(multimodal_embeddings)
+            inputs_embeds[is_multimodal] = flattened
+
         return inputs_embeds
 
     num_expected_tokens = is_multimodal.sum().item()
@@ -484,7 +494,6 @@ def merge_multimodal_embeddings(
             torch.isin(input_ids, placeholder_token_id),
             multimodal_embeddings,
         )
-
     return _merge_multimodal_embeddings(
         inputs_embeds,
         (input_ids == placeholder_token_id),

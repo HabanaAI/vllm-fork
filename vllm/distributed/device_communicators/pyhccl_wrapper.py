@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import ctypes
 import platform
 from dataclasses import dataclass
@@ -10,13 +11,13 @@ from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
-
 hcclResult_t = ctypes.c_int
 hcclComm_t = ctypes.c_void_p
 
 
 class hcclUniqueId(ctypes.Structure):
-    _fields_ = [("internal", ctypes.c_uint8 * 1024), ("length", ctypes.c_size_t)]
+    _fields_ = [("internal", ctypes.c_uint8 * 1024),
+                ("length", ctypes.c_size_t)]
 
 
 hpuStream_t = ctypes.c_void_p
@@ -99,34 +100,51 @@ class Function:
 
 class HCCLLibrary:
     exported_functions = [
-        # synStatus SYN_API_CALL synStreamCreateGeneric(synStreamHandle*  pStreamHandle,
-        #                                       const synDeviceId deviceId,
-        #                                       const uint32_t    flags);
+        # synStatus SYN_API_CALL synStreamCreateGeneric(
+        #     synStreamHandle*  pStreamHandle,
+        #     const synDeviceId deviceId,
+        #     const uint32_t    flags);
         Function(
             "synStreamCreateGeneric",
             ctypes.c_int32,
             [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32],
         ),
-        # synStatus SYN_API_CALL synStreamSynchronize( const synStreamHandle streamHandle );
+
+        # synStatus SYN_API_CALL synStreamSynchronize(
+        #     const synStreamHandle streamHandle);
         Function(
             "synStreamSynchronize",
             ctypes.c_int32,
             [ctypes.c_void_p],
         ),
+
         # const char* hcclGetErrorString(hcclResult_t result);
         Function("hcclGetErrorString", ctypes.c_char_p, [hcclResult_t]),
+
         # hcclResult_t hcclGetVersion(int* version);
-        Function("hcclGetVersion", hcclResult_t, [ctypes.POINTER(ctypes.c_int)]),
+        Function("hcclGetVersion", hcclResult_t,
+                 [ctypes.POINTER(ctypes.c_int)]),
+
         # hcclResult_t hcclGetUniqueId(hcclUniqueId* uniqueId);
-        Function("hcclGetUniqueId", hcclResult_t, [ctypes.POINTER(hcclUniqueId)]),
-        # hcclResult_t hcclCommInitRank(hcclComm_t* comm, int nranks, hcclUniqueId commId, int rank);
+        Function("hcclGetUniqueId", hcclResult_t,
+                 [ctypes.POINTER(hcclUniqueId)]),
+
+        # hcclResult_t hcclCommInitRank(
+        #     hcclComm_t* comm,
+        #     int nranks,
+        #     hcclUniqueId commId,
+        #     int rank);
         # note that hcclComm_t is a pointer type, so the first argument
         # is a pointer to a pointer
         Function(
             "hcclCommInitRank",
             hcclResult_t,
-            [ctypes.POINTER(hcclComm_t), ctypes.c_int, hcclUniqueId, ctypes.c_int],
+            [
+                ctypes.POINTER(hcclComm_t), ctypes.c_int, hcclUniqueId,
+                ctypes.c_int
+            ],
         ),
+
         # hcclResult_t hcclAllReduce(const void*    sendbuff,
         #                    void*          recvbuff,
         #                    size_t         count,
@@ -149,6 +167,7 @@ class HCCLLibrary:
                 ctypes.c_void_p,
             ],
         ),
+
         # hcclResult_t hcclAllGather(const void*    sendbuff,
         #                    void*          recvbuff,
         #                    size_t         sendcount,
@@ -169,6 +188,7 @@ class HCCLLibrary:
                 ctypes.c_void_p,
             ],
         ),
+
         # hcclResult_t hcclReduceScatter(const void*    sendbuff,
         #                        void*          recvbuff,
         #                        size_t         recvcount,
@@ -191,6 +211,7 @@ class HCCLLibrary:
                 ctypes.c_void_p,
             ],
         ),
+
         # hcclResult_t hcclSend(const void* sendbuff,
         #                       size_t count,
         #                       hcclDataType_t datatype,
@@ -209,6 +230,7 @@ class HCCLLibrary:
                 ctypes.c_void_p,
             ],
         ),
+
         # hcclResult_t hcclRecv(void* recvbuff,
         #                       size_t count,
         #                       hcclDataType_t datatype,
@@ -227,6 +249,7 @@ class HCCLLibrary:
                 ctypes.c_void_p,
             ],
         ),
+
         # hcclResult_t hcclBroadcast(const void*    sendbuff,
         #                    void*          recvbuff,
         #                    size_t         count,
@@ -247,6 +270,7 @@ class HCCLLibrary:
                 ctypes.c_void_p,
             ],
         ),
+
         # be cautious! this is a collective call, it will block until all
         # processes in the communicator have called this function.
         # because Python object destruction can happen in random order,
@@ -292,9 +316,10 @@ class HCCLLibrary:
                 _funcs[func.name] = f
             HCCLLibrary.path_to_dict_mapping[so_file] = _funcs
         self._funcs = HCCLLibrary.path_to_dict_mapping[so_file]
-    
+
     def synStreamCreateGeneric(self):
-        res = self._funcs["synStreamCreateGeneric"](ctypes.byref(self.streamHandle), 0, 0)
+        res = self._funcs["synStreamCreateGeneric"](ctypes.byref(
+            self.streamHandle), 0, 0)
         assert res == 0
 
     def synStreamSynchronize(self):
@@ -333,8 +358,9 @@ class HCCLLibrary:
                                                         rank))
         return comm
 
-    def hcclAllReduce(self, sendbuff: ctypes.c_void_p, recvbuff: ctypes.c_void_p,
-                      count: int, datatype: int, op: int, comm: hcclComm_t,
+    def hcclAllReduce(self, sendbuff: ctypes.c_void_p,
+                      recvbuff: ctypes.c_void_p, count: int, datatype: int,
+                      op: int, comm: hcclComm_t,
                       stream: ctypes.c_void_p) -> None:
         # `datatype` actually should be `hcclDataType_t`
         # and `op` should be `hcclRedOp_t`
@@ -345,8 +371,9 @@ class HCCLLibrary:
                                                      datatype, op, comm,
                                                      stream))
 
-    def hcclReduceScatter(self, sendbuff: ctypes.c_void_p, recvbuff: ctypes.c_void_p,
-                          count: int, datatype: int, op: int, comm: hcclComm_t,
+    def hcclReduceScatter(self, sendbuff: ctypes.c_void_p,
+                          recvbuff: ctypes.c_void_p, count: int, datatype: int,
+                          op: int, comm: hcclComm_t,
                           stream: ctypes.c_void_p) -> None:
         # `datatype` actually should be `hcclDataType_t`
         # and `op` should be `hcclRedOp_t`
@@ -357,9 +384,9 @@ class HCCLLibrary:
                                                          count, datatype, op,
                                                          comm, stream))
 
-    def hcclAllGather(self, sendbuff: ctypes.c_void_p, recvbuff: ctypes.c_void_p,
-                      count: int, datatype: int, comm: hcclComm_t,
-                      stream: ctypes.c_void_p) -> None:
+    def hcclAllGather(self, sendbuff: ctypes.c_void_p,
+                      recvbuff: ctypes.c_void_p, count: int, datatype: int,
+                      comm: hcclComm_t, stream: ctypes.c_void_p) -> None:
         # `datatype` actually should be `hcclDataType_t`
         # which is an aliases of `ctypes.c_int`
         # when we pass int to a function, it will be converted to `ctypes.c_int`
@@ -377,8 +404,9 @@ class HCCLLibrary:
         self.HCCL_CHECK(self._funcs["hcclRecv"](recvbuff, count, datatype, src,
                                                 comm, stream))
 
-    def hcclBroadcast(self, sendbuff: ctypes.c_void_p, recvbuff: ctypes.c_void_p,
-                      count: int, datatype: int, root: int, comm: hcclComm_t,
+    def hcclBroadcast(self, sendbuff: ctypes.c_void_p,
+                      recvbuff: ctypes.c_void_p, count: int, datatype: int,
+                      root: int, comm: hcclComm_t,
                       stream: ctypes.c_void_p) -> None:
         self.HCCL_CHECK(self._funcs["hcclBroadcast"](sendbuff, recvbuff, count,
                                                      datatype, root, comm,
@@ -390,5 +418,5 @@ class HCCLLibrary:
 
 __all__ = [
     "HCCLLibrary", "hcclDataTypeEnum", "hcclRedOpTypeEnum", "hcclUniqueId",
-    "hcclComm_t", "ctypes.c_void_p", "ctypes.c_void_p"
+    "hcclComm_t"
 ]

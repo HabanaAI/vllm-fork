@@ -34,8 +34,6 @@ import torch.nn.functional as F
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
     Qwen2_5OmniAudioEncoderConfig, Qwen2_5OmniConfig, Qwen2_5OmniThinkerConfig)
-from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
-    Qwen2_5OmniAudioEncoder)
 from transformers.models.qwen2_5_omni.processing_qwen2_5_omni import (
     Qwen2_5OmniProcessor)
 from transformers.models.whisper import WhisperFeatureExtractor
@@ -83,6 +81,9 @@ except (ImportError, ModuleNotFoundError):
 
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
+
+if is_hpu:
+    import habana_frameworks.torch as htorch
 
 
 def _qwen2_5_omni_thinker_field_config(hf_inputs: Mapping[str, torch.Tensor]):
@@ -449,8 +450,9 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
                                  padding_value=0,
                                  padding_side="right"):
         """
-        Pads a sequence of tensors to their maximum length on indicated `padding_side`.
-        Then prepares a mask so that pad tokens are not attended to.
+        Pads a sequence of tensors to their maximum length on indicated
+        `padding_side`. Then prepares a mask so that pad tokens are not
+        attended to.
         """
         max_len = tensor_len.max()
         dim = tensor_list[0].shape[0]
@@ -520,7 +522,10 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
         chunk_list = input_features.split(chunk_lengths.tolist(), dim=1)
         padded_feature, padded_mask, padded_mask_after_cnn = \
           self.padded_and_mask_function(
-              chunk_list, chunk_lengths, padding_value=0, audio_buckets=audio_buckets,
+              chunk_list,
+              chunk_lengths,
+              padding_value=0,
+              audio_buckets=audio_buckets,
           )
 
         cu_seqlens = torch.cat((
@@ -646,20 +651,30 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
     ):
         offset = 0
         audio_outputs = []
-        for feature_len in audio_feature_lengths:
-            input_feature = input_features[offset:offset + feature_len]
+        for i, feature_len in enumerate(audio_feature_lengths):
+            input_feature = input_features[:, offset:offset + feature_len]
             offset = offset + feature_len
             padded_feature, padded_mask, padded_mask_after_cnn, \
               padded_aftercnn_lens, attention_mask = \
                   self.pre_attn(input_feature,
                                 feature_len.unsqueeze(0),
                                 audio_buckets)
+
+            extra_forward_kwargs = {}
+            if htorch.utils.internal.is_lazy():
+                padded_shape = padded_feature.shape
+                padded_len = padded_shape[0] * padded_shape[2]
+                use_graph = audio_buckets.use_graph(padded_len)
+                extra_forward_kwargs.update(
+                    {"bypass_hpu_graphs": not use_graph})
+
             audio_features = self.forward(padded_feature, padded_aftercnn_lens,
                                           padded_mask, padded_mask_after_cnn,
-                                          attention_mask)
+                                          attention_mask,
+                                          **extra_forward_kwargs)
             audio_features = self.post_attn(audio_features,
                                             padded_aftercnn_lens,
-                                            audio_feat_lengths)
+                                            audio_feat_lengths[i:i + 1])
             audio_outputs.append(audio_features)
         return torch.cat(audio_outputs, dim=0)
 

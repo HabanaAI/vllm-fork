@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import itertools
+import os
 import warnings
 from collections.abc import Sequence
-import os
 from contextlib import contextmanager
 from typing import Any, Callable, ClassVar, Optional, Union, cast, overload
 
@@ -260,7 +260,7 @@ class LLM:
     ) -> AnyTokenizer:
         return self.llm_engine.get_tokenizer_group().get_lora_tokenizer(
             lora_request)
-    
+
     def _setup_profiler(self):
         enable_profile = os.getenv("VLLM_ENGINE_PROFILER_ENABLED",
                                    "false").lower() in ["true", "1"]
@@ -273,17 +273,14 @@ class LLM:
                                            warmup=warmup,
                                            active=steps,
                                            repeat=repeat)
-        activities = [ torch.profiler.ProfilerActivity.CPU ]
+        activities = [torch.profiler.ProfilerActivity.CPU]
         if current_platform.is_cuda():
             activities.append(torch.profiler.ProfilerActivity.CUDA)
         elif current_platform.is_hpu():
             activities.append(torch.profiler.ProfilerActivity.HPU)
-            # from habana_frameworks.torch.activity_profiler import DebugActivity
-            # debug_activities=[DebugActivity.BRIDGE_FUNCTION_CALLS]
         profiler = torch.profiler.profile(
             schedule=schedule,
             activities=activities,
-            # debug_activities=debug_activities,
             on_trace_ready=torch.profiler.tensorboard_trace_handler(
                 '.', use_gzip=True),
             record_shapes=False,

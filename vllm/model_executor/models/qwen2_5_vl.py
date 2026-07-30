@@ -77,6 +77,7 @@ logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 
 if is_hpu:
+    import habana_frameworks.torch as htorch
     import habana_frameworks.torch.core as htcore
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
@@ -949,8 +950,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
     def pre_attn(self, x: torch.Tensor, grid_thw: torch.Tensor,
                  vision_buckets):
         seq_len = x.shape[0]
-        rot_pos_emb, cu_window_seqlens, window_index, attention_mask, _ = self.prepare_for_attn_cpu(
-            seq_len, grid_thw, vision_buckets)
+        rot_pos_emb, cu_window_seqlens, window_index, attention_mask = \
+            self.prepare_for_attn_cpu(seq_len, grid_thw, vision_buckets)
         hidden_states, rot_pos_emb, attention_mask = self.pre_attn_hpu(
             x, rot_pos_emb, attention_mask, window_index, grid_thw,
             vision_buckets)
@@ -972,12 +973,21 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                                      vision_buckets,
                                      -100)
 
-        attention_mask, padded_grid_thw_cpu =\
-            self.pad_multimodal_data(attention_mask, grid_thw_cpu, vision_buckets, 0)
+        attention_mask, padded_grid_thw_cpu = \
+            self.pad_multimodal_data(
+                attention_mask,
+                grid_thw_cpu,
+                vision_buckets,
+                0
+            )
 
         # windows attention
-        window_index, cu_window_seqlens = self.get_window_index(
-            padded_grid_thw_cpu)
+        window_index, _ = self.get_window_index(padded_grid_thw_cpu)
+        cu_window_seqlens = torch.arange(
+            0,
+            padded_grid_thw_cpu.prod(-1).sum() + 1,
+            self.vit_merger_window_size * self.vit_merger_window_size * \
+              self.spatial_merge_size)
 
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
@@ -988,7 +998,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                                            dtype=self.dtype)
         attention_mask = attention_mask.bool().to(device=self.device)
 
-        return rotary_pos_emb, cu_window_seqlens, window_index, attention_mask, grid_thw
+        return rotary_pos_emb, cu_window_seqlens, window_index, attention_mask
 
     def pre_attn_hpu(self, x: torch.Tensor, rotary_pos_emb, attention_mask,
                      window_index, grid_thw, vision_buckets):
@@ -1101,7 +1111,15 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                         vision_buckets)
 
                 fullatt_block_attn_mask = \
-                    attention_mask[0,0,:,:] * attention_mask[0,0,0,:].unsqueeze(1)
+                    attention_mask[0,0,:,:] * \
+                        attention_mask[0,0,0,:].unsqueeze(1)
+
+                extra_forward_kwargs = {}
+                if htorch.utils.internal.is_lazy():
+                    padded_len = pixel_values_curr_img_padded.shape[0]
+                    use_graph = vision_buckets.use_graph(padded_len)
+                    extra_forward_kwargs.update(
+                        {"bypass_hpu_graphs": not use_graph})
 
                 htcore.mark_step()
                 hidden_states = self.forward(
@@ -1109,7 +1127,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                     rotary_pos_emb=rot_pos_emb,
                     fullattn_mask=fullatt_block_attn_mask,
                     windowattn_mask=attention_mask,
-                    cu_window_seqlens=cu_window_seqlens)
+                    cu_window_seqlens=cu_window_seqlens,
+                    **extra_forward_kwargs)
                 htcore.mark_step()
 
                 image_embeds = self.post_attn(hidden_states, window_index,
@@ -1444,10 +1463,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             )
 
         if video_input is not None:
-            if is_hpu:
-                logger.warning("Video inputs have not been enabled yet, "
-                               "ignoring video inputs")
-                return inputs_embeds
             video_embeds = self._process_video_input(video_input)
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids,
